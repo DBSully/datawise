@@ -47,6 +47,8 @@ begin
 end;
 $$;
 
+alter table public.real_properties enable row level security;
+
 DROP TRIGGER IF EXISTS trg_real_properties_updated_at ON public.real_properties;
 create trigger trg_real_properties_updated_at
 before update on public.real_properties
