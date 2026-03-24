@@ -1,3 +1,144 @@
+## 2026-03-24 — Batch Processing into Core Tables
+
+### Summary
+
+Completed the first working end-to-end MLS intake pipeline for DataWise.
+
+The application can now:
+
+- upload REcolorado CSV files
+- validate and stage them
+- process staged batches into core DataWise tables
+- populate canonical property and listing records for downstream analysis
+
+This moves DataWise from a staging-only importer into a true intake engine.
+
+### What was completed
+
+#### Application structure
+
+- Finalized the four-level site structure:
+  - Public → `/`
+  - Reports → `/reports`
+  - Analysis → `/analysis/...`
+  - Admin → `/admin`
+- Refactored existing internal pages under the `/analysis` route group.
+- Confirmed that the new route structure builds and loads cleanly.
+
+#### Import architecture
+
+- Expanded the import pipeline to support:
+  - multi-file CSV uploads
+  - batch-level notes
+  - file-level tracking
+  - daily import counts
+  - rolling 30-day import counts
+- Added executable import profile support for:
+  - `recolorado_basic_50`
+- Added import profile documentation under:
+  - `docs/import-profiles/recolorado_basic_50_mapping.md`
+
+#### Staging layer
+
+Confirmed a working staging flow into:
+
+- `import_batches`
+- `import_batch_files`
+- `import_batch_rows`
+
+This allows DataWise to:
+
+- preserve raw uploaded data
+- track source files
+- validate before processing
+- measure MLS usage limits
+
+#### Batch processing
+
+Built and verified the first working batch processor.
+
+The processor now reads staged rows and writes them into:
+
+- `mls_listings`
+- `real_properties`
+- `property_physical`
+- `property_financials`
+
+The processor also:
+
+- parses and cleans raw source values
+- generates standardized DataWise fields
+- matches or creates canonical property records
+- updates staged row processing status
+- updates batch status after completion
+
+### Successful batch processing results
+
+Processed staged REcolorado test batches successfully.
+
+At this point:
+
+- two batches have been staged and processed
+- the working test set totals 82 imported records
+- batches display as `processed`
+- core tables are being populated from imported MLS data
+
+This confirms that the first full MLS intake path is working:
+
+1. upload
+2. validate
+3. stage
+4. process
+5. populate core tables
+
+### Why this matters
+
+This is one of the most important milestones in the project so far.
+
+DataWise is no longer only:
+
+- a schema design
+- a manual property-entry tool
+- or a staging-only uploader
+
+It is now a working MLS intake system that transforms imported source data into:
+
+- canonical property records
+- physical fact records
+- financial fact records
+- listing records
+
+### Known issue
+
+A `NEXT_REDIRECT` message is appearing at the top of the imports page after batch processing.
+
+Current understanding:
+
+- processing appears to complete successfully
+- the issue is likely caused by Next.js `redirect()` being surfaced through the server action instead of being handled cleanly
+
+Planned fix:
+
+- remove the unnecessary redirect from the processing action and keep the user on the imports page with a success state
+
+### Current state
+
+DataWise now has:
+
+- working authenticated workspace
+- stable route structure
+- shared app shell
+- manual property creation
+- MLS upload/staging
+- MLS batch processing into core tables
+
+### Immediate next priorities
+
+- clean up the `NEXT_REDIRECT` behavior on batch processing
+- build `/analysis/properties/[id]` as the first property detail / analysis workspace
+- inspect imported data through the app instead of SQL only
+- begin tightening matching, QA, and property review workflows
+
 ## 2026-03-24 — Working MLS Upload and Staging Flow
 
 ### Summary

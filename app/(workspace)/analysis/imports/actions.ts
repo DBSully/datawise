@@ -1,5 +1,7 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { createHash } from "crypto";
 import { createClient } from "@/lib/supabase/server";
 import { parseCsvText } from "@/lib/imports/csv";
@@ -12,6 +14,7 @@ import {
   initialImportPreviewState,
   type ImportPreviewState,
 } from "@/lib/imports/import-preview-state";
+import { processImportBatch } from "@/lib/imports/process-batch";
 
 function chunkArray<T>(items: T[], chunkSize: number) {
   const chunks: T[][] = [];
@@ -72,7 +75,6 @@ export async function previewImportAction(
 
   const fileAnalyses: Array<{
     file: File;
-    fileText: string;
     fileHash: string;
     validated: ReturnType<typeof validateParsedFile>;
   }> = [];
@@ -96,12 +98,7 @@ export async function previewImportAction(
       profile: recoloradoBasic50Profile,
     });
 
-    fileAnalyses.push({
-      file,
-      fileText,
-      fileHash,
-      validated,
-    });
+    fileAnalyses.push({ file, fileHash, validated });
   }
 
   const headerErrors = fileAnalyses.flatMap(({ validated }) =>
@@ -152,7 +149,7 @@ export async function previewImportAction(
       const postalCode = rowValidation.rawRow["Postal Code"] ?? "";
       const unitNumber = rowValidation.rawRow["Unit Number"] ?? "";
 
-      if (address.trim() && city.trim()) {
+      if (String(address).trim() && String(city).trim()) {
         uniquePropertyKeys.add(
           `${address}|${city}|${recoloradoBasic50Profile.defaultState}|${postalCode}|${unitNumber}`.toLowerCase(),
         );
@@ -318,4 +315,34 @@ export async function previewImportAction(
     errors: [],
     warnings: summaryWarnings,
   };
+}
+
+export async function processImportBatchAction(formData: FormData) {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/auth/sign-in");
+  }
+
+  const batchIdValue = formData.get("batch_id");
+  const batchId = typeof batchIdValue === "string" ? batchIdValue.trim() : "";
+
+  if (!batchId) {
+    redirect("/analysis/imports?process_error=Missing%20batch%20id");
+  }
+
+  try {
+    await processImportBatch(batchId);
+    revalidatePath("/analysis/imports");
+    revalidatePath("/analysis/properties");
+    redirect(`/analysis/imports?processed=1&batch=${encodeURIComponent(batchId)}`);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to process import batch.";
+    redirect(`/analysis/imports?process_error=${encodeURIComponent(message)}`);
+  }
 }
