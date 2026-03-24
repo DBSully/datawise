@@ -1,26 +1,185 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --dw-bg: #f8fafc;
+  --dw-surface: #ffffff;
+  --dw-surface-alt: #f1f5f9;
+  --dw-text: #0f172a;
+  --dw-text-muted: #475569;
+  --dw-border: #cbd5e1;
+
+  --dw-header-height: 46px;
+  --dw-subheader-height: 34px;
+  --dw-subheader-2-height: 34px;
+
+  --dw-page-pad-x: 12px;
+  --dw-page-pad-y: 10px;
+  --dw-radius: 12px;
+  --dw-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 1px rgba(15, 23, 42, 0.04);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  min-height: 100%;
+  background: var(--dw-bg);
+  color: var(--dw-text);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  margin: 0;
   font-family: Arial, Helvetica, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.dw-page-title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--dw-text);
+}
+
+.dw-page-copy {
+  margin-top: 0.35rem;
+  font-size: 0.875rem;
+  color: var(--dw-text-muted);
+}
+
+.dw-section-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.dw-card {
+  border: 1px solid var(--dw-border);
+  background: var(--dw-surface);
+  border-radius: var(--dw-radius);
+  box-shadow: var(--dw-shadow);
+  padding: 12px;
+}
+
+.dw-card-tight {
+  border: 1px solid var(--dw-border);
+  background: var(--dw-surface);
+  border-radius: var(--dw-radius);
+  box-shadow: var(--dw-shadow);
+  padding: 10px;
+}
+
+.dw-input,
+.dw-select,
+.dw-textarea {
+  width: 100%;
+  border: 1px solid #94a3b8;
+  background: #ffffff;
+  color: var(--dw-text);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 0.875rem;
+  line-height: 1.2;
+}
+
+.dw-input::placeholder,
+.dw-textarea::placeholder {
+  color: #64748b;
+}
+
+.dw-input:focus,
+.dw-select:focus,
+.dw-textarea:focus {
+  outline: none;
+  border-color: #0f172a;
+  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.08);
+}
+
+.dw-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #334155;
+  letter-spacing: 0.01em;
+}
+
+.dw-button-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #ffffff;
+  border: 1px solid #0f172a;
+  padding: 8px 12px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.dw-button-primary:hover {
+  background: #1e293b;
+}
+
+.dw-button-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid var(--dw-border);
+  padding: 8px 12px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.dw-button-secondary:hover {
+  background: #f8fafc;
+}
+
+.dw-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--dw-border);
+  border-radius: var(--dw-radius);
+  background: var(--dw-surface);
+  box-shadow: var(--dw-shadow);
+}
+
+.dw-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.dw-table thead th {
+  background: var(--dw-surface-alt);
+  color: #334155;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 1px solid var(--dw-border);
+  padding: 6px 8px;
+  white-space: nowrap;
+}
+
+.dw-table tbody td {
+  color: #0f172a;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 6px 8px;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.dw-table tbody tr:hover {
+  background: #f8fafc;
+}
+
+.dw-table tbody tr:last-child td {
+  border-bottom: none;
 }
