@@ -36,7 +36,7 @@ export default function SignInPage() {
       return;
     }
 
-    router.push("/properties/new");
+    router.push("/analysis/properties/new");
     router.refresh();
   }
 
@@ -60,7 +60,7 @@ export default function SignInPage() {
     // If Confirm Email is OFF, Supabase usually gives you a session immediately.
     // If Confirm Email is ON, you may get a user but no active session yet.
     if (data.session) {
-      router.push("/properties/new");
+      router.push("/analysis/properties/new");
       router.refresh();
       return;
     }

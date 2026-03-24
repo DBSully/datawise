@@ -1,17 +1,8 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function PropertiesPage() {
   const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/auth/sign-in");
-  }
 
   const { data: properties, error } = await supabase
     .from("real_properties")
@@ -42,7 +33,7 @@ export default async function PropertiesPage() {
           </p>
         </div>
 
-        <Link href="/properties/new" className="dw-button-primary">
+        <Link href="/analysis/properties/new" className="dw-button-primary">
           New property
         </Link>
       </div>

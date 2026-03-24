@@ -1,4 +1,3 @@
-// app/properties/new/actions.ts
 "use server";
 
 import { revalidatePath } from "next/cache";
@@ -119,7 +118,7 @@ export async function createPropertyAction(formData: FormData) {
     throw new Error(physicalError.message);
   }
 
-  revalidatePath("/properties");
-  revalidatePath("/properties/new");
-  redirect("/properties/new?created=1");
+  revalidatePath("/analysis/properties");
+  revalidatePath("/analysis/properties/new");
+  redirect("/analysis/properties/new?created=1");
 }

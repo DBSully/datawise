@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { AppChrome } from "@/components/layout/app-chrome";
 
 export const metadata: Metadata = {
   title: "DataWise",
@@ -14,9 +13,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>
-        <AppChrome>{children}</AppChrome>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

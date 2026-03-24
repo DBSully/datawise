@@ -1,5 +1,3 @@
-// /components/layout/app-chrome.tsx
-
 "use client";
 
 import Link from "next/link";
@@ -17,44 +15,43 @@ type SectionConfig = {
 };
 
 const primaryNav = [
-  { href: "/properties", label: "Properties" },
-  { href: "/imports", label: "Imports" },
-  { href: "/analyses", label: "Analyses" },
+  { href: "/reports", label: "Reports" },
+  { href: "/analysis/properties", label: "Analysis" },
+  { href: "/admin", label: "Admin" },
 ];
 
 function getSectionConfig(pathname: string): SectionConfig {
-  if (pathname.startsWith("/properties")) {
+  if (pathname.startsWith("/analysis")) {
     return {
-      title: "Properties",
-      subtitle: "Canonical property records and physical facts.",
+      title: "Analysis",
+      subtitle:
+        "Internal intake, underwriting, and report-generation workspace.",
       tabs: [
-        { href: "/properties", label: "All Properties", exact: true },
-        { href: "/properties/new", label: "Manual Entry", exact: true },
+        { href: "/analysis/properties", label: "Properties", exact: true },
+        {
+          href: "/analysis/properties/new",
+          label: "Manual Entry",
+          exact: true,
+        },
+        { href: "/analysis/imports", label: "Imports", exact: true },
+        { href: "/analysis/analyses", label: "Analyses", exact: true },
       ],
     };
   }
 
-  if (pathname.startsWith("/imports")) {
+  if (pathname.startsWith("/reports")) {
     return {
-      title: "Imports",
-      subtitle: "Source ingestion, mapping, and staging workflows.",
-      tabs: [
-        { href: "/imports", label: "Upload Queue", exact: true },
-        { href: "/imports/mappings", label: "Field Mapping" },
-        { href: "/imports/history", label: "History" },
-      ],
+      title: "Reports",
+      subtitle: "Client-facing reports and deliverables.",
+      tabs: [{ href: "/reports", label: "Report Library", exact: true }],
     };
   }
 
-  if (pathname.startsWith("/analyses")) {
+  if (pathname.startsWith("/admin")) {
     return {
-      title: "Analyses",
-      subtitle: "Analyst workflows, saved analyses, and deal decisions.",
-      tabs: [
-        { href: "/analyses", label: "Saved Analyses", exact: true },
-        { href: "/analyses/pipeline", label: "Pipeline" },
-        { href: "/analyses/comps", label: "Comp Sets" },
-      ],
+      title: "Admin",
+      subtitle: "Configuration, mappings, and administrative controls.",
+      tabs: [{ href: "/admin", label: "Overview", exact: true }],
     };
   }
 
@@ -66,17 +63,16 @@ function getSectionConfig(pathname: string): SectionConfig {
 }
 
 function getPageLabel(pathname: string): string {
-  if (pathname === "/properties") return "All Properties";
-  if (pathname === "/properties/new") return "Manual Entry";
-  if (pathname.startsWith("/properties/")) return "Property Detail";
+  if (pathname === "/analysis/properties") return "Properties";
+  if (pathname === "/analysis/properties/new") return "Manual Entry";
+  if (pathname.startsWith("/analysis/properties/")) return "Property Detail";
+  if (pathname === "/analysis/imports") return "Imports";
+  if (pathname === "/analysis/analyses") return "Analyses";
 
-  if (pathname === "/imports") return "Upload Queue";
-  if (pathname.startsWith("/imports/mappings")) return "Field Mapping";
-  if (pathname.startsWith("/imports/history")) return "History";
+  if (pathname === "/reports") return "Report Library";
+  if (pathname.startsWith("/reports/")) return "Report Detail";
 
-  if (pathname === "/analyses") return "Saved Analyses";
-  if (pathname.startsWith("/analyses/pipeline")) return "Pipeline";
-  if (pathname.startsWith("/analyses/comps")) return "Comp Sets";
+  if (pathname === "/admin") return "Admin Overview";
 
   return "Overview";
 }
@@ -110,13 +106,6 @@ function tabLinkClass(active: boolean) {
 
 export function AppChrome({ children }: AppChromeProps) {
   const pathname = usePathname() ?? "/";
-
-  const showChrome = !pathname.startsWith("/auth");
-
-  if (!showChrome) {
-    return <>{children}</>;
-  }
-
   const section = getSectionConfig(pathname);
   const pageLabel = getPageLabel(pathname);
 
@@ -126,7 +115,7 @@ export function AppChrome({ children }: AppChromeProps) {
         <div className="flex h-[var(--dw-header-height)] items-center justify-between gap-4 px-[var(--dw-page-pad-x)]">
           <div className="flex min-w-0 items-center gap-6">
             <Link
-              href="/properties"
+              href="/analysis/properties"
               className="shrink-0 text-sm font-semibold uppercase tracking-[0.22em] text-white"
             >
               DataWise
