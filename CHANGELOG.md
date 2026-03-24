@@ -1,3 +1,99 @@
+## 2026-03-24 — Working MLS Upload and Staging Flow
+
+### Summary
+
+Completed the first working MLS intake/staging workflow for DataWise under the new route structure.
+
+This is a major milestone because the platform can now accept REcolorado CSV uploads through the web application, validate them, stage them in the database, and return a structured batch summary to the user.
+
+### What was completed
+
+- Finalized the new application structure:
+  - Public → `/`
+  - Reports → `/reports`
+  - Analysis → `/analysis/...`
+  - Admin → `/admin`
+- Confirmed that the refactored route structure builds and loads cleanly.
+- Established `/analysis/imports` as the internal intake entry point.
+- Added support for the first executable MLS import profile:
+  - `recolorado_basic_50`
+- Added multi-file upload support for CSV intake.
+- Added optional `import_notes` at the batch level.
+- Added tracking for:
+  - total rows in upload
+  - unique listings
+  - unique properties
+  - imported today
+  - rolling 30-day imported rows
+- Added the database structure needed for staged intake:
+  - `import_batches`
+  - `import_batch_files`
+  - `import_batch_rows`
+- Confirmed that the upload flow can:
+  1. accept a CSV file
+  2. validate headers and rows
+  3. create an import batch
+  4. create file-level records
+  5. stage raw rows for later processing
+  6. display a clean summary in the UI
+
+### First successful staging test
+
+Ran a successful test upload using `recolorado_basic_50.csv` and confirmed:
+
+- Files: `1`
+- Total Rows: `19`
+- Unique Listings: `19`
+- Unique Properties: `19`
+- Duplicate Listings: `0`
+- Row Errors: `0`
+- Row Warnings: `0`
+
+The application displayed a success message and generated a valid batch ID, confirming that the upload/staging layer is now working end-to-end.
+
+### Why this matters
+
+This is the first working MLS “front door” for DataWise.
+
+The platform can now:
+
+- receive source files through the app
+- preserve raw uploaded records
+- track batch metadata
+- measure MLS usage against import limits
+- prepare staged records for transformation into canonical property data
+
+This moves DataWise from schema/design mode into a real intake workflow.
+
+### Current state after this update
+
+DataWise now has:
+
+- authenticated internal workspace
+- canonical property creation flow
+- stable route structure
+- shared app shell and navigation
+- import batch/file/row staging system
+- first working MLS upload and validation flow
+
+### Next priority
+
+Build the next-stage processing workflow:
+
+- select/process a staged batch
+- transform staged rows into:
+  - `mls_listings`
+  - `real_properties`
+  - `property_physical`
+  - `property_financials`
+- update import statuses and return a processing summary
+
+### Commit reference
+
+This update corresponds to:
+
+`Add working MLS upload and staging flow`
+
 ## 2026-03-24 - Continued framework building for database and structure for importing raw csv data from MLS
 
 - Created property_financials
