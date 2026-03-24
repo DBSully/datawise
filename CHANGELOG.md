@@ -1,4 +1,12 @@
-## 2026-03-24 — Foundation and First Working Web Flow
+## 2026-03-24 - Continued framework building for database and structure for importing raw csv data from MLS
+
+- Created property_financials
+- Created mls_listings
+- Created import_batches and import_batch_rows
+- adopted migration-based schema workflow
+- established recolorado_basic_50 as first MLS import profile
+
+## 2026-03-23 — Foundation and First Working Web Flow
 
 ### Project goals
 
