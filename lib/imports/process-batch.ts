@@ -31,6 +31,26 @@ export type ProcessImportBatchResult = {
   errors: string[];
 };
 
+type ImportBatchRowRecord = {
+  id: string;
+  import_batch_id: string;
+  row_number: number;
+  source_system: string | null;
+  source_record_key: string | null;
+  raw_row: RawImportRow | null;
+  processing_status: string | null;
+};
+
+type BatchRecord = {
+  id: string;
+  source_system: string | null;
+  import_profile: string | null;
+  status: string | null;
+  summary: Record<string, unknown> | null;
+};
+
+const ROW_PAGE_SIZE = 500;
+
 function toRealPropertyPayload(row: RawImportRow) {
   const unparsedAddress = getText(row, "Address");
   const streetNumber = getText(row, "Street Number");
@@ -111,7 +131,9 @@ function toPropertyPhysicalPayload(row: RawImportRow) {
     year_built: parseInteger(row["Year Built"]),
     building_area_total_sqft: parseNumber(row["Building Area Total"]),
     living_area_sqft: null,
-    above_grade_finished_area_sqft: parseNumber(row["Above Grade Finished Area"]),
+    above_grade_finished_area_sqft: parseNumber(
+      row["Above Grade Finished Area"],
+    ),
     below_grade_total_sqft: belowGradeTotalSqft,
     below_grade_finished_area_sqft: belowGradeFinishedSqft,
     below_grade_unfinished_area_sqft:
@@ -178,11 +200,62 @@ function toMlsListingPayload(params: {
 
 function nonNullEntries<T extends Record<string, unknown>>(payload: T) {
   return Object.fromEntries(
-    Object.entries(payload).filter(([, value]) => value !== null && value !== undefined && value !== ""),
+    Object.entries(payload).filter(
+      ([, value]) => value !== null && value !== undefined && value !== "",
+    ),
   );
 }
 
-export async function processImportBatch(batchId: string): Promise<ProcessImportBatchResult> {
+async function fetchNextValidatedRowPage(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  batchId: string,
+): Promise<ImportBatchRowRecord[]> {
+  const { data, error } = await supabase
+    .from("import_batch_rows")
+    .select(
+      `
+      id,
+      import_batch_id,
+      row_number,
+      source_system,
+      source_record_key,
+      raw_row,
+      processing_status
+    `,
+    )
+    .eq("import_batch_id", batchId)
+    .eq("processing_status", "validated")
+    .order("row_number", { ascending: true })
+    .range(0, ROW_PAGE_SIZE - 1);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as ImportBatchRowRecord[];
+}
+
+async function countRowsByStatus(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  batchId: string,
+  status: string,
+) {
+  const { count, error } = await supabase
+    .from("import_batch_rows")
+    .select("id", { count: "exact", head: true })
+    .eq("import_batch_id", batchId)
+    .eq("processing_status", status);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return count ?? 0;
+}
+
+export async function processImportBatch(
+  batchId: string,
+): Promise<ProcessImportBatchResult> {
   const supabase = await createClient();
 
   const { data: batch, error: batchError } = await supabase
@@ -195,20 +268,17 @@ export async function processImportBatch(batchId: string): Promise<ProcessImport
     throw new Error(batchError?.message ?? "Import batch not found.");
   }
 
-  const { data: stagedRows, error: stagedRowsError } = await supabase
-    .from("import_batch_rows")
-    .select("id,row_number,source_record_key,raw_row,processing_status")
-    .eq("import_batch_id", batchId)
-    .in("processing_status", ["validated", "processing_error"])
-    .order("row_number", { ascending: true });
+  const batchRecord = batch as BatchRecord;
 
-  if (stagedRowsError) {
-    throw new Error(stagedRowsError.message);
-  }
+  const rowsConsidered = await countRowsByStatus(
+    supabase,
+    batchId,
+    "validated",
+  );
 
   const result: ProcessImportBatchResult = {
     batchId,
-    rowsConsidered: stagedRows?.length ?? 0,
+    rowsConsidered,
     rowsProcessed: 0,
     rowErrors: 0,
     listingsInserted: 0,
@@ -221,193 +291,264 @@ export async function processImportBatch(batchId: string): Promise<ProcessImport
     errors: [],
   };
 
-  for (const stagedRow of stagedRows ?? []) {
-    const row = (stagedRow.raw_row ?? {}) as RawImportRow;
+  while (true) {
+    const stagedRows = await fetchNextValidatedRowPage(supabase, batchId);
 
-    try {
-      const listingId = stagedRow.source_record_key ?? getText(row, "Listing ID");
-      if (!listingId) {
-        throw new Error(`Row ${stagedRow.row_number}: missing Listing ID.`);
-      }
+    if (stagedRows.length === 0) {
+      break;
+    }
 
-      const realPropertyPayload = toRealPropertyPayload(row);
-      if (!realPropertyPayload.unparsed_address || !realPropertyPayload.city || !realPropertyPayload.state) {
-        throw new Error(
-          `Row ${stagedRow.row_number}: missing required property fields (Address/City/State).`,
-        );
-      }
+    for (const stagedRow of stagedRows) {
+      const row = (stagedRow.raw_row ?? {}) as RawImportRow;
 
-      const { data: existingPropertyRows, error: existingPropertyError } = await supabase
-        .from("real_properties")
-        .select("id,parcel_id")
-        .eq("normalized_address_key", realPropertyPayload.normalized_address_key)
-        .limit(1);
+      try {
+        const listingId =
+          stagedRow.source_record_key ?? getText(row, "Listing ID");
 
-      if (existingPropertyError) {
-        throw new Error(existingPropertyError.message);
-      }
+        if (!listingId) {
+          throw new Error(`Row ${stagedRow.row_number}: missing Listing ID.`);
+        }
 
-      const existingProperty = existingPropertyRows?.[0] ?? null;
-      let realPropertyId: string;
+        const realPropertyPayload = toRealPropertyPayload(row);
 
-      if (existingProperty) {
-        realPropertyId = existingProperty.id;
-        result.propertiesMatched += 1;
-
-        const incomingParcelId = realPropertyPayload.parcel_id;
         if (
-          existingProperty.parcel_id &&
-          incomingParcelId &&
-          existingProperty.parcel_id !== incomingParcelId
+          !realPropertyPayload.unparsed_address ||
+          !realPropertyPayload.city ||
+          !realPropertyPayload.state
         ) {
-          result.warnings.push(
-            `Parcel mismatch for ${realPropertyPayload.unparsed_address}: existing ${existingProperty.parcel_id}, incoming ${incomingParcelId}.`,
+          throw new Error(
+            `Row ${stagedRow.row_number}: missing required property fields (Address/City/State).`,
           );
         }
 
-        const updatePayload = nonNullEntries(realPropertyPayload);
-        const { error: updatePropertyError } = await supabase
-          .from("real_properties")
-          .update(updatePayload)
-          .eq("id", realPropertyId);
+        const { data: existingPropertyRows, error: existingPropertyError } =
+          await supabase
+            .from("real_properties")
+            .select("id,parcel_id")
+            .eq(
+              "normalized_address_key",
+              realPropertyPayload.normalized_address_key,
+            )
+            .limit(1);
 
-        if (updatePropertyError) {
-          throw new Error(updatePropertyError.message);
-        }
-      } else {
-        const { data: insertedProperty, error: insertPropertyError } = await supabase
-          .from("real_properties")
-          .insert(realPropertyPayload)
-          .select("id")
-          .single();
-
-        if (insertPropertyError || !insertedProperty) {
-          throw new Error(insertPropertyError?.message ?? "Failed to insert real_properties row.");
+        if (existingPropertyError) {
+          throw new Error(existingPropertyError.message);
         }
 
-        realPropertyId = insertedProperty.id;
-        result.propertiesCreated += 1;
-      }
+        const existingProperty = existingPropertyRows?.[0] ?? null;
+        let realPropertyId: string;
 
-      const physicalPayload = {
-        real_property_id: realPropertyId,
-        ...toPropertyPhysicalPayload(row),
-      };
+        if (existingProperty) {
+          realPropertyId = existingProperty.id;
+          result.propertiesMatched += 1;
 
-      const { error: propertyPhysicalError } = await supabase
-        .from("property_physical")
-        .upsert(physicalPayload, { onConflict: "real_property_id" });
+          const incomingParcelId = realPropertyPayload.parcel_id;
+          if (
+            existingProperty.parcel_id &&
+            incomingParcelId &&
+            existingProperty.parcel_id !== incomingParcelId
+          ) {
+            result.warnings.push(
+              `Parcel mismatch for ${realPropertyPayload.unparsed_address}: existing ${existingProperty.parcel_id}, incoming ${incomingParcelId}.`,
+            );
+          }
 
-      if (propertyPhysicalError) {
-        throw new Error(propertyPhysicalError.message);
-      }
-      result.physicalUpserts += 1;
+          const updatePayload = nonNullEntries(realPropertyPayload);
 
-      const financialPayload = {
-        real_property_id: realPropertyId,
-        ...toPropertyFinancialsPayload(row, listingId),
-      };
+          const { error: updatePropertyError } = await supabase
+            .from("real_properties")
+            .update(updatePayload)
+            .eq("id", realPropertyId);
 
-      const hasFinancialValues =
-        financialPayload.annual_property_tax !== null ||
-        financialPayload.annual_hoa_dues !== null;
+          if (updatePropertyError) {
+            throw new Error(updatePropertyError.message);
+          }
+        } else {
+          const { data: insertedProperty, error: insertPropertyError } =
+            await supabase
+              .from("real_properties")
+              .insert(realPropertyPayload)
+              .select("id")
+              .single();
 
-      if (hasFinancialValues) {
-        const { error: propertyFinancialError } = await supabase
-          .from("property_financials")
-          .upsert(financialPayload, { onConflict: "real_property_id" });
+          if (insertPropertyError || !insertedProperty) {
+            throw new Error(
+              insertPropertyError?.message ??
+                "Failed to insert real_properties row.",
+            );
+          }
 
-        if (propertyFinancialError) {
-          throw new Error(propertyFinancialError.message);
+          realPropertyId = insertedProperty.id;
+          result.propertiesCreated += 1;
         }
-        result.financialUpserts += 1;
+
+        const physicalPayload = {
+          real_property_id: realPropertyId,
+          ...toPropertyPhysicalPayload(row),
+        };
+
+        const { error: propertyPhysicalError } = await supabase
+          .from("property_physical")
+          .upsert(physicalPayload, { onConflict: "real_property_id" });
+
+        if (propertyPhysicalError) {
+          throw new Error(propertyPhysicalError.message);
+        }
+
+        result.physicalUpserts += 1;
+
+        const financialPayload = {
+          real_property_id: realPropertyId,
+          ...toPropertyFinancialsPayload(row, listingId),
+        };
+
+        const hasFinancialValues =
+          financialPayload.annual_property_tax !== null ||
+          financialPayload.annual_hoa_dues !== null;
+
+        if (hasFinancialValues) {
+          const { error: propertyFinancialError } = await supabase
+            .from("property_financials")
+            .upsert(financialPayload, { onConflict: "real_property_id" });
+
+          if (propertyFinancialError) {
+            throw new Error(propertyFinancialError.message);
+          }
+
+          result.financialUpserts += 1;
+        }
+
+        const { data: existingListingRows, error: existingListingError } =
+          await supabase
+            .from("mls_listings")
+            .select("id")
+            .eq("source_system", recoloradoBasic50Profile.sourceSystem)
+            .eq("listing_id", listingId)
+            .limit(1);
+
+        if (existingListingError) {
+          throw new Error(existingListingError.message);
+        }
+
+        const listingExisted = (existingListingRows?.length ?? 0) > 0;
+
+        const mlsListingPayload = toMlsListingPayload({
+          row,
+          realPropertyId,
+          batchId,
+          listingId,
+        });
+
+        const { error: mlsListingError } = await supabase
+          .from("mls_listings")
+          .upsert(mlsListingPayload, {
+            onConflict: "source_system,listing_id",
+          });
+
+        if (mlsListingError) {
+          throw new Error(mlsListingError.message);
+        }
+
+        if (listingExisted) {
+          result.listingsUpdated += 1;
+        } else {
+          result.listingsInserted += 1;
+        }
+
+        const { error: markProcessedError } = await supabase
+          .from("import_batch_rows")
+          .update({
+            processing_status: "processed",
+            error_message: null,
+          })
+          .eq("id", stagedRow.id);
+
+        if (markProcessedError) {
+          throw new Error(markProcessedError.message);
+        }
+
+        result.rowsProcessed += 1;
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Unknown row processing error.";
+
+        result.rowErrors += 1;
+        result.errors.push(message);
+
+        await supabase
+          .from("import_batch_rows")
+          .update({
+            processing_status: "processing_error",
+            error_message: message,
+          })
+          .eq("id", stagedRow.id);
       }
-
-      const { data: existingListingRows, error: existingListingError } = await supabase
-        .from("mls_listings")
-        .select("id")
-        .eq("source_system", recoloradoBasic50Profile.sourceSystem)
-        .eq("listing_id", listingId)
-        .limit(1);
-
-      if (existingListingError) {
-        throw new Error(existingListingError.message);
-      }
-
-      const listingExisted = (existingListingRows?.length ?? 0) > 0;
-
-      const mlsListingPayload = toMlsListingPayload({
-        row,
-        realPropertyId,
-        batchId,
-        listingId,
-      });
-
-      const { error: mlsListingError } = await supabase
-        .from("mls_listings")
-        .upsert(mlsListingPayload, { onConflict: "source_system,listing_id" });
-
-      if (mlsListingError) {
-        throw new Error(mlsListingError.message);
-      }
-
-      if (listingExisted) {
-        result.listingsUpdated += 1;
-      } else {
-        result.listingsInserted += 1;
-      }
-
-      const { error: markProcessedError } = await supabase
-        .from("import_batch_rows")
-        .update({
-          processing_status: "processed",
-          error_message: null,
-        })
-        .eq("id", stagedRow.id);
-
-      if (markProcessedError) {
-        throw new Error(markProcessedError.message);
-      }
-
-      result.rowsProcessed += 1;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown row processing error.";
-      result.rowErrors += 1;
-      result.errors.push(message);
-
-      await supabase
-        .from("import_batch_rows")
-        .update({
-          processing_status: "processing_error",
-          error_message: message,
-        })
-        .eq("id", stagedRow.id);
     }
   }
 
-  const batchStatus = result.rowErrors > 0 ? "processed_with_errors" : "processed";
+  const remainingValidatedRows = await countRowsByStatus(
+    supabase,
+    batchId,
+    "validated",
+  );
+  const processingErrorRows = await countRowsByStatus(
+    supabase,
+    batchId,
+    "processing_error",
+  );
+  const validationErrorRows = await countRowsByStatus(
+    supabase,
+    batchId,
+    "validation_error",
+  );
+  const processedRowsTotal = await countRowsByStatus(
+    supabase,
+    batchId,
+    "processed",
+  );
+
+  const nextBatchStatus =
+    remainingValidatedRows > 0
+      ? "staged"
+      : processingErrorRows > 0 || validationErrorRows > 0
+        ? "processed_with_errors"
+        : "processed";
+
+  const completedAt =
+    nextBatchStatus === "staged" ? null : new Date().toISOString();
+
+  const existingSummary =
+    batchRecord.summary && typeof batchRecord.summary === "object"
+      ? batchRecord.summary
+      : {};
 
   const nextSummary = {
-    ...(batch.summary ?? {}),
-    processedAt: new Date().toISOString(),
+    ...existingSummary,
+    processedAt: completedAt,
     rowsConsidered: result.rowsConsidered,
-    rowsProcessed: result.rowsProcessed,
-    rowErrors: result.rowErrors,
-    listingsInserted: result.listingsInserted,
-    listingsUpdated: result.listingsUpdated,
-    propertiesCreated: result.propertiesCreated,
-    propertiesMatched: result.propertiesMatched,
-    physicalUpserts: result.physicalUpserts,
-    financialUpserts: result.financialUpserts,
-    warnings: result.warnings,
-    errors: result.errors.slice(0, 25),
+    rowsProcessedThisRun: result.rowsProcessed,
+    rowsProcessedTotal: processedRowsTotal,
+    rowErrorsThisRun: result.rowErrors,
+    processingErrorRows,
+    remainingValidatedRows,
+    validationErrorRows,
+    listingsInsertedThisRun: result.listingsInserted,
+    listingsUpdatedThisRun: result.listingsUpdated,
+    propertiesCreatedThisRun: result.propertiesCreated,
+    propertiesMatchedThisRun: result.propertiesMatched,
+    physicalUpsertsThisRun: result.physicalUpserts,
+    financialUpsertsThisRun: result.financialUpserts,
+    warningsThisRun: result.warnings.slice(0, 50),
+    errorsThisRun: result.errors.slice(0, 50),
   };
 
   const { error: completeBatchError } = await supabase
     .from("import_batches")
     .update({
-      status: batchStatus,
-      completed_at: new Date().toISOString(),
+      status: nextBatchStatus,
+      completed_at: completedAt,
       summary: nextSummary,
     })
     .eq("id", batchId);

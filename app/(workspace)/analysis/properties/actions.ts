@@ -7,6 +7,7 @@ import {
   initialManualAnalysisFormState,
   type ManualAnalysisFormState,
 } from "@/lib/analysis/manual-analysis-state";
+import { runComparableSearch } from "@/lib/valuation/engine";
 
 function textValue(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -133,4 +134,108 @@ export async function saveManualAnalysisAction(
     analysisId,
     message: "Manual analysis saved successfully.",
   };
+}
+
+export async function toggleComparableCandidateSelectionAction(
+  formData: FormData,
+) {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/auth/sign-in");
+  }
+
+  const candidateIdValue = formData.get("candidate_id");
+  const propertyIdValue = formData.get("property_id");
+  const nextSelectedValue = formData.get("next_selected");
+
+  const candidateId =
+    typeof candidateIdValue === "string" ? candidateIdValue.trim() : "";
+  const propertyId =
+    typeof propertyIdValue === "string" ? propertyIdValue.trim() : "";
+  const nextSelected =
+    typeof nextSelectedValue === "string"
+      ? nextSelectedValue === "true"
+      : false;
+
+  if (!candidateId || !propertyId) {
+    throw new Error("Candidate ID and property ID are required.");
+  }
+
+  const { error } = await supabase
+    .from("valuation_run_candidates")
+    .update({ selected_yn: nextSelected })
+    .eq("id", candidateId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath(`/analysis/properties/${propertyId}`);
+}
+
+export async function runComparableSearchAction(formData: FormData) {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/auth/sign-in");
+  }
+
+  const propertyId = textValue(formData, "property_id");
+  const subjectListingRowId = nullableText(formData, "subject_listing_row_id");
+  const profileSlug =
+    textValue(formData, "profile_slug") || "denver_detached_basic_v1";
+
+  if (!propertyId) {
+    redirect("/analysis/properties?comp_error=Missing%20property%20id");
+  }
+
+  const overrides = {
+    maxDistanceMiles:
+      nullableNumber(formData, "max_distance_miles") ?? undefined,
+    maxDaysSinceClose:
+      nullableInteger(formData, "max_days_since_close") ?? undefined,
+    sqftTolerancePct:
+      nullableNumber(formData, "sqft_tolerance_pct") ?? undefined,
+    yearBuiltTolerance:
+      nullableInteger(formData, "year_built_tolerance") ?? undefined,
+    bedTolerance: nullableInteger(formData, "bed_tolerance") ?? undefined,
+    bathTolerance: nullableNumber(formData, "bath_tolerance") ?? undefined,
+    maxCandidateCount:
+      nullableInteger(formData, "max_candidate_count") ?? undefined,
+    requireSameLevelClass: formData.get("require_same_level_class") === "on",
+    requireSamePropertyType:
+      formData.get("require_same_property_type") === "on",
+  };
+
+  let redirectUrl = `/analysis/properties/${propertyId}`;
+
+  try {
+    const result = await runComparableSearch({
+      supabase,
+      propertyId,
+      subjectListingRowId,
+      profileSlug,
+      overrides,
+      createdByUserId: user.id,
+    });
+
+    revalidatePath(`/analysis/properties/${propertyId}`);
+    revalidatePath("/analysis/properties");
+    redirectUrl = `/analysis/properties/${propertyId}?comp_run=${encodeURIComponent(result.runId)}`;
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Comparable search failed.";
+    redirectUrl = `/analysis/properties/${propertyId}?comp_error=${encodeURIComponent(message)}`;
+  }
+
+  redirect(redirectUrl);
 }

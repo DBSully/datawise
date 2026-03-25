@@ -1,8 +1,237 @@
-##2026-03-24 - Next.config.js settings
+## 2026-03-25 — Batch Processing Fixes, Import Dashboard Improvements, Property Browser Filters, and Comparable Workspace Enhancements
+
+### Summary
+
+This update focused on stabilizing the MLS intake pipeline at larger scale, improving operational visibility, tightening the property browsing experience, and making the comparable-sales workspace more useful for real analyst workflow.
+
+The biggest technical fix in this cycle was correcting large-batch processing so staged import batches larger than 1,000 rows can now be processed fully instead of stopping after the first page of results.
+
+### Major infrastructure and workflow improvements
+
+#### Large-batch import processing fix
+
+Identified and fixed the issue where large processed batches were stopping at exactly 1,000 rows.
+
+Key findings:
+
+- staged rows were being loaded through a query limited by the default row cap
+- large batches were showing `processed` status while many rows still remained in `validated`
+- there were no row-level processing errors, which helped isolate the problem
+
+Resolution:
+
+- updated `process-batch.ts` to fetch staged rows in paginated chunks
+- changed processing logic so batches repeatedly pull the next page of remaining `validated` rows
+- confirmed successful full processing on previously partial batches
+
+Result:
+
+- large staged batches can now be resumed and processed to completion
+- processed row counts can now match total batch row counts for large imports
+- the MLS intake pipeline is now viable at much larger volume
+
+#### Import dashboard improvements
+
+Enhanced `/analysis/imports` to better support monitoring and recovery during batch processing.
+
+Improvements include:
+
+- batch progress meter
+- processed / remaining / error counts
+- better visibility into partial progress
+- clear `Resume` behavior for partially processed batches
+- better operational control while working through import backlogs
+
+#### Import usage / MLS limit dashboard
+
+Expanded the usage dashboard on the imports page to continuously show REcolorado usage metrics, including:
+
+- rolling 30-day imported record count
+- remaining 30-day capacity
+- imported today
+- imported yesterday
+- 7-day average imports per day
+- 30-day average imports per day
+- compact 60-day bar chart
+- summary guidance for staying within the 75,000-record limit
+
+This makes the imports page a real compliance and workflow dashboard, not just an upload tool.
+
+### Property browser improvements
+
+#### Filter reliability fix
+
+Resolved the issue where filter dropdowns on `/analysis/properties` were incomplete.
+
+Cause:
+
+- filter options were previously being derived from limited result sets
+
+Resolution:
+
+- added database-backed option views for:
+  - city
+  - listing status
+  - property type
+
+Views added:
+
+- `property_city_options_v`
+- `property_status_options_v`
+- `property_type_options_v`
+
+Result:
+
+- filter dropdowns now reflect the full available dataset
+
+#### Browser filtering and sorting
+
+Improved the property browser with:
+
+- city filter
+- listing status filter
+- property type filter
+- sort by latest import date
+- sort by latest listing date
+- clearer pagination and result counts
+
+This makes the property browser much more useful as the dataset grows.
+
+### Property workspace improvements
+
+#### Latest comparable run summary
+
+Added a compact `Latest Comp Run` summary panel to the property detail page.
+
+It now surfaces:
+
+- run status
+- run date
+- candidate count
+- selected count
+- max distance
+- max days since close
+- square footage tolerance
+- run ID
+
+This gives the analyst immediate context on whether a comp search has already been run and how it was configured.
+
+#### Comparable workspace tightening
+
+Refined the comparable workspace to make it more useful in a compact analyst dashboard layout.
+
+Improvements include:
+
+- denser comparable candidate table
+- tighter search controls
+- better fit within the right-side workspace column
+- easier scanning of candidate rows
+
+#### Selectable comparable candidates
+
+Added the ability to actively select and deselect comp candidates.
+
+Behavior:
+
+- each comparable row now has a `Pick` / `Picked` action
+- selected candidates are highlighted
+- selected candidates float to the top of the candidate list
+
+This is the first step toward a true user-curated preferred comp set.
+
+#### MLS quick-copy tools
+
+Added MLS-number copy tools to support analyst workflow in the MLS system.
+
+New features:
+
+- quick-copy box containing subject MLS# first, followed by all candidate comp MLS#s
+- quick-copy box containing subject MLS# first, followed by selected comp MLS#s
+- clipboard copy feedback in the UI
+
+This supports the practical workflow of jumping back into the MLS to review:
+
+- photos
+- map position
+- listing details
+- neighborhood context
+
+#### Selected comp summary
+
+Added a compact selected-comp summary section that shows:
+
+- selected comp count
+- average selected distance
+- average selected close price
+- average selected PPSF
+- selected MLS-number copy box
+- compact selected-comp table for quick review
+
+This gives the analyst an immediate snapshot of the actively chosen comp set.
+
+#### Linked MLS listing ordering
+
+Improved the ordering of linked MLS listings on the property detail page so the most relevant/newest listing appears first.
+
+Ordering logic now prioritizes:
+
+1. `listing_contract_date` descending
+2. null contract dates first
+3. `created_at` descending
+
+This keeps `Coming Soon` or not-yet-contracted listings near the top while still preserving recency.
+
+#### Visual Context refinement
+
+Adjusted the visual context placeholders so:
+
+- the primary photo area
+- the map / comparable pins area
+
+now sit side by side as square placeholders instead of stacked rectangles.
+
+This better reflects the intended long-term workspace layout and uses the right-side panel area more efficiently.
+
+### Current state
+
+At this point, DataWise now has:
+
+- a stable route and dashboard structure
+- authenticated internal workspace
+- MLS upload, staging, and processing pipeline
+- large-batch processing support
+- import usage tracking and resume controls
+- filtered and sortable property browser
+- compact property workspace
+- manual analysis panel
+- comparable search proof of concept
+- selectable comp candidates
+- MLS quick-copy workflow support
+
+### Why this matters
+
+This update significantly improved both the reliability and usability of the system.
+
+The platform is now much closer to being a practical daily-use underwriting tool because:
+
+- large imports can be processed correctly
+- partial work can be resumed safely
+- properties can be browsed more intelligently
+- comp search results can be reviewed and curated more effectively
+- key MLS workflow steps are supported directly in the UI
+
+### Immediate next priorities
+
+- continue improving comp candidate quality and filtering logic
+- expand visual context with real photos and mapped comps
+- begin surfacing stronger comp-run summaries and interpretation
+- prepare for the next stage of valuation / final calculations
+
+##2026-03-24 - Next.config.ts settings
 
 ## Quick Fix
 
-Asjusted settings to allow larger upload sizes for property imports
+Adjusted settings to allow larger upload sizes for property imports (bodySizeLimit = 5mb)
 
 ## 2026-03-24 — Property Workspace and Working MLS Intake Engine
 

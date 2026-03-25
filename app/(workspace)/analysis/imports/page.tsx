@@ -41,31 +41,62 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
     shiftUtcDays(new Date(), -59),
   ).toISOString();
 
-  const { data: importBatches, error } = await supabase
-    .from("import_batches")
-    .select(
-      `
-      id,
-      created_at,
-      status,
-      source_system,
-      import_profile,
-      total_row_count,
-      unique_listing_count,
-      unique_property_count,
-      file_count,
-      import_notes
-    `,
-    )
-    .eq("source_system", "recolorado")
-    .gte("created_at", sixtyDayStart)
-    .order("created_at", { ascending: false });
+  const [
+    { data: importBatches, error },
+    { data: recentBatches, error: recentBatchesError },
+  ] = await Promise.all([
+    supabase
+      .from("import_batches")
+      .select(
+        `
+          id,
+          created_at,
+          status,
+          source_system,
+          import_profile,
+          total_row_count,
+          unique_listing_count,
+          unique_property_count,
+          file_count,
+          import_notes
+        `,
+      )
+      .eq("source_system", "recolorado")
+      .gte("created_at", sixtyDayStart)
+      .order("created_at", { ascending: false }),
 
-  if (error) {
-    throw new Error(error.message);
-  }
+    supabase
+      .from("import_batch_progress_v")
+      .select(
+        `
+          id,
+          created_at,
+          completed_at,
+          status,
+          source_system,
+          import_profile,
+          file_count,
+          total_row_count,
+          unique_listing_count,
+          unique_property_count,
+          import_notes,
+          processed_rows,
+          remaining_validated_rows,
+          processing_error_rows,
+          validation_error_rows,
+          processed_pct
+        `,
+      )
+      .eq("source_system", "recolorado")
+      .order("created_at", { ascending: false })
+      .limit(25),
+  ]);
+
+  if (error) throw new Error(error.message);
+  if (recentBatchesError) throw new Error(recentBatchesError.message);
 
   const batches = importBatches ?? [];
+  const progressRows = recentBatches ?? [];
 
   const totalsByDay = new Map<string, number>();
   for (const batch of batches) {
@@ -125,8 +156,6 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
       : `To stay within the 75,000-record rolling 30-day limit, keep your 30-day average at or below ${DAILY_AVERAGE_LIMIT.toLocaleString()} records/day. You are currently averaging ${Math.round(
           average30Day,
         ).toLocaleString()} per day and have ${remaining30DayCapacity.toLocaleString()} records of 30-day capacity remaining.`;
-
-  const recentBatches = batches.slice(0, 25);
 
   return (
     <section className="dw-section-stack">
@@ -302,8 +331,8 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
             Recent batches
           </h2>
           <p className="mt-1 text-sm text-slate-600">
-            Staged batches can be processed into `mls_listings`,
-            `real_properties`, `property_physical`, and `property_financials`.
+            Track batch progress, resume partially processed batches, and
+            monitor row-level completion.
           </p>
         </div>
 
@@ -317,48 +346,77 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
                 <th>Profile</th>
                 <th>Files</th>
                 <th>Total Rows</th>
-                <th>Unique Listings</th>
-                <th>Unique Properties</th>
+                <th>Processed</th>
+                <th>Remaining</th>
+                <th>Errors</th>
                 <th>Notes</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
-              {recentBatches.length > 0 ? (
-                recentBatches.map((batch) => (
-                  <tr key={batch.id}>
-                    <td>{new Date(batch.created_at).toLocaleString()}</td>
-                    <td>{batch.status}</td>
-                    <td>{batch.source_system}</td>
-                    <td>{batch.import_profile}</td>
-                    <td>{batch.file_count ?? "—"}</td>
-                    <td>{batch.total_row_count ?? 0}</td>
-                    <td>{batch.unique_listing_count ?? 0}</td>
-                    <td>{batch.unique_property_count ?? 0}</td>
-                    <td>{batch.import_notes ?? "—"}</td>
-                    <td>
-                      {batch.status === "staged" ? (
-                        <form action={processImportBatchAction}>
-                          <input
-                            type="hidden"
-                            name="batch_id"
-                            value={batch.id}
-                          />
-                          <button type="submit" className="dw-button-primary">
-                            Process
-                          </button>
-                        </form>
-                      ) : (
-                        <span className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
-                          Complete
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))
+              {progressRows.length > 0 ? (
+                progressRows.map((batch) => {
+                  const canResume = (batch.remaining_validated_rows ?? 0) > 0;
+                  const actionLabel =
+                    (batch.processed_rows ?? 0) > 0 ? "Resume" : "Process";
+
+                  return (
+                    <tr key={batch.id}>
+                      <td>{new Date(batch.created_at).toLocaleString()}</td>
+                      <td>{batch.status}</td>
+                      <td>{batch.source_system}</td>
+                      <td>{batch.import_profile}</td>
+                      <td>{batch.file_count ?? "—"}</td>
+                      <td>{batch.total_row_count ?? 0}</td>
+                      <td>
+                        <div className="min-w-[120px]">
+                          <div className="text-xs text-slate-700">
+                            {(batch.processed_rows ?? 0).toLocaleString()} /{" "}
+                            {(batch.total_row_count ?? 0).toLocaleString()}
+                          </div>
+                          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                            <div
+                              className="h-full rounded-full bg-slate-700"
+                              style={{
+                                width: `${Math.min(
+                                  100,
+                                  Number(batch.processed_pct ?? 0),
+                                )}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </td>
+                      <td>{batch.remaining_validated_rows ?? 0}</td>
+                      <td>
+                        {(batch.processing_error_rows ?? 0) +
+                          (batch.validation_error_rows ?? 0)}
+                      </td>
+                      <td>{batch.import_notes ?? "—"}</td>
+                      <td>
+                        {canResume ? (
+                          <form action={processImportBatchAction}>
+                            <input
+                              type="hidden"
+                              name="batch_id"
+                              value={batch.id}
+                            />
+                            <button type="submit" className="dw-button-primary">
+                              {actionLabel}
+                            </button>
+                          </form>
+                        ) : (
+                          <span className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                            Complete
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
               ) : (
                 <tr>
-                  <td colSpan={10} className="text-slate-500">
+                  <td colSpan={11} className="text-slate-500">
                     No batches yet.
                   </td>
                 </tr>

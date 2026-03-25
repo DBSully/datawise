@@ -1,10 +1,13 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ManualAnalysisPanel } from "@/components/properties/manual-analysis-panel";
+import { ComparableWorkspacePanel } from "@/components/properties/comparable-workspace-panel";
 
 type PropertyDetailPageProps = {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ comp_run?: string; comp_error?: string }>;
 };
 
 function formatCurrency(value: number | null | undefined) {
@@ -34,13 +37,7 @@ function formatDateTime(value: string | null | undefined) {
   return new Date(value).toLocaleString();
 }
 
-function DetailItem({
-  label,
-  value,
-}: {
-  label: string;
-  value: React.ReactNode;
-}) {
+function DetailItem({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="dw-detail-item">
       <div className="dw-detail-label">{label}</div>
@@ -49,7 +46,7 @@ function DetailItem({
   );
 }
 
-function StatChip({ label, value }: { label: string; value: React.ReactNode }) {
+function StatChip({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
       <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500">
@@ -60,10 +57,28 @@ function StatChip({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+function readParam(
+  params: Record<string, unknown> | null | undefined,
+  ...keys: string[]
+) {
+  if (!params) return null;
+
+  for (const key of keys) {
+    const value = params[key];
+    if (value !== null && value !== undefined && value !== "") {
+      return value;
+    }
+  }
+
+  return null;
+}
+
 export default async function PropertyDetailPage({
   params,
+  searchParams,
 }: PropertyDetailPageProps) {
   const { id } = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const supabase = await createClient();
 
   const { data: property, error: propertyError } = await supabase
@@ -93,19 +108,16 @@ export default async function PropertyDetailPage({
     .eq("id", id)
     .maybeSingle();
 
-  if (propertyError) {
-    throw new Error(propertyError.message);
-  }
-
-  if (!property) {
-    notFound();
-  }
+  if (propertyError) throw new Error(propertyError.message);
+  if (!property) notFound();
 
   const [
     { data: physical, error: physicalError },
     { data: financials, error: financialsError },
     { data: listings, error: listingsError },
     { data: latestAnalysis, error: analysisError },
+    { data: defaultProfile, error: profileError },
+    { data: latestRun, error: latestRunError },
   ] = await Promise.all([
     supabase
       .from("property_physical")
@@ -190,6 +202,7 @@ export default async function PropertyDetailPage({
       `,
       )
       .eq("real_property_id", id)
+      .order("listing_contract_date", { ascending: false, nullsFirst: true })
       .order("created_at", { ascending: false }),
 
     supabase
@@ -206,17 +219,70 @@ export default async function PropertyDetailPage({
       .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+
+    supabase
+      .from("valuation_profiles")
+      .select(
+        `
+        id,
+        slug,
+        name,
+        rules_json
+      `,
+      )
+      .eq("slug", "denver_detached_basic_v1")
+      .maybeSingle(),
+
+    supabase
+      .from("valuation_runs")
+      .select(
+        `
+        id,
+        status,
+        parameters_json,
+        summary_json,
+        created_at
+      `,
+      )
+      .eq("subject_real_property_id", id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
   if (physicalError) throw new Error(physicalError.message);
   if (financialsError) throw new Error(financialsError.message);
   if (listingsError) throw new Error(listingsError.message);
   if (analysisError) throw new Error(analysisError.message);
+  if (profileError) throw new Error(profileError.message);
+  if (latestRunError) throw new Error(latestRunError.message);
 
   const latestListing = listings?.[0] ?? null;
 
-  let manualAnalysis: any = null;
-  let pipeline: any = null;
+  let manualAnalysis: {
+    analyst_condition: string | null;
+    update_year_est: number | null;
+    update_quality: string | null;
+    uad_condition_manual: string | null;
+    uad_updates_manual: string | null;
+    arv_manual: number | null;
+    margin_manual: number | null;
+    rehab_manual: number | null;
+    days_held_manual: number | null;
+    rent_estimate_monthly: number | null;
+    design_rating: string | null;
+    location_rating: string | null;
+    created_at?: string | null;
+    updated_at?: string | null;
+  } | null = null;
+
+  let pipeline: {
+    interest_level: string | null;
+    showing_status: string | null;
+    offer_status: string | null;
+    created_at?: string | null;
+    updated_at?: string | null;
+  } | null = null;
 
   if (latestAnalysis?.id) {
     const [
@@ -270,6 +336,117 @@ export default async function PropertyDetailPage({
     pipeline = pipelineData;
   }
 
+  let latestCandidates: Array<{
+    id: string;
+    comp_listing_row_id: string | null;
+    listing_id: string | null;
+    distance_miles: number | null;
+    days_since_close: number | null;
+    sqft_delta_pct: number | null;
+    raw_score: number | null;
+    selected_yn: boolean;
+    metrics_json: Record<string, unknown> | null;
+  }> = [];
+
+  if (latestRun?.id) {
+    const { data: rawCandidates, error: candidatesError } = await supabase
+      .from("valuation_run_candidates")
+      .select(
+        `
+        id,
+        comp_listing_row_id,
+        distance_miles,
+        days_since_close,
+        sqft_delta_pct,
+        raw_score,
+        selected_yn,
+        metrics_json
+      `,
+      )
+      .eq("valuation_run_id", latestRun.id)
+      .order("raw_score", { ascending: false });
+
+    if (candidatesError) throw new Error(candidatesError.message);
+
+    const candidateRows =
+      (rawCandidates as Array<{
+        id: string;
+        comp_listing_row_id: string | null;
+        distance_miles: number | null;
+        days_since_close: number | null;
+        sqft_delta_pct: number | null;
+        raw_score: number | null;
+        selected_yn: boolean;
+        metrics_json: Record<string, unknown> | null;
+      }>) ?? [];
+
+    const compListingRowIds = Array.from(
+      new Set(
+        candidateRows
+          .map((candidate) => candidate.comp_listing_row_id)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    );
+
+    let listingIdMap = new Map<string, string>();
+
+    if (compListingRowIds.length > 0) {
+      const { data: compListingRows, error: compListingRowsError } =
+        await supabase
+          .from("mls_listings")
+          .select("id, listing_id")
+          .in("id", compListingRowIds);
+
+      if (compListingRowsError) throw new Error(compListingRowsError.message);
+
+      listingIdMap = new Map(
+        (compListingRows ?? []).map((row) => [row.id, row.listing_id]),
+      );
+    }
+
+    latestCandidates = candidateRows.map((candidate) => ({
+      ...candidate,
+      listing_id: candidate.comp_listing_row_id
+        ? (listingIdMap.get(candidate.comp_listing_row_id) ?? null)
+        : null,
+    }));
+  }
+
+  const profileRules =
+    defaultProfile?.rules_json && typeof defaultProfile.rules_json === "object"
+      ? (defaultProfile.rules_json as Record<string, unknown>)
+      : {};
+
+  const latestRunParams =
+    latestRun?.parameters_json && typeof latestRun.parameters_json === "object"
+      ? (latestRun.parameters_json as Record<string, unknown>)
+      : null;
+
+  const runParams = latestRunParams ?? profileRules;
+
+  const compCandidateCount = latestCandidates.length;
+  const compSelectedCount = latestCandidates.filter(
+    (candidate) => candidate.selected_yn,
+  ).length;
+
+  const compMaxDistance = readParam(
+    runParams,
+    "maxDistanceMiles",
+    "max_distance_miles",
+  );
+
+  const compMaxDays = readParam(
+    runParams,
+    "maxDaysSinceClose",
+    "max_days_since_close",
+  );
+
+  const compSqftTolerance = readParam(
+    runParams,
+    "sqftTolerancePct",
+    "sqft_tolerance_pct",
+  );
+
   return (
     <section className="dw-section-stack-compact">
       <div className="flex items-start justify-between gap-4">
@@ -286,7 +463,7 @@ export default async function PropertyDetailPage({
           <h1 className="dw-page-title">{property.unparsed_address}</h1>
           <p className="dw-page-copy">
             Compact property workspace for imported facts, manual analysis, and
-            future comp review.
+            comparable review.
           </p>
         </div>
 
@@ -514,12 +691,12 @@ export default async function PropertyDetailPage({
                   )}
                 />
                 <DetailItem
-                  label="Condition"
-                  value={latestListing?.property_condition_source ?? "—"}
-                />
-                <DetailItem
                   label="Contract Date"
                   value={formatDate(latestListing?.listing_contract_date)}
+                />
+                <DetailItem
+                  label="Condition"
+                  value={latestListing?.property_condition_source ?? "—"}
                 />
                 <DetailItem
                   label="Annual Tax"
@@ -598,33 +775,83 @@ export default async function PropertyDetailPage({
         <div className="dw-section-stack-compact xl:sticky xl:top-[122px]">
           <div className="dw-card-compact space-y-3">
             <div className="dw-card-header-compact">
-              <h2 className="dw-card-title-compact">Comparable Workspace</h2>
+              <h2 className="dw-card-title-compact">Latest Comp Run</h2>
               <p className="dw-card-copy-compact">
-                Reserved for spreadsheet-style comp selection and ranking.
+                Most recent saved comparable search for this property.
               </p>
             </div>
 
-            <div className="dw-table-wrap">
-              <table className="dw-table-compact">
-                <thead>
-                  <tr>
-                    <th>Comp</th>
-                    <th>Dist</th>
-                    <th>GLA</th>
-                    <th>PSF</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td colSpan={5} className="text-slate-500">
-                      Comparable selection list will appear here next.
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+            {latestRun ? (
+              <div className="dw-detail-grid">
+                <DetailItem
+                  label="Run Status"
+                  value={latestRun.status ?? "—"}
+                />
+                <DetailItem
+                  label="Run Date"
+                  value={formatDateTime(latestRun.created_at)}
+                />
+                <DetailItem
+                  label="Candidates"
+                  value={String(compCandidateCount)}
+                />
+                <DetailItem
+                  label="Selected"
+                  value={String(compSelectedCount)}
+                />
+                <DetailItem
+                  label="Max Distance"
+                  value={
+                    compMaxDistance !== null && compMaxDistance !== undefined
+                      ? `${compMaxDistance} mi`
+                      : "—"
+                  }
+                />
+                <DetailItem
+                  label="Max Days"
+                  value={
+                    compMaxDays !== null && compMaxDays !== undefined
+                      ? String(compMaxDays)
+                      : "—"
+                  }
+                />
+                <DetailItem
+                  label="Sq Ft Tol"
+                  value={
+                    compSqftTolerance !== null &&
+                    compSqftTolerance !== undefined
+                      ? `${compSqftTolerance}%`
+                      : "—"
+                  }
+                />
+                <DetailItem
+                  label="Run ID"
+                  value={
+                    <span className="font-mono text-[11px]">
+                      {latestRun.id}
+                    </span>
+                  }
+                />
+              </div>
+            ) : (
+              <div className="dw-card-tight">
+                <p className="text-sm text-slate-600">
+                  No comp search has been run for this property yet.
+                </p>
+              </div>
+            )}
           </div>
+
+          <ComparableWorkspacePanel
+            propertyId={property.id}
+            subjectListingRowId={latestListing?.id ?? null}
+            subjectListingMlsNumber={latestListing?.listing_id ?? null}
+            latestRun={latestRun}
+            latestCandidates={latestCandidates}
+            defaultProfileRules={profileRules}
+            compRunMessage={resolvedSearchParams?.comp_run ?? null}
+            compErrorMessage={resolvedSearchParams?.comp_error ?? null}
+          />
 
           <div className="dw-card-compact space-y-3">
             <div className="dw-card-header-compact">
@@ -634,11 +861,11 @@ export default async function PropertyDetailPage({
               </p>
             </div>
 
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-1">
-              <div className="flex min-h-[130px] items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-500">
+            <div className="grid gap-2 md:grid-cols-2">
+              <div className="flex aspect-square items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-500">
                 Primary photo area
               </div>
-              <div className="flex min-h-[170px] items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-500">
+              <div className="flex aspect-square items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-500">
                 Map + comparable pins
               </div>
             </div>
@@ -650,7 +877,8 @@ export default async function PropertyDetailPage({
         <div className="dw-card-header-compact">
           <h2 className="dw-card-title-compact">Linked MLS Listings</h2>
           <p className="dw-card-copy-compact">
-            Source listing records currently attached to this property.
+            Source listing records attached to this property, newest/relevant
+            first.
           </p>
         </div>
 
