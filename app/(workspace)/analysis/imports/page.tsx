@@ -1,6 +1,9 @@
-import { createClient } from "@/lib/supabase/server";
 import { ImportUploadPanel } from "@/components/imports/import-upload-panel";
+import { createClient } from "@/lib/supabase/server";
 import { processImportBatchAction } from "./actions";
+
+const ROLLING_LIMIT_30_DAY = 75_000;
+const DAILY_AVERAGE_LIMIT = ROLLING_LIMIT_30_DAY / 30;
 
 type ImportsPageProps = {
   searchParams?: Promise<{
@@ -10,128 +13,359 @@ type ImportsPageProps = {
   }>;
 };
 
-export default async function ImportsPage({ searchParams }: ImportsPageProps) {
-  const params = searchParams ? await searchParams : undefined;
-  const processed = params?.processed === "1";
-  const batchId = params?.batch ?? null;
-  const processError = params?.process_error ?? null;
+function shiftUtcDays(date: Date, offset: number) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + offset);
+  return next;
+}
 
+function startOfUtcDay(date: Date) {
+  const next = new Date(date);
+  next.setUTCHours(0, 0, 0, 0);
+  return next;
+}
+
+function dayKey(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function formatShortDate(date: Date) {
+  return `${date.getUTCMonth() + 1}/${date.getUTCDate()}`;
+}
+
+export default async function ImportsPage({ searchParams }: ImportsPageProps) {
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const supabase = await createClient();
 
-  const { data: recentBatches, error } = await supabase
+  const sixtyDayStart = startOfUtcDay(
+    shiftUtcDays(new Date(), -59),
+  ).toISOString();
+
+  const { data: importBatches, error } = await supabase
     .from("import_batches")
     .select(
       `
       id,
+      created_at,
+      status,
       source_system,
       import_profile,
-      import_notes,
       total_row_count,
       unique_listing_count,
       unique_property_count,
       file_count,
-      status,
-      created_at,
-      completed_at
+      import_notes
     `,
     )
-    .order("created_at", { ascending: false })
-    .limit(10);
+    .eq("source_system", "recolorado")
+    .gte("created_at", sixtyDayStart)
+    .order("created_at", { ascending: false });
 
   if (error) {
     throw new Error(error.message);
   }
+
+  const batches = importBatches ?? [];
+
+  const totalsByDay = new Map<string, number>();
+  for (const batch of batches) {
+    const key = String(batch.created_at).slice(0, 10);
+    totalsByDay.set(
+      key,
+      (totalsByDay.get(key) ?? 0) + (batch.total_row_count ?? 0),
+    );
+  }
+
+  const today = new Date();
+
+  const chartDays = Array.from({ length: 60 }, (_, index) => {
+    const date = startOfUtcDay(shiftUtcDays(today, -59 + index));
+    const key = dayKey(date);
+    return {
+      key,
+      label: formatShortDate(date),
+      total: totalsByDay.get(key) ?? 0,
+    };
+  });
+
+  const last30Days = chartDays.slice(-30);
+  const last7Days = chartDays.slice(-7);
+  const todayPoint = chartDays[chartDays.length - 1];
+  const yesterdayPoint = chartDays[chartDays.length - 2];
+
+  const rolling30Total = last30Days.reduce((sum, day) => sum + day.total, 0);
+  const last7Total = last7Days.reduce((sum, day) => sum + day.total, 0);
+  const todayTotal = todayPoint?.total ?? 0;
+  const yesterdayTotal = yesterdayPoint?.total ?? 0;
+
+  const average7Day = last7Total / 7;
+  const average30Day = rolling30Total / 30;
+
+  const remaining30DayCapacity = Math.max(
+    0,
+    ROLLING_LIMIT_30_DAY - rolling30Total,
+  );
+  const utilizationPercent = Math.min(
+    100,
+    Math.round((rolling30Total / ROLLING_LIMIT_30_DAY) * 100),
+  );
+
+  const maxChartValue = Math.max(...chartDays.map((day) => day.total), 1);
+
+  const summaryToneClass =
+    rolling30Total >= ROLLING_LIMIT_30_DAY
+      ? "text-red-700"
+      : rolling30Total >= ROLLING_LIMIT_30_DAY * 0.85
+        ? "text-amber-700"
+        : "text-emerald-700";
+
+  const summaryMessage =
+    rolling30Total >= ROLLING_LIMIT_30_DAY
+      ? `You are over the 75,000 rolling 30-day limit. Reduce imports immediately until older days roll off.`
+      : `To stay within the 75,000-record rolling 30-day limit, keep your 30-day average at or below ${DAILY_AVERAGE_LIMIT.toLocaleString()} records/day. You are currently averaging ${Math.round(
+          average30Day,
+        ).toLocaleString()} per day and have ${remaining30DayCapacity.toLocaleString()} records of 30-day capacity remaining.`;
+
+  const recentBatches = batches.slice(0, 12);
 
   return (
     <section className="dw-section-stack">
       <div>
         <h1 className="dw-page-title">Imports</h1>
         <p className="dw-page-copy">
-          Upload one or more REcolorado CSV files, validate them, stage them, and process them into core tables.
+          Upload one or more REcolorado CSV files, validate them, stage them,
+          and process them into core tables.
         </p>
       </div>
 
-      {processed ? (
+      {resolvedSearchParams?.processed === "1" ? (
         <div className="dw-card-tight border-emerald-200 bg-emerald-50 text-sm text-emerald-800">
-          Batch {batchId ? <span className="font-mono">{batchId}</span> : null} processed successfully.
+          Batch processed successfully.
+          {resolvedSearchParams?.batch ? (
+            <span className="ml-2 font-mono text-emerald-900">
+              {resolvedSearchParams.batch}
+            </span>
+          ) : null}
         </div>
       ) : null}
 
-      {processError ? (
+      {resolvedSearchParams?.process_error ? (
         <div className="dw-card-tight border-red-200 bg-red-50 text-sm text-red-800">
-          {processError}
+          {resolvedSearchParams.process_error}
         </div>
       ) : null}
 
-      <ImportUploadPanel />
-
-      <div className="dw-card space-y-4">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-base font-semibold text-slate-900">Recent batches</h2>
-            <p className="mt-1 text-sm text-slate-600">
-              Staged batches can be processed into `mls_listings`, `real_properties`, `property_physical`, and `property_financials`.
-            </p>
-          </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className="min-w-0">
+          <ImportUploadPanel />
         </div>
 
-        {recentBatches && recentBatches.length > 0 ? (
-          <div className="dw-table-wrap">
-            <table className="dw-table">
-              <thead>
-                <tr>
-                  <th>Created</th>
-                  <th>Status</th>
-                  <th>Source</th>
-                  <th>Profile</th>
-                  <th>Files</th>
-                  <th>Total Rows</th>
-                  <th>Unique Listings</th>
-                  <th>Unique Properties</th>
-                  <th>Notes</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentBatches.map((batch) => {
-                  const canProcess = ["staged", "processed_with_errors"].includes(batch.status);
+        <div className="dw-card space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
+                Usage Dashboard
+              </p>
+              <h2 className="mt-1 text-lg font-semibold text-slate-900">
+                REcolorado import limits
+              </h2>
+            </div>
+
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] uppercase tracking-[0.14em] text-slate-600">
+              75,000 / 30 days
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="dw-card-tight">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                Rolling 30 Days
+              </p>
+              <p className="mt-1 text-2xl font-semibold text-slate-900">
+                {rolling30Total.toLocaleString()}
+              </p>
+            </div>
+
+            <div className="dw-card-tight">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                Remaining Capacity
+              </p>
+              <p className="mt-1 text-2xl font-semibold text-slate-900">
+                {remaining30DayCapacity.toLocaleString()}
+              </p>
+            </div>
+
+            <div className="dw-card-tight">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                Today
+              </p>
+              <p className="mt-1 text-2xl font-semibold text-slate-900">
+                {todayTotal.toLocaleString()}
+              </p>
+            </div>
+
+            <div className="dw-card-tight">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                Yesterday
+              </p>
+              <p className="mt-1 text-xl font-semibold text-slate-900">
+                {yesterdayTotal.toLocaleString()}
+              </p>
+            </div>
+
+            <div className="dw-card-tight">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                7-Day Avg / Day
+              </p>
+              <p className="mt-1 text-xl font-semibold text-slate-900">
+                {Math.round(average7Day).toLocaleString()}
+              </p>
+            </div>
+
+            <div className="dw-card-tight">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                30-Day Avg / Day
+              </p>
+              <p className="mt-1 text-xl font-semibold text-slate-900">
+                {Math.round(average30Day).toLocaleString()}
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs text-slate-600">
+              <span>30-day limit utilization</span>
+              <span>{utilizationPercent}%</span>
+            </div>
+            <div className="h-2.5 overflow-hidden rounded-full bg-slate-200">
+              <div
+                className={`h-full rounded-full ${
+                  utilizationPercent >= 100
+                    ? "bg-red-600"
+                    : utilizationPercent >= 85
+                      ? "bg-amber-500"
+                      : "bg-emerald-600"
+                }`}
+                style={{ width: `${utilizationPercent}%` }}
+              />
+            </div>
+          </div>
+
+          <div className={`text-sm ${summaryToneClass}`}>{summaryMessage}</div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
+                Last 60 Days
+              </p>
+              <p className="text-[11px] text-slate-500">
+                Daily imported records
+              </p>
+            </div>
+
+            <div className="dw-card-tight">
+              <div className="flex h-36 items-end gap-[2px]">
+                {chartDays.map((day) => {
+                  const heightPercent =
+                    day.total > 0
+                      ? Math.max(4, (day.total / maxChartValue) * 100)
+                      : 2;
 
                   return (
-                    <tr key={batch.id}>
-                      <td>{new Date(batch.created_at).toLocaleString()}</td>
-                      <td>{batch.status}</td>
-                      <td>{batch.source_system}</td>
-                      <td>{batch.import_profile}</td>
-                      <td>{batch.file_count ?? "—"}</td>
-                      <td>{batch.total_row_count ?? "—"}</td>
-                      <td>{batch.unique_listing_count ?? "—"}</td>
-                      <td>{batch.unique_property_count ?? "—"}</td>
-                      <td>{batch.import_notes ?? "—"}</td>
-                      <td>
-                        {canProcess ? (
-                          <form action={processImportBatchAction}>
-                            <input type="hidden" name="batch_id" value={batch.id} />
-                            <button type="submit" className="dw-button-primary">
-                              Process
-                            </button>
-                          </form>
-                        ) : (
-                          <span className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
-                            Complete
-                          </span>
-                        )}
-                      </td>
-                    </tr>
+                    <div
+                      key={day.key}
+                      className="group flex-1"
+                      title={`${day.key}: ${day.total.toLocaleString()} records`}
+                    >
+                      <div
+                        className="w-full rounded-t-[2px] bg-slate-400 transition-colors group-hover:bg-slate-700"
+                        style={{ height: `${heightPercent}%` }}
+                      />
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
+              </div>
+
+              <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                <span>{chartDays[0]?.label}</span>
+                <span>60-day window</span>
+                <span>{chartDays[chartDays.length - 1]?.label}</span>
+              </div>
+            </div>
           </div>
-        ) : (
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
-            No import batches yet.
-          </div>
-        )}
+        </div>
+      </div>
+
+      <div className="dw-card space-y-3">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">
+            Recent batches
+          </h2>
+          <p className="mt-1 text-sm text-slate-600">
+            Staged batches can be processed into `mls_listings`,
+            `real_properties`, `property_physical`, and `property_financials`.
+          </p>
+        </div>
+
+        <div className="dw-table-wrap">
+          <table className="dw-table">
+            <thead>
+              <tr>
+                <th>Created</th>
+                <th>Status</th>
+                <th>Source</th>
+                <th>Profile</th>
+                <th>Files</th>
+                <th>Total Rows</th>
+                <th>Unique Listings</th>
+                <th>Unique Properties</th>
+                <th>Notes</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentBatches.length > 0 ? (
+                recentBatches.map((batch) => (
+                  <tr key={batch.id}>
+                    <td>{new Date(batch.created_at).toLocaleString()}</td>
+                    <td>{batch.status}</td>
+                    <td>{batch.source_system}</td>
+                    <td>{batch.import_profile}</td>
+                    <td>{batch.file_count ?? "—"}</td>
+                    <td>{batch.total_row_count ?? 0}</td>
+                    <td>{batch.unique_listing_count ?? 0}</td>
+                    <td>{batch.unique_property_count ?? 0}</td>
+                    <td>{batch.import_notes ?? "—"}</td>
+                    <td>
+                      {batch.status === "staged" ? (
+                        <form action={processImportBatchAction}>
+                          <input
+                            type="hidden"
+                            name="batch_id"
+                            value={batch.id}
+                          />
+                          <button type="submit" className="dw-button-primary">
+                            Process
+                          </button>
+                        </form>
+                      ) : (
+                        <span className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                          Complete
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={10} className="text-slate-500">
+                    No batches yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
   );

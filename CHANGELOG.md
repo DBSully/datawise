@@ -1,3 +1,159 @@
+## 2026-03-25 — Property Workspace and Working MLS Intake Engine
+
+### Summary
+
+Completed the first full property workspace and the first end-to-end MLS intake pipeline.
+
+DataWise can now:
+
+- upload REcolorado CSV files
+- validate them
+- stage them in batch tables
+- process staged batches into core tables
+- display imported property records in a compact workspace
+- save manual analyst inputs directly on the property page
+
+This is the point where the platform shifts from setup/infrastructure into actual underwriting workflow.
+
+### What was completed
+
+#### Route and workspace structure
+
+- Finalized the app structure into:
+  - Public → `/`
+  - Reports → `/reports`
+  - Analysis → `/analysis/...`
+  - Admin → `/admin`
+- Confirmed the refactored route structure builds and loads cleanly.
+- Established `/analysis/properties/[id]` as the first true property workspace.
+
+#### Import pipeline
+
+Built and verified the first working MLS import pipeline for REcolorado.
+
+The system can now:
+
+1. upload CSV files
+2. validate headers and rows
+3. stage raw files and rows in the database
+4. process staged batches into core DataWise tables
+
+Database tables actively used in this flow:
+
+- `import_batches`
+- `import_batch_files`
+- `import_batch_rows`
+- `mls_listings`
+- `real_properties`
+- `property_physical`
+- `property_financials`
+
+#### Import dashboard
+
+Expanded `/analysis/imports` into a true intake dashboard with:
+
+- upload panel
+- multi-file support
+- optional import notes
+- recent batches table
+- processing actions
+- rolling import usage tracking
+
+#### MLS usage tracking
+
+Added always-visible import monitoring for REcolorado:
+
+- rolling 30-day imported records
+- remaining 30-day capacity
+- daily counts
+- short-term and 30-day averages
+- compact 60-day history chart
+- guidance to stay within the 75,000 record limit
+
+#### Property workspace
+
+Built the first compact property detail workspace at:
+
+- `/analysis/properties/[id]`
+
+The page now includes:
+
+- subject property snapshot
+- physical facts
+- financial facts
+- linked MLS listings
+- reserved comp workspace
+- reserved visual/photo/map workspace
+- record metadata in a lower-visibility panel
+
+#### Manual analysis
+
+Added the first working `manual_analysis` panel directly into the property workspace.
+
+The page now supports saving:
+
+- analyst condition
+- update year estimate
+- update quality
+- UAD condition / updates
+- manual ARV
+- manual margin
+- manual rehab
+- days held
+- monthly rent estimate
+- design rating
+- location rating
+- workflow statuses
+
+This is the first time the imported data and manual analysis layers are working together in the web application.
+
+### Successful outcomes
+
+- Multiple REcolorado test batches have been uploaded and processed successfully.
+- Core tables are being populated from imported MLS records.
+- The property workspace is now functional and usable for analyst review.
+- Manual analysis entries can be saved from within the property detail page.
+- Import-limit monitoring is visible from the imports dashboard.
+
+### Why this matters
+
+This is one of the most important checkpoints in the project so far.
+
+DataWise is now:
+
+- a working MLS intake system
+- a working canonical property database
+- a working internal analysis workspace
+
+The platform is no longer just an app shell or a staging system. It is now ready for the next phase:
+
+### Next priority
+
+Build the comparable sales engine:
+
+- subject property selection
+- candidate comparable search
+- comparable scoring
+- ARV calculation
+- rehab and opportunity modeling
+- batch ranking of active listings
+
+## 2026-03-24 - Intelligent download dashboard
+
+### Summary
+
+Intelligent dashboard, showing individual download statistics for MLS data limit compliance
+
+- Rolling 30 days
+- Remaining capacity
+- Today
+- Yesterday
+- 7-Day Avereage / Day
+- 30-Day Average / Day
+- utilization bar
+- 60 day bar chart
+- short policy guidance summary
+
 ## 2026-03-24 — Batch Processing into Core Tables
 
 ### Summary

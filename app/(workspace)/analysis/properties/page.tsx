@@ -24,12 +24,13 @@ export default async function PropertiesPage() {
   }
 
   return (
-    <section className="dw-section-stack">
+    <section className="dw-section-stack-compact">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="dw-page-title">Saved property records</h1>
           <p className="dw-page-copy">
-            Canonical DataWise property records created through the app.
+            Canonical DataWise property records created through the app and
+            import pipeline.
           </p>
         </div>
 
@@ -40,7 +41,7 @@ export default async function PropertiesPage() {
 
       {properties && properties.length > 0 ? (
         <div className="dw-table-wrap">
-          <table className="dw-table">
+          <table className="dw-table-compact">
             <thead>
               <tr>
                 <th>Address</th>
@@ -49,17 +50,33 @@ export default async function PropertiesPage() {
                 <th>Postal Code</th>
                 <th>Unit</th>
                 <th>Created</th>
+                <th>Open</th>
               </tr>
             </thead>
             <tbody>
               {properties.map((property) => (
                 <tr key={property.id}>
-                  <td>{property.unparsed_address}</td>
+                  <td>
+                    <Link
+                      href={`/analysis/properties/${property.id}`}
+                      className="font-medium text-slate-900 hover:underline"
+                    >
+                      {property.unparsed_address}
+                    </Link>
+                  </td>
                   <td>{property.city}</td>
                   <td>{property.state}</td>
                   <td>{property.postal_code ?? "—"}</td>
                   <td>{property.unit_number ?? "—"}</td>
                   <td>{new Date(property.created_at).toLocaleString()}</td>
+                  <td>
+                    <Link
+                      href={`/analysis/properties/${property.id}`}
+                      className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-600 hover:text-slate-900"
+                    >
+                      View
+                    </Link>
+                  </td>
                 </tr>
               ))}
             </tbody>

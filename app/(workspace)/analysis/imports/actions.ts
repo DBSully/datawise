@@ -335,14 +335,19 @@ export async function processImportBatchAction(formData: FormData) {
     redirect("/analysis/imports?process_error=Missing%20batch%20id");
   }
 
+  let redirectUrl = `/analysis/imports?processed=1&batch=${encodeURIComponent(batchId)}`;
+
   try {
     await processImportBatch(batchId);
     revalidatePath("/analysis/imports");
     revalidatePath("/analysis/properties");
-    redirect(`/analysis/imports?processed=1&batch=${encodeURIComponent(batchId)}`);
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Failed to process import batch.";
-    redirect(`/analysis/imports?process_error=${encodeURIComponent(message)}`);
+      error instanceof Error
+        ? error.message
+        : "Failed to process import batch.";
+    redirectUrl = `/analysis/imports?process_error=${encodeURIComponent(message)}`;
   }
+
+  redirect(redirectUrl);
 }
