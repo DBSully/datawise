@@ -1,4 +1,10 @@
-## 2026-03-25 — Property Workspace and Working MLS Intake Engine
+##2026-03-24 - Next.config.js settings
+
+## Quick Fix
+
+Asjusted settings to allow larger upload sizes for property imports
+
+## 2026-03-24 — Property Workspace and Working MLS Intake Engine
 
 ### Summary
 

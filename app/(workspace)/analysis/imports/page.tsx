@@ -126,7 +126,7 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
           average30Day,
         ).toLocaleString()} per day and have ${remaining30DayCapacity.toLocaleString()} records of 30-day capacity remaining.`;
 
-  const recentBatches = batches.slice(0, 12);
+  const recentBatches = batches.slice(0, 25);
 
   return (
     <section className="dw-section-stack">
