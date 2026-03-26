@@ -7,7 +7,7 @@ import {
   initialManualAnalysisFormState,
   type ManualAnalysisFormState,
 } from "@/lib/analysis/manual-analysis-state";
-import { runComparableSearch } from "@/lib/valuation/engine";
+import { runComparableSearch } from "@/lib/comparables/engine";
 
 function textValue(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -35,6 +35,156 @@ function nullableInteger(formData: FormData, key: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+type ActiveAnalysisRecord = {
+  id: string;
+  listing_id: string | null;
+  updated_at: string | null;
+  scenario_name: string | null;
+  strategy_type: string | null;
+};
+
+function titleCaseStrategy(strategy: string) {
+  return strategy
+    .split("_")
+    .join(" ")
+    .split("-")
+    .join(" ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+async function getUserOwnedAnalysis(params: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  userId: string;
+  propertyId: string;
+  analysisId: string;
+}): Promise<ActiveAnalysisRecord> {
+  const { supabase, userId, propertyId, analysisId } = params;
+
+  const { data, error } = await supabase
+    .from("analyses")
+    .select("id, listing_id, updated_at, scenario_name, strategy_type")
+    .eq("id", analysisId)
+    .eq("real_property_id", propertyId)
+    .eq("created_by_user_id", userId)
+    .eq("is_archived", false)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data) {
+    throw new Error("Analysis not found for this property and user.");
+  }
+
+  return data;
+}
+
+async function getOrCreateAnalysis(params: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  userId: string;
+  propertyId: string;
+  listingId: string | null;
+  analysisId?: string | null;
+}): Promise<ActiveAnalysisRecord> {
+  const { supabase, userId, propertyId, listingId, analysisId } = params;
+
+  if (analysisId) {
+    return getUserOwnedAnalysis({
+      supabase,
+      userId,
+      propertyId,
+      analysisId,
+    });
+  }
+
+  const { data: insertedAnalysis, error: insertedAnalysisError } =
+    await supabase
+      .from("analyses")
+      .insert({
+        real_property_id: propertyId,
+        listing_id: listingId,
+        created_by_user_id: userId,
+        scenario_name: "General Analysis",
+        strategy_type: "general",
+        status: "draft",
+        is_archived: false,
+      })
+      .select("id, listing_id, updated_at, scenario_name, strategy_type")
+      .single();
+
+  if (insertedAnalysisError || !insertedAnalysis) {
+    throw new Error(
+      insertedAnalysisError?.message ?? "Failed to create analysis.",
+    );
+  }
+
+  return insertedAnalysis;
+}
+
+export async function createAnalysisScenarioAction(formData: FormData) {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/auth/sign-in");
+  }
+
+  const propertyId = textValue(formData, "property_id");
+  const listingId = nullableText(formData, "listing_id");
+  const strategyType = textValue(formData, "strategy_type") || "general";
+  const scenarioNameInput = nullableText(formData, "scenario_name");
+
+  if (!propertyId) {
+    redirect("/analysis/properties");
+  }
+
+  const { count: existingScenarioCount, error: existingScenarioCountError } =
+    await supabase
+      .from("analyses")
+      .select("id", { count: "exact", head: true })
+      .eq("real_property_id", propertyId)
+      .eq("created_by_user_id", user.id)
+      .eq("strategy_type", strategyType)
+      .eq("is_archived", false);
+
+  if (existingScenarioCountError) {
+    throw new Error(existingScenarioCountError.message);
+  }
+
+  const scenarioNumber = (existingScenarioCount ?? 0) + 1;
+  const defaultScenarioName = `${titleCaseStrategy(strategyType)} ${scenarioNumber}`;
+
+  const { data: insertedAnalysis, error: insertedAnalysisError } =
+    await supabase
+      .from("analyses")
+      .insert({
+        real_property_id: propertyId,
+        listing_id: listingId,
+        created_by_user_id: user.id,
+        scenario_name: scenarioNameInput ?? defaultScenarioName,
+        strategy_type: strategyType,
+        status: "draft",
+        is_archived: false,
+      })
+      .select("id")
+      .single();
+
+  if (insertedAnalysisError || !insertedAnalysis) {
+    throw new Error(
+      insertedAnalysisError?.message ?? "Failed to create analysis scenario.",
+    );
+  }
+
+  revalidatePath(`/analysis/properties/${propertyId}`);
+  redirect(
+    `/analysis/properties/${propertyId}/analyses/${insertedAnalysis.id}`,
+  );
+}
+
 export async function saveManualAnalysisAction(
   _previousState: ManualAnalysisFormState,
   formData: FormData,
@@ -51,7 +201,7 @@ export async function saveManualAnalysisAction(
 
   const propertyId = textValue(formData, "property_id");
   const listingId = nullableText(formData, "listing_id");
-  let analysisId = nullableText(formData, "analysis_id");
+  const analysisId = nullableText(formData, "analysis_id");
 
   if (!propertyId) {
     return {
@@ -61,30 +211,28 @@ export async function saveManualAnalysisAction(
     };
   }
 
-  if (!analysisId) {
-    const { data: analysis, error: analysisCreateError } = await supabase
-      .from("analyses")
-      .insert({
-        real_property_id: propertyId,
-        listing_id: listingId,
-      })
-      .select("id")
-      .single();
-
-    if (analysisCreateError || !analysis) {
-      return {
-        ...initialManualAnalysisFormState,
-        status: "error",
-        message:
-          analysisCreateError?.message ?? "Failed to create analysis record.",
-      };
-    }
-
-    analysisId = analysis.id;
+  let activeAnalysis: ActiveAnalysisRecord;
+  try {
+    activeAnalysis = await getOrCreateAnalysis({
+      supabase,
+      userId: user.id,
+      propertyId,
+      listingId,
+      analysisId,
+    });
+  } catch (error) {
+    return {
+      ...initialManualAnalysisFormState,
+      status: "error",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Failed to initialize analysis.",
+    };
   }
 
   const { error: manualError } = await supabase.from("manual_analysis").upsert({
-    analysis_id: analysisId,
+    analysis_id: activeAnalysis.id,
     analyst_condition: nullableText(formData, "analyst_condition"),
     update_year_est: nullableInteger(formData, "update_year_est"),
     update_quality: nullableText(formData, "update_quality"),
@@ -103,7 +251,7 @@ export async function saveManualAnalysisAction(
     return {
       ...initialManualAnalysisFormState,
       status: "error",
-      analysisId,
+      analysisId: activeAnalysis.id,
       message: manualError.message,
     };
   }
@@ -111,7 +259,7 @@ export async function saveManualAnalysisAction(
   const { error: pipelineError } = await supabase
     .from("analysis_pipeline")
     .upsert({
-      analysis_id: analysisId,
+      analysis_id: activeAnalysis.id,
       interest_level: nullableText(formData, "interest_level"),
       showing_status: nullableText(formData, "showing_status"),
       offer_status: nullableText(formData, "offer_status"),
@@ -121,19 +269,106 @@ export async function saveManualAnalysisAction(
     return {
       ...initialManualAnalysisFormState,
       status: "error",
-      analysisId,
+      analysisId: activeAnalysis.id,
       message: pipelineError.message,
     };
   }
 
   revalidatePath(`/analysis/properties/${propertyId}`);
-  revalidatePath("/analysis/properties");
+  revalidatePath(
+    `/analysis/properties/${propertyId}/analyses/${activeAnalysis.id}`,
+  );
 
   return {
     status: "success",
-    analysisId,
+    analysisId: activeAnalysis.id,
     message: "Manual analysis saved successfully.",
   };
+}
+
+export async function runComparableSearchAction(formData: FormData) {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/auth/sign-in");
+  }
+
+  const propertyId = textValue(formData, "property_id");
+  const analysisId = textValue(formData, "analysis_id");
+  const subjectListingRowId = textValue(formData, "subject_listing_row_id");
+  const profileSlug =
+    textValue(formData, "profile_slug") || "denver_detached_basic_v1";
+
+  if (!propertyId || !analysisId) {
+    redirect("/analysis/properties");
+  }
+
+  if (!subjectListingRowId) {
+    redirect(
+      `/analysis/properties/${propertyId}/analyses/${analysisId}/comparables?comp_error=${encodeURIComponent(
+        "A linked subject listing is required before running comparable search.",
+      )}`,
+    );
+  }
+
+  try {
+    await getUserOwnedAnalysis({
+      supabase,
+      userId: user.id,
+      propertyId,
+      analysisId,
+    });
+  } catch (error) {
+    redirect(
+      `/analysis/properties/${propertyId}?comp_error=${encodeURIComponent(
+        error instanceof Error ? error.message : "Analysis not found.",
+      )}`,
+    );
+  }
+
+  try {
+    await runComparableSearch({
+      analysisId,
+      subjectRealPropertyId: propertyId,
+      subjectListingRowId,
+      profileSlug,
+      overrides: {
+        maxDistanceMiles: nullableNumber(formData, "max_distance_miles"),
+        maxDaysSinceClose: nullableInteger(formData, "max_days_since_close"),
+        sqftTolerancePct: nullableNumber(formData, "sqft_tolerance_pct"),
+        yearToleranceYears: nullableInteger(formData, "year_tolerance_years"),
+        bedTolerance: nullableInteger(formData, "bed_tolerance"),
+        bathTolerance: nullableNumber(formData, "bath_tolerance"),
+        maxCandidates: nullableInteger(formData, "max_candidates"),
+        requireSamePropertyType:
+          formData.get("require_same_property_type") === "on",
+        requireSameLevelClass:
+          formData.get("require_same_level_class") === "on",
+      },
+    });
+  } catch (error) {
+    redirect(
+      `/analysis/properties/${propertyId}/analyses/${analysisId}/comparables?comp_error=${encodeURIComponent(
+        error instanceof Error ? error.message : "Comp search failed.",
+      )}`,
+    );
+  }
+
+  revalidatePath(`/analysis/properties/${propertyId}`);
+  revalidatePath(`/analysis/properties/${propertyId}/analyses/${analysisId}`);
+  revalidatePath(
+    `/analysis/properties/${propertyId}/analyses/${analysisId}/comparables`,
+  );
+
+  redirect(
+    `/analysis/properties/${propertyId}/analyses/${analysisId}/comparables?comp_run=${encodeURIComponent(
+      "Comparable search saved successfully.",
+    )}`,
+  );
 }
 
 export async function toggleComparableCandidateSelectionAction(
@@ -151,23 +386,26 @@ export async function toggleComparableCandidateSelectionAction(
 
   const candidateIdValue = formData.get("candidate_id");
   const propertyIdValue = formData.get("property_id");
+  const analysisIdValue = formData.get("analysis_id");
   const nextSelectedValue = formData.get("next_selected");
 
   const candidateId =
     typeof candidateIdValue === "string" ? candidateIdValue.trim() : "";
   const propertyId =
     typeof propertyIdValue === "string" ? propertyIdValue.trim() : "";
+  const analysisId =
+    typeof analysisIdValue === "string" ? analysisIdValue.trim() : "";
   const nextSelected =
     typeof nextSelectedValue === "string"
       ? nextSelectedValue === "true"
       : false;
 
-  if (!candidateId || !propertyId) {
-    throw new Error("Candidate ID and property ID are required.");
+  if (!candidateId || !propertyId || !analysisId) {
+    throw new Error("Candidate ID, property ID, and analysis ID are required.");
   }
 
   const { error } = await supabase
-    .from("valuation_run_candidates")
+    .from("comparable_search_candidates")
     .update({ selected_yn: nextSelected })
     .eq("id", candidateId);
 
@@ -176,66 +414,8 @@ export async function toggleComparableCandidateSelectionAction(
   }
 
   revalidatePath(`/analysis/properties/${propertyId}`);
-}
-
-export async function runComparableSearchAction(formData: FormData) {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/auth/sign-in");
-  }
-
-  const propertyId = textValue(formData, "property_id");
-  const subjectListingRowId = nullableText(formData, "subject_listing_row_id");
-  const profileSlug =
-    textValue(formData, "profile_slug") || "denver_detached_basic_v1";
-
-  if (!propertyId) {
-    redirect("/analysis/properties?comp_error=Missing%20property%20id");
-  }
-
-  const overrides = {
-    maxDistanceMiles:
-      nullableNumber(formData, "max_distance_miles") ?? undefined,
-    maxDaysSinceClose:
-      nullableInteger(formData, "max_days_since_close") ?? undefined,
-    sqftTolerancePct:
-      nullableNumber(formData, "sqft_tolerance_pct") ?? undefined,
-    yearBuiltTolerance:
-      nullableInteger(formData, "year_built_tolerance") ?? undefined,
-    bedTolerance: nullableInteger(formData, "bed_tolerance") ?? undefined,
-    bathTolerance: nullableNumber(formData, "bath_tolerance") ?? undefined,
-    maxCandidateCount:
-      nullableInteger(formData, "max_candidate_count") ?? undefined,
-    requireSameLevelClass: formData.get("require_same_level_class") === "on",
-    requireSamePropertyType:
-      formData.get("require_same_property_type") === "on",
-  };
-
-  let redirectUrl = `/analysis/properties/${propertyId}`;
-
-  try {
-    const result = await runComparableSearch({
-      supabase,
-      propertyId,
-      subjectListingRowId,
-      profileSlug,
-      overrides,
-      createdByUserId: user.id,
-    });
-
-    revalidatePath(`/analysis/properties/${propertyId}`);
-    revalidatePath("/analysis/properties");
-    redirectUrl = `/analysis/properties/${propertyId}?comp_run=${encodeURIComponent(result.runId)}`;
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Comparable search failed.";
-    redirectUrl = `/analysis/properties/${propertyId}?comp_error=${encodeURIComponent(message)}`;
-  }
-
-  redirect(redirectUrl);
+  revalidatePath(`/analysis/properties/${propertyId}/analyses/${analysisId}`);
+  revalidatePath(
+    `/analysis/properties/${propertyId}/analyses/${analysisId}/comparables`,
+  );
 }

@@ -8,6 +8,7 @@ import {
 
 type ComparableWorkspacePanelProps = {
   propertyId: string;
+  analysisId: string;
   subjectListingRowId: string | null;
   subjectListingMlsNumber: string | null;
   latestRun: {
@@ -169,6 +170,7 @@ function DetailMini({
 
 export function ComparableWorkspacePanel({
   propertyId,
+  analysisId,
   subjectListingRowId,
   subjectListingMlsNumber,
   latestRun,
@@ -267,7 +269,6 @@ export function ComparableWorkspacePanel({
         ) ?? "—";
 
       const closeDate = metricValue(metrics, "close_date", "closeDate");
-
       const closePrice = metricValue(metrics, "close_price", "closePrice");
 
       const gla = metricValue(
@@ -422,6 +423,7 @@ export function ComparableWorkspacePanel({
         className="space-y-3"
       >
         <input type="hidden" name="property_id" value={propertyId} />
+        <input type="hidden" name="analysis_id" value={analysisId} />
         <input
           type="hidden"
           name="subject_listing_row_id"
@@ -679,6 +681,11 @@ export function ComparableWorkspacePanel({
                         type="hidden"
                         name="property_id"
                         value={propertyId}
+                      />
+                      <input
+                        type="hidden"
+                        name="analysis_id"
+                        value={analysisId}
                       />
                       <input
                         type="hidden"

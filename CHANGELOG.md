@@ -1,3 +1,411 @@
+## 2026-03-26 — Scenario-Based Analysis Foundation, Dedicated Comparables Workspace, and Operational UI Improvements
+
+### Summary
+
+This update is a major architectural checkpoint for DataWise.
+
+The platform has moved from a single-page property workflow toward a more durable structure built around:
+
+- **property-first navigation**
+- **analysis-scenario-based workspaces**
+- a dedicated **comparables workspace**
+- improved **import recovery / monitoring**
+- improved **property browser filtering**
+- a cleaner separation between:
+  - the **comparables engine**
+  - the future **valuation engine**
+
+This lays the foundation for multiple analysts, multiple scenarios per property, and later owner-facing report delivery.
+
+---
+
+### Key architecture decision
+
+A critical design decision was finalized:
+
+- the app remains **property-based in navigation**
+- the underlying work becomes **analysis-based in data ownership**
+
+This means:
+
+- one property can have **many analyses**
+- one analyst can create **many scenarios** for the same property
+- multiple analysts can eventually work on the same property independently
+- detailed workspaces are tied to an **analysis scenario**, not globally to the property
+
+This replaces the earlier idea of “one active analysis per user per property,” which was too restrictive for real-world use cases such as:
+
+- flip vs rental vs wholesale vs listing vs new-build
+- multiple scenario versions for the same strategy
+- eventual owner/client review of multiple strategy outcomes
+
+---
+
+## Data model and schema updates
+
+### Analysis scenario foundation
+
+Expanded `analyses` to support scenario-based work by adding / formalizing:
+
+- `created_by_user_id`
+- `scenario_name`
+- `strategy_type`
+- `status`
+- `is_archived`
+
+This makes `analyses` the parent scenario record for all future workspaces.
+
+### Comparable engine naming correction
+
+Renamed the earlier “valuation” search layer into a true **comparables** layer.
+
+Current structure now aligns conceptually with the product design:
+
+- `valuation_profiles` → `comparable_profiles`
+- `valuation_runs` → `comparable_search_runs`
+- `valuation_run_candidates` → `comparable_search_candidates`
+
+This reflects the correct separation:
+
+- **comparables engine** finds and organizes candidate comps
+- **valuation engine** will later consume selected comp sets and produce values
+
+### Comparable set foundation
+
+Added the beginning of the selected-comp-set layer:
+
+- `comparable_sets`
+- `comparable_set_members`
+
+This is an important long-term foundation because the true output of the comparables engine is not a valuation — it is a **selected comp set**.
+
+### Backfill / continuity work
+
+Applied backfill steps so current data continues to function under the new foundation:
+
+- existing analyses were associated with the current user
+- existing comparable search runs were tied to `analysis_id` where possible
+
+---
+
+## Import pipeline and operational improvements
+
+### Large-batch processing fix
+
+Resolved the issue where large import batches were stopping after the first ~1,000 staged rows.
+
+Root cause:
+
+- row retrieval was being limited by the default max row cap per request
+
+Resolution:
+
+- updated batch processing to page through remaining `validated` rows in chunks
+- confirmed that larger batches can now be resumed and processed fully
+
+### Imports dashboard improvements
+
+Enhanced `/analysis/imports` with better operational visibility:
+
+- progress meter by batch
+- processed / remaining / error row counts
+- clear **Resume** behavior for partially processed batches
+- better support for working through large import backlogs
+
+### REcolorado usage dashboard
+
+Expanded the usage dashboard to track MLS data consumption more clearly:
+
+- rolling 30-day imported records
+- remaining capacity under the 75,000-record limit
+- imported today
+- imported yesterday
+- 7-day average
+- 30-day average
+- 60-day compact bar chart
+- compliance guidance summary
+
+This turns the imports page into both an intake tool and an operational dashboard.
+
+---
+
+## Property browser improvements
+
+### Reliable filter option sourcing
+
+Resolved the issue where property browser dropdowns were incomplete.
+
+Cause:
+
+- filter options were previously being derived from limited API result sets
+
+Resolution:
+
+- added database-backed filter option views:
+  - `property_city_options_v`
+  - `property_status_options_v`
+  - `property_type_options_v`
+
+### Property browser enhancements
+
+Improved `/analysis/properties` with:
+
+- city filter
+- listing status filter
+- property type filter
+- sort by latest import date
+- sort by latest listing date
+- pagination
+- result counts
+
+This makes the browser much more usable as the dataset grows.
+
+---
+
+## Property workspace evolution
+
+### Previous property detail page evolved into a transition state
+
+The earlier single property detail page was useful as a proof of concept, but it was becoming overloaded with:
+
+- imported facts
+- manual analysis
+- comparable search controls
+- selected comp review
+- future rehab / rental / listing / new-build logic
+
+This update formalizes the move away from a single overloaded page.
+
+### New property hub role
+
+`/analysis/properties/[propertyId]` is now intended to become the **Property Hub**:
+
+- subject snapshot
+- latest imported facts
+- analysis scenario list
+- scenario creation
+- navigation into scenario-specific workspaces
+
+### New analysis overview role
+
+`/analysis/properties/[propertyId]/analyses/[analysisId]` is now intended to become the **Analysis Overview**:
+
+- manual analysis summary
+- comparable summary
+- scenario-level outputs
+- links into deep workspaces
+
+This separates:
+
+- **property-level subject context**
+  from
+- **scenario-level work product**
+
+---
+
+## Dedicated analysis workspace route scaffold
+
+Added / scaffolded the new scenario-based route structure:
+
+- `/analysis/properties/[propertyId]`
+- `/analysis/properties/[propertyId]/analyses/[analysisId]`
+- `/analysis/properties/[propertyId]/analyses/[analysisId]/comparables`
+- `/analysis/properties/[propertyId]/analyses/[analysisId]/rehab-budget`
+- `/analysis/properties/[propertyId]/analyses/[analysisId]/rental`
+- `/analysis/properties/[propertyId]/analyses/[analysisId]/wholesale`
+- `/analysis/properties/[propertyId]/analyses/[analysisId]/listing`
+- `/analysis/properties/[propertyId]/analyses/[analysisId]/new-build`
+
+Placeholder pages were added for:
+
+- rehab-budget
+- rental
+- wholesale
+- listing
+- new-build
+
+This locks in the workspace architecture before deeper features are added.
+
+---
+
+## Comparables workspace improvements
+
+### Dedicated comparables page direction
+
+The heavy comparable review tool is now being moved toward its own dedicated scenario page:
+
+- `/analysis/properties/[propertyId]/analyses/[analysisId]/comparables`
+
+This is important because the comparables workflow needs far more room than the old combined property page could provide.
+
+### Comparable workspace enhancements
+
+The comparable review tool now supports:
+
+- dedicated comparable search controls
+- candidate ranking display
+- denser comparable grid
+- more usable layout for analyst review
+
+### Selectable comp candidates
+
+Added analyst selection behavior:
+
+- candidate rows can be marked as selected
+- selected rows are highlighted
+- selected rows float to the top
+
+This begins turning the comp engine into a real analyst-driven selection workflow.
+
+### MLS number quick-copy tools
+
+Added clipboard utilities to support real MLS workflow:
+
+- **subject MLS# + all candidate MLS#s**
+- **subject MLS# + selected MLS#s**
+
+These can be copied directly into the MLS for:
+
+- photo review
+- map review
+- listing detail inspection
+- neighborhood context review
+
+### Selected comp summary
+
+Added a compact selected-comp summary section showing:
+
+- selected count
+- average distance
+- average close price
+- average PPSF
+- selected MLS-number copy box
+- compact selected-comp table
+
+This provides a real summary of the active comp set.
+
+---
+
+## Linked MLS listing behavior
+
+Improved ordering of linked MLS listings on the property page so the most relevant/current record appears first.
+
+Current ordering prioritizes:
+
+1. `listing_contract_date` descending
+2. null contract dates first
+3. `created_at` descending
+
+This keeps “Coming Soon” / no-contract-date listings appropriately visible near the top while preserving recency.
+
+---
+
+## Visual context refinement
+
+Adjusted the visual context placeholders to better reflect the intended final workspace.
+
+Changes:
+
+- “Primary photo area” and “Map + comparable pins” now sit side by side as square placeholders
+- space is used more efficiently within the right-side workspace column
+
+This is still placeholder UI, but it better matches the long-term analyst workflow.
+
+---
+
+## Strategic product decision: comparables engine vs valuation engine
+
+A major conceptual clarification was made:
+
+### Comparables engine
+
+Responsible for:
+
+- searching the database
+- applying hard filters
+- ranking candidate comps
+- enabling analyst review and comp selection
+
+### Valuation engine
+
+Responsible for:
+
+- consuming a selected comp set
+- applying valuation-specific math
+- producing ARV / as-is / rental / new-build value outputs later
+
+This is an important long-term separation and prevents the platform from collapsing candidate search and valuation math into one fragile module.
+
+---
+
+## Strategic product decision: owner-facing reporting layer
+
+Confirmed the long-term direction for owner/client access:
+
+- owners will **not** use internal analysis pages directly
+- a later `/reports/[reportId]` layer will present curated analysis outputs
+- reports can eventually aggregate one or more analyses for one property
+
+This fits the property-first / analysis-scenario-based architecture cleanly.
+
+---
+
+## Current state after this update
+
+DataWise now has:
+
+- authenticated internal workspace
+- stable route structure
+- MLS upload / staging / processing pipeline
+- large-batch processing support
+- import usage dashboard and resume behavior
+- filtered and sortable property browser
+- property hub direction
+- scenario-based analysis foundation
+- comparable engine naming corrected
+- dedicated analysis workspace scaffold
+- dedicated comparables workspace direction
+- selectable comps
+- selected comp summary
+- MLS clipboard workflow support
+- placeholder workspaces for:
+  - rehab-budget
+  - rental
+  - wholesale
+  - listing
+  - new-build
+
+---
+
+## Why this matters
+
+This update is a true structural milestone.
+
+The system is now being shaped around the way real analyst workflow actually works:
+
+- one property
+- many scenarios
+- many strategies
+- potentially many analysts
+- later, clean owner-facing report outputs
+
+This is a much stronger foundation than trying to keep everything on one oversized property page.
+
+---
+
+## Immediate next priorities
+
+- complete the move of the comparables workflow onto the dedicated comparables page
+- simplify the property hub into a cleaner subject-and-scenarios page
+- simplify the analysis overview into a true scenario summary page
+- continue improving comparable candidate quality, filters, and transparency
+- later, build the next deep workspaces:
+  - rehab-budget
+  - rental
+  - wholesale
+  - listing
+  - new-build
+
 ## 2026-03-25 — Batch Processing Fixes, Import Dashboard Improvements, Property Browser Filters, and Comparable Workspace Enhancements
 
 ### Summary
