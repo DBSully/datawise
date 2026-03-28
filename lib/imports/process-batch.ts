@@ -1,3 +1,5 @@
+// /lib/imports/process-batch.ts
+
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
@@ -109,6 +111,23 @@ function toRealPropertyPayload(row: RawImportRow) {
   };
 }
 
+function deriveBuildingFormStandardized(
+  structureType: string | null,
+): string | null {
+  const value = (structureType ?? "").trim().toLowerCase();
+
+  if (value.startsWith("high rise")) return "high_rise";
+  if (value.startsWith("mid rise")) return "mid_rise";
+  if (value.startsWith("low rise")) return "low_rise";
+  if (value.startsWith("townhouse")) return "townhouse_style";
+  if (value.startsWith("patio/cluster")) return "patio_cluster";
+  if (value.startsWith("duplex")) return "duplex";
+  if (value.startsWith("house")) return "house";
+
+  return null;
+}
+
+
 function toPropertyPhysicalPayload(row: RawImportRow) {
   const propertySubType = getText(row, "Property Sub Type");
   const structureType = getText(row, "Structure Type");
@@ -128,6 +147,7 @@ function toPropertyPhysicalPayload(row: RawImportRow) {
     property_attached_yn: attached,
     levels_raw: levelsRaw,
     level_class_standardized: deriveLevelClass(levelsRaw),
+    building_form_standardized: deriveBuildingFormStandardized(structureType),
     year_built: parseInteger(row["Year Built"]),
     building_area_total_sqft: parseNumber(row["Building Area Total"]),
     living_area_sqft: null,
@@ -382,10 +402,10 @@ export async function processImportBatch(
           result.propertiesCreated += 1;
         }
 
-        const physicalPayload = {
+        const physicalPayload = nonNullEntries({
           real_property_id: realPropertyId,
           ...toPropertyPhysicalPayload(row),
-        };
+        });
 
         const { error: propertyPhysicalError } = await supabase
           .from("property_physical")

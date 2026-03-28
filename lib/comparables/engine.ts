@@ -32,6 +32,10 @@ type ComparableSearchRules = {
   requireSameLevelClass: boolean;
 };
 
+const comparablesDebugEnabled =
+  process.env.COMPARABLES_DEBUG === "1" ||
+  process.env.COMPARABLES_DEBUG === "true";
+
 function toNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
@@ -124,10 +128,30 @@ function haversineMiles(
   return earthRadiusMiles * c;
 }
 
-function daysBetween(fromDate: string, toDate: Date) {
+// close_date is effectively a calendar date for comp filtering/storage.
+// Normalize both sides to UTC midnight so we get a whole-day integer.
+function daysBetween(fromDate: string, toDate: Date): number | null {
   const from = new Date(fromDate);
-  const diffMs = toDate.getTime() - from.getTime();
-  return diffMs / (1000 * 60 * 60 * 24);
+
+  if (Number.isNaN(from.getTime()) || Number.isNaN(toDate.getTime())) {
+    return null;
+  }
+
+  const fromUtcMidnight = Date.UTC(
+    from.getUTCFullYear(),
+    from.getUTCMonth(),
+    from.getUTCDate(),
+  );
+
+  const toUtcMidnight = Date.UTC(
+    toDate.getUTCFullYear(),
+    toDate.getUTCMonth(),
+    toDate.getUTCDate(),
+  );
+
+  return Math.floor(
+    (toUtcMidnight - fromUtcMidnight) / (1000 * 60 * 60 * 24),
+  );
 }
 
 function pctDelta(subject: number, candidate: number) {
@@ -334,6 +358,21 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
     profile.rules_json as Record<string, unknown> | null,
     input.overrides,
   );
+
+  if (comparablesDebugEnabled) {
+    console.log(
+      "[comp-pull] merged rules",
+      JSON.stringify(
+        {
+          analysisId: input.analysisId,
+          profileSlug: input.profileSlug,
+          rules: mergedRules,
+        },
+        null,
+        2,
+      ),
+    );
+  }
 
   const [
     { data: subjectListing, error: subjectListingError },
@@ -671,11 +710,76 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
       metrics_json: candidate.metrics_json,
     }));
 
+    if (comparablesDebugEnabled) {
+      console.log(
+        "[comp-pull] candidate rows preview",
+        JSON.stringify(
+          {
+            runId: insertedRun.id,
+            candidateCount: candidateRows.length,
+            preview: candidateRows.slice(0, 5),
+          },
+          null,
+          2,
+        ),
+      );
+    }
+
+    const invalidIntegerCandidateRows: Array<{
+      index: number;
+      issues: string[];
+      row: (typeof candidateRows)[number];
+    }> = [];
+
+    for (const [index, row] of candidateRows.entries()) {
+      const issues: string[] = [];
+
+      if (
+        row.days_since_close !== null &&
+        !Number.isInteger(row.days_since_close)
+      ) {
+        issues.push(`days_since_close=${row.days_since_close}`);
+      }
+
+      if (issues.length > 0) {
+        invalidIntegerCandidateRows.push({ index, issues, row });
+      }
+    }
+
+    if (invalidIntegerCandidateRows.length > 0) {
+      console.error(
+        "[comp-pull] invalid integer candidate rows",
+        JSON.stringify(
+          {
+            runId: insertedRun.id,
+            invalidIntegerCandidateRows,
+          },
+          null,
+          2,
+        ),
+      );
+    }
+
     const { error: candidateInsertError } = await supabase
       .from("comparable_search_candidates")
       .insert(candidateRows);
 
     if (candidateInsertError) {
+      console.error(
+        "[comp-pull] candidate insert failed",
+        JSON.stringify(
+          {
+            analysisId: input.analysisId,
+            runId: insertedRun.id,
+            candidateCount: candidateRows.length,
+            preview: candidateRows.slice(0, 3),
+            error: candidateInsertError,
+          },
+          null,
+          2,
+        ),
+      );
+
       throw new Error(candidateInsertError.message);
     }
   }

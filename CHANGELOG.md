@@ -1,3 +1,4 @@
+
 ## 2026-03-26 — Scenario-Based Analysis Foundation, Dedicated Comparables Workspace, and Operational UI Improvements
 
 ### Summary
