@@ -4,6 +4,54 @@ import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
 
+type SizeBasis = "building_area_total" | "lot_size";
+type ComparablePurpose = "listing" | "rental" | "flip" | "scrape" | "generic";
+type PropertyTypeFamily =
+  | "detached"
+  | "condo"
+  | "townhome"
+  | "manufactured"
+  | "multifamily"
+  | "new_home_community"
+  | "other";
+
+type ScoreWeights = {
+  distance: number;
+  recency: number;
+  size: number;
+  lotSize: number;
+  year: number;
+  beds: number;
+  baths: number;
+  form: number;
+  level: number;
+  condition: number;
+};
+
+type ScoreComponent = {
+  used: boolean;
+  score: number | null;
+  missingDefault?: number;
+};
+
+type ComparableMode = {
+  purpose: ComparablePurpose;
+  subjectFamily: PropertyTypeFamily;
+  sizeBasis: SizeBasis;
+  useSqftMetric: boolean;
+  useLotSizeMetric: boolean;
+  useYearMetric: boolean;
+  useBedMetric: boolean;
+  useBathMetric: boolean;
+  useBuildingFormMetric: boolean;
+  useLevelMetric: boolean;
+  useConditionMetric: boolean;
+  requireSamePropertyType: boolean;
+  requireSameBuildingForm: boolean;
+  requireSameLevelClass: boolean;
+  weights: ScoreWeights;
+};
+
 export type RunComparableSearchInput = {
   analysisId: string;
   subjectRealPropertyId: string;
@@ -19,6 +67,9 @@ export type RunComparableSearchInput = {
     maxCandidates: number | null;
     requireSamePropertyType: boolean;
     requireSameLevelClass: boolean;
+    lotSizeTolerancePct?: number | null;
+    requireSameBuildingForm?: boolean | null;
+    sizeBasis?: SizeBasis | null;
   };
 };
 
@@ -26,17 +77,31 @@ type ComparableSearchRules = {
   maxDistanceMiles: number;
   maxDaysSinceClose: number;
   sqftTolerancePct: number;
+  lotSizeTolerancePct: number;
   yearToleranceYears: number;
   bedTolerance: number;
   bathTolerance: number;
   maxCandidates: number;
   requireSamePropertyType: boolean;
   requireSameLevelClass: boolean;
+  requireSameBuildingForm: boolean;
+  preferredSizeBasis: SizeBasis | null;
 };
 
 const comparablesDebugEnabled =
   process.env.COMPARABLES_DEBUG === "1" ||
   process.env.COMPARABLES_DEBUG === "true";
+
+function normalizeText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizedKey(value: unknown): string | null {
+  const normalized = normalizeText(value);
+  return normalized ? normalized.toLowerCase() : null;
+}
 
 function toNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -57,11 +122,31 @@ function toBoolean(value: unknown): boolean | null {
   return null;
 }
 
+function parseSizeBasis(value: unknown): SizeBasis | null {
+  const normalized = normalizedKey(value);
+  if (normalized === "building_area_total") return "building_area_total";
+  if (normalized === "lot_size") return "lot_size";
+  return null;
+}
+
 function firstNonNull<T>(...values: Array<T | null | undefined>): T | null {
   for (const value of values) {
     if (value !== null && value !== undefined) return value;
   }
   return null;
+}
+
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function roundNumber(value: number, digits = 4) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function toIntegerOrNull(value: number | null) {
+  return value === null ? null : Math.round(value);
 }
 
 function mergeRules(
@@ -75,6 +160,9 @@ function mergeRules(
     365;
   const defaultSqftTolerance =
     toNumber(defaults?.sqftTolerancePct ?? defaults?.sqft_tolerance_pct) ?? 20;
+  const defaultLotSizeTolerance =
+    toNumber(defaults?.lotSizeTolerancePct ?? defaults?.lot_size_tolerance_pct) ??
+    defaultSqftTolerance;
   const defaultYearTolerance =
     toNumber(defaults?.yearToleranceYears ?? defaults?.year_tolerance_years) ??
     25;
@@ -92,11 +180,21 @@ function mergeRules(
     toBoolean(
       defaults?.requireSameLevelClass ?? defaults?.require_same_level_class,
     ) ?? true;
+  const defaultRequireSameBuildingForm =
+    toBoolean(
+      defaults?.requireSameBuildingForm ??
+        defaults?.require_same_building_form,
+    ) ?? true;
+  const defaultPreferredSizeBasis = parseSizeBasis(
+    defaults?.sizeBasis ?? defaults?.size_basis,
+  );
 
   return {
     maxDistanceMiles: overrides.maxDistanceMiles ?? defaultMaxDistance,
     maxDaysSinceClose: overrides.maxDaysSinceClose ?? defaultMaxDays,
     sqftTolerancePct: overrides.sqftTolerancePct ?? defaultSqftTolerance,
+    lotSizeTolerancePct:
+      overrides.lotSizeTolerancePct ?? defaultLotSizeTolerance,
     yearToleranceYears: overrides.yearToleranceYears ?? defaultYearTolerance,
     bedTolerance: overrides.bedTolerance ?? defaultBedTolerance,
     bathTolerance: overrides.bathTolerance ?? defaultBathTolerance,
@@ -105,6 +203,193 @@ function mergeRules(
       overrides.requireSamePropertyType ?? defaultRequireSamePropertyType,
     requireSameLevelClass:
       overrides.requireSameLevelClass ?? defaultRequireSameLevelClass,
+    requireSameBuildingForm:
+      overrides.requireSameBuildingForm ?? defaultRequireSameBuildingForm,
+    preferredSizeBasis:
+      overrides.sizeBasis ?? defaultPreferredSizeBasis ?? null,
+  };
+}
+
+function resolveComparablePurpose(input: {
+  slug?: unknown;
+  name?: unknown;
+  purpose?: unknown;
+}): ComparablePurpose {
+  const haystack = [
+    normalizeText(input.slug),
+    normalizeText(input.name),
+    normalizeText(input.purpose),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (
+    haystack.includes("scrape") ||
+    haystack.includes("new build") ||
+    haystack.includes("new_build") ||
+    haystack.includes("new construction") ||
+    haystack.includes("land")
+  ) {
+    return "scrape";
+  }
+
+  if (haystack.includes("rental") || haystack.includes("rent")) {
+    return "rental";
+  }
+
+  if (haystack.includes("flip") || haystack.includes("arv")) {
+    return "flip";
+  }
+
+  if (haystack.includes("listing") || haystack.includes("list")) {
+    return "listing";
+  }
+
+  return "generic";
+}
+
+function resolvePropertyTypeFamily(value: string | null): PropertyTypeFamily {
+  const normalized = normalizedKey(value);
+
+  switch (normalized) {
+    case "detached":
+      return "detached";
+    case "condo":
+      return "condo";
+    case "townhome":
+      return "townhome";
+    case "manufactured":
+      return "manufactured";
+    case "multi-family":
+      return "multifamily";
+    case "new home community":
+      return "new_home_community";
+    default:
+      return "other";
+  }
+}
+
+function resolveComparableMode(input: {
+  purpose: ComparablePurpose;
+  subjectFamily: PropertyTypeFamily;
+  rules: ComparableSearchRules;
+}): ComparableMode {
+  const { purpose, subjectFamily, rules } = input;
+
+  const isCondo = subjectFamily === "condo";
+  const isTownhome = subjectFamily === "townhome";
+  const isAttachedLike = isCondo || isTownhome;
+  const isScrape = purpose === "scrape";
+
+  const sizeBasis =
+    rules.preferredSizeBasis ??
+    (isScrape ? "lot_size" : "building_area_total");
+
+  const useBuildingFormMetric =
+    !isScrape &&
+    (subjectFamily === "condo" ||
+      subjectFamily === "townhome" ||
+      subjectFamily === "multifamily");
+
+  const useLevelMetric = !isScrape && !isAttachedLike;
+  const useLotSizeMetric = !isCondo;
+  const useConditionMetric = !isScrape;
+
+  if (purpose === "scrape") {
+    return {
+      purpose,
+      subjectFamily,
+      sizeBasis,
+      useSqftMetric: false,
+      useLotSizeMetric,
+      useYearMetric: false,
+      useBedMetric: false,
+      useBathMetric: false,
+      useBuildingFormMetric: false,
+      useLevelMetric: false,
+      useConditionMetric: false,
+      requireSamePropertyType: false,
+      requireSameBuildingForm: false,
+      requireSameLevelClass: false,
+      weights: {
+        distance: 0.35,
+        recency: 0.25,
+        size: 0,
+        lotSize: useLotSizeMetric ? 0.4 : 0,
+        year: 0,
+        beds: 0,
+        baths: 0,
+        form: 0,
+        level: 0,
+        condition: 0,
+      },
+    };
+  }
+
+  if (purpose === "flip") {
+    return {
+      purpose,
+      subjectFamily,
+      sizeBasis,
+      useSqftMetric: true,
+      useLotSizeMetric,
+      useYearMetric: true,
+      useBedMetric: true,
+      useBathMetric: true,
+      useBuildingFormMetric,
+      useLevelMetric,
+      useConditionMetric,
+      requireSamePropertyType: rules.requireSamePropertyType,
+      requireSameBuildingForm:
+        useBuildingFormMetric && rules.requireSameBuildingForm,
+      requireSameLevelClass: useLevelMetric && rules.requireSameLevelClass,
+      weights: {
+        distance: 0.24,
+        recency: 0.18,
+        size: 0.24,
+        lotSize: useLotSizeMetric ? 0.08 : 0,
+        year: 0.1,
+        beds: 0.06,
+        baths: 0.06,
+        form: useBuildingFormMetric ? 0.12 : 0,
+        level: useLevelMetric ? 0.12 : 0,
+        condition: useConditionMetric ? 0.06 : 0,
+      },
+    };
+  }
+
+  const listingLikePurpose: ComparablePurpose =
+    purpose === "rental" ? "rental" : purpose === "listing" ? "listing" : "generic";
+
+  return {
+    purpose: listingLikePurpose,
+    subjectFamily,
+    sizeBasis,
+    useSqftMetric: true,
+    useLotSizeMetric,
+    useYearMetric: true,
+    useBedMetric: true,
+    useBathMetric: true,
+    useBuildingFormMetric,
+    useLevelMetric,
+    useConditionMetric,
+    requireSamePropertyType: rules.requireSamePropertyType,
+    requireSameBuildingForm:
+      useBuildingFormMetric && rules.requireSameBuildingForm,
+    requireSameLevelClass: useLevelMetric && rules.requireSameLevelClass,
+    weights: {
+      distance: 0.22,
+      recency: purpose === "rental" ? 0.14 : 0.16,
+      size: 0.22,
+      lotSize: useLotSizeMetric ? 0.06 : 0,
+      year: 0.1,
+      beds: 0.1,
+      baths: 0.1,
+      form: useBuildingFormMetric ? 0.12 : 0,
+      level: useLevelMetric ? 0.12 : 0,
+      condition: useConditionMetric ? 0.1 : 0,
+    },
   };
 }
 
@@ -151,9 +436,7 @@ function daysBetween(fromDate: string, toDate: Date): number | null {
     toDate.getUTCDate(),
   );
 
-  return Math.floor(
-    (toUtcMidnight - fromUtcMidnight) / (1000 * 60 * 60 * 24),
-  );
+  return Math.floor((toUtcMidnight - fromUtcMidnight) / 86400000);
 }
 
 function pctDelta(subject: number, candidate: number) {
@@ -161,54 +444,155 @@ function pctDelta(subject: number, candidate: number) {
   return (Math.abs(candidate - subject) / subject) * 100;
 }
 
-function computeRawScore(input: {
-  distanceMiles: number;
-  maxDistanceMiles: number;
-  daysSinceClose: number;
-  maxDaysSinceClose: number;
-  sqftDeltaPct: number | null;
-  sqftTolerancePct: number;
-  yearDelta: number | null;
-  yearToleranceYears: number;
-  bedDelta: number | null;
-  bedTolerance: number;
-  bathDelta: number | null;
-  bathTolerance: number;
+function componentScoreFromDelta(
+  delta: number | null,
+  tolerance: number,
+): number | null {
+  if (delta === null) return null;
+  if (tolerance <= 0) return delta === 0 ? 1 : 0;
+  return clamp01(1 - delta / tolerance);
+}
+
+function computeFormMatchScore(
+  subjectForm: string | null,
+  candidateForm: string | null,
+): number | null {
+  const subject = normalizedKey(subjectForm);
+  const candidate = normalizedKey(candidateForm);
+
+  if (!subject && !candidate) return null;
+  if (!subject || !candidate) return 0.45;
+  return subject === candidate ? 1 : 0;
+}
+
+function computeLevelMatchScore(input: {
+  subjectLevelClass: string | null;
+  candidateLevelClass: string | null;
+  subjectLevelsRaw: string | null;
+  candidateLevelsRaw: string | null;
+}): number | null {
+  const subjectRaw = normalizedKey(input.subjectLevelsRaw);
+  const candidateRaw = normalizedKey(input.candidateLevelsRaw);
+  const subjectClass = normalizedKey(input.subjectLevelClass);
+  const candidateClass = normalizedKey(input.candidateLevelClass);
+
+  if (!subjectRaw && !candidateRaw && !subjectClass && !candidateClass) {
+    return null;
+  }
+
+  if (subjectRaw && candidateRaw && subjectRaw === candidateRaw) {
+    return 1;
+  }
+
+  if (subjectClass && candidateClass) {
+    return subjectClass === candidateClass ? 0.85 : 0;
+  }
+
+  if (!subjectClass || !candidateClass) {
+    return 0.45;
+  }
+
+  return 0;
+}
+
+function computeConditionMatchScore(
+  subjectCondition: string | null,
+  candidateCondition: string | null,
+): number | null {
+  const subject = normalizedKey(subjectCondition);
+  const candidate = normalizedKey(candidateCondition);
+
+  if (!subject && !candidate) return null;
+  if (!subject || !candidate) return 0.45;
+  return subject === candidate ? 1 : 0.3;
+}
+
+function sizeSqftFromPhysical(physical: {
+  building_area_total_sqft?: unknown;
+  above_grade_finished_area_sqft?: unknown;
 }) {
-  const distanceComponent =
-    1 - Math.min(input.distanceMiles / input.maxDistanceMiles, 1);
-  const recencyComponent =
-    1 - Math.min(input.daysSinceClose / input.maxDaysSinceClose, 1);
+  return firstNonNull(
+    toNumber(physical.building_area_total_sqft),
+    toNumber(physical.above_grade_finished_area_sqft),
+  );
+}
 
-  const sqftComponent =
-    input.sqftDeltaPct === null
-      ? 0.4
-      : 1 - Math.min(input.sqftDeltaPct / input.sqftTolerancePct, 1);
+function lotSizeSqftFromProperty(input: {
+  lot_size_sqft?: unknown;
+  lot_size_acres?: unknown;
+}) {
+  const sqft = toNumber(input.lot_size_sqft);
+  if (sqft !== null) return sqft;
 
-  const yearComponent =
-    input.yearDelta === null
-      ? 0.4
-      : 1 - Math.min(input.yearDelta / input.yearToleranceYears, 1);
+  const acres = toNumber(input.lot_size_acres);
+  return acres !== null ? acres * 43560 : null;
+}
 
-  const bedComponent =
-    input.bedDelta === null
-      ? 0.4
-      : 1 - Math.min(input.bedDelta / Math.max(input.bedTolerance, 1), 1);
+function buildWeightedScore(input: {
+  weights: ScoreWeights;
+  components: Record<keyof ScoreWeights, ScoreComponent>;
+}) {
+  let totalWeight = 0;
+  let weightedScoreTotal = 0;
 
-  const bathComponent =
-    input.bathDelta === null
-      ? 0.4
-      : 1 - Math.min(input.bathDelta / Math.max(input.bathTolerance, 0.5), 1);
+  const breakdown: Record<
+    keyof ScoreWeights,
+    {
+      used: boolean;
+      weight: number;
+      score: number | null;
+      rawScore: number | null;
+    }
+  > = {
+    distance: { used: false, weight: 0, score: null, rawScore: null },
+    recency: { used: false, weight: 0, score: null, rawScore: null },
+    size: { used: false, weight: 0, score: null, rawScore: null },
+    lotSize: { used: false, weight: 0, score: null, rawScore: null },
+    year: { used: false, weight: 0, score: null, rawScore: null },
+    beds: { used: false, weight: 0, score: null, rawScore: null },
+    baths: { used: false, weight: 0, score: null, rawScore: null },
+    form: { used: false, weight: 0, score: null, rawScore: null },
+    level: { used: false, weight: 0, score: null, rawScore: null },
+    condition: { used: false, weight: 0, score: null, rawScore: null },
+  };
 
-  const weighted =
-    distanceComponent * 0.28 +
-    recencyComponent * 0.22 +
-    sqftComponent * 0.22 +
-    yearComponent * 0.12 +
-    bedComponent * 0.08 +
-    bathComponent * 0.08;
+  (Object.keys(input.weights) as Array<keyof ScoreWeights>).forEach((key) => {
+    const weight = input.weights[key];
+    const component = input.components[key];
+    const used = component.used && weight > 0;
 
-  return Math.max(0, Math.min(100, weighted * 100));
+    if (!used) {
+      breakdown[key] = {
+        used: false,
+        weight: roundNumber(weight),
+        score: null,
+        rawScore: component.score === null ? null : roundNumber(component.score * 100, 2),
+      };
+      return;
+    }
+
+    const resolvedScore = component.score ?? component.missingDefault ?? 0.5;
+
+    totalWeight += weight;
+    weightedScoreTotal += resolvedScore * weight;
+
+    breakdown[key] = {
+      used: true,
+      weight: roundNumber(weight),
+      score: roundNumber(resolvedScore * 100, 2),
+      rawScore:
+        component.score === null ? null : roundNumber(component.score * 100, 2),
+    };
+  });
+
+  return {
+    rawScore:
+      totalWeight === 0
+        ? 0
+        : roundNumber(clamp01(weightedScoreTotal / totalWeight) * 100, 4),
+    totalWeight: roundNumber(totalWeight),
+    breakdown,
+  };
 }
 
 async function fetchRealPropertiesByIds(
@@ -234,7 +618,9 @@ async function fetchRealPropertiesByIds(
         state,
         postal_code,
         latitude,
-        longitude
+        longitude,
+        lot_size_sqft,
+        lot_size_acres
       `,
       )
       .in("id", chunk);
@@ -265,8 +651,12 @@ async function fetchPhysicalByPropertyIds(
         real_property_id,
         property_type,
         property_sub_type,
+        structure_type,
+        levels_raw,
         level_class_standardized,
+        building_form_standardized,
         above_grade_finished_area_sqft,
+        below_grade_total_sqft,
         building_area_total_sqft,
         year_built,
         bedrooms_total,
@@ -361,21 +751,6 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
     input.overrides,
   );
 
-  if (comparablesDebugEnabled) {
-    console.log(
-      "[comp-pull] merged rules",
-      JSON.stringify(
-        {
-          analysisId: input.analysisId,
-          profileSlug: input.profileSlug,
-          rules: mergedRules,
-        },
-        null,
-        2,
-      ),
-    );
-  }
-
   const [
     { data: subjectListing, error: subjectListingError },
     { data: subjectProperty, error: subjectPropertyError },
@@ -388,7 +763,8 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           id,
           listing_id,
           source_system,
-          real_property_id
+          real_property_id,
+          property_condition_source
         `,
       )
       .eq("id", input.subjectListingRowId)
@@ -404,7 +780,9 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           state,
           postal_code,
           latitude,
-          longitude
+          longitude,
+          lot_size_sqft,
+          lot_size_acres
         `,
       )
       .eq("id", input.subjectRealPropertyId)
@@ -416,8 +794,13 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
         `
           real_property_id,
           property_type,
+          property_sub_type,
+          structure_type,
+          levels_raw,
           level_class_standardized,
+          building_form_standardized,
           above_grade_finished_area_sqft,
+          below_grade_total_sqft,
           building_area_total_sqft,
           year_built,
           bedrooms_total,
@@ -436,6 +819,11 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
     throw new Error("Subject property is missing required imported facts.");
   }
 
+  const sourceSystem = normalizeText(subjectListing.source_system);
+  if (!sourceSystem) {
+    throw new Error("Subject listing is missing source_system.");
+  }
+
   const subjectLat = toNumber(subjectProperty.latitude);
   const subjectLon = toNumber(subjectProperty.longitude);
 
@@ -443,18 +831,113 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
     throw new Error("Subject property is missing latitude/longitude.");
   }
 
-  const subjectSqft = firstNonNull(
-    toNumber(subjectPhysical.above_grade_finished_area_sqft),
-    toNumber(subjectPhysical.building_area_total_sqft),
+  const subjectPropertyType = normalizeText(subjectPhysical.property_type);
+  const subjectPropertyTypeFamily = resolvePropertyTypeFamily(subjectPropertyType);
+  const resolvedPurpose = resolveComparablePurpose({
+    slug: profile.slug,
+    name: profile.name,
+    purpose: profile.purpose,
+  });
+  const mode = resolveComparableMode({
+    purpose: resolvedPurpose,
+    subjectFamily: subjectPropertyTypeFamily,
+    rules: mergedRules,
+  });
+
+  const subjectSqft = sizeSqftFromPhysical(subjectPhysical);
+  const subjectBuildingAreaTotalSqft = toNumber(
+    subjectPhysical.building_area_total_sqft,
   );
+  const subjectAboveGradeFinishedSqft = toNumber(
+    subjectPhysical.above_grade_finished_area_sqft,
+  );
+  const subjectBelowGradeTotalSqft = toNumber(
+    subjectPhysical.below_grade_total_sqft,
+  );
+  const subjectLotSizeSqft = lotSizeSqftFromProperty(subjectProperty);
 
-  const latDelta = mergedRules.maxDistanceMiles / 69;
-  const lonDelta =
-    mergedRules.maxDistanceMiles /
-    Math.max(1, 69 * Math.cos((subjectLat * Math.PI) / 180));
+  const subjectYearBuilt = toNumber(subjectPhysical.year_built);
+  const subjectBeds = toNumber(subjectPhysical.bedrooms_total);
+  const subjectBaths = toNumber(subjectPhysical.bathrooms_total);
+  const subjectCondition = normalizeText(subjectListing.property_condition_source);
+  const subjectBuildingForm = normalizeText(
+    subjectPhysical.building_form_standardized,
+  );
+  const subjectStructureType = normalizeText(subjectPhysical.structure_type);
+  const subjectLevelClass = normalizeText(
+    subjectPhysical.level_class_standardized,
+  );
+  const subjectLevelsRaw = normalizeText(subjectPhysical.levels_raw);
 
-  const { data: candidatePropertyShells, error: candidatePropertyShellsError } =
-    await supabase
+  const initialSummary = {
+    sourceSystem,
+    subjectListingId: subjectListing.listing_id,
+    subjectPropertyType,
+    subjectPropertyTypeFamily,
+    subjectBuildingForm,
+    subjectStructureType,
+    subjectLevelClass,
+    subjectLevelsRaw,
+    purposeMode: resolvedPurpose,
+    sizeBasis: mode.sizeBasis,
+  };
+
+  const { data: insertedRun, error: insertedRunError } = await supabase
+    .from("comparable_search_runs")
+    .insert({
+      analysis_id: input.analysisId,
+      subject_real_property_id: input.subjectRealPropertyId,
+      subject_listing_row_id: input.subjectListingRowId,
+      comparable_profile_id: profile.id,
+      purpose: profile.purpose ?? "arv",
+      status: "pending",
+      parameters_json: mergedRules,
+      summary_json: initialSummary,
+    })
+    .select("id")
+    .single();
+
+  if (insertedRunError || !insertedRun) {
+    throw new Error(
+      insertedRunError?.message ?? "Failed to save comparable search run.",
+    );
+  }
+
+  try {
+    if (comparablesDebugEnabled) {
+      console.log(
+        "[comp-pull] merged rules",
+        JSON.stringify(
+          {
+            analysisId: input.analysisId,
+            profileSlug: input.profileSlug,
+            rules: mergedRules,
+            mode,
+            subject: {
+              subjectPropertyType,
+              subjectPropertyTypeFamily,
+              subjectBuildingForm,
+              subjectLevelClass,
+              subjectLevelsRaw,
+              subjectSqft,
+              subjectLotSizeSqft,
+            },
+          },
+          null,
+          2,
+        ),
+      );
+    }
+
+    const latDelta = mergedRules.maxDistanceMiles / 69;
+    const lonDelta =
+      mergedRules.maxDistanceMiles /
+      Math.max(1, 69 * Math.cos((subjectLat * Math.PI) / 180));
+
+    const {
+      data: candidatePropertyShells,
+      error: candidatePropertyShellsError,
+    } = await supabase
       .from("real_properties")
       .select(
         `
@@ -468,238 +951,374 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
       .gte("longitude", subjectLon - lonDelta)
       .lte("longitude", subjectLon + lonDelta);
 
-  if (candidatePropertyShellsError) {
-    throw new Error(candidatePropertyShellsError.message);
-  }
+    if (candidatePropertyShellsError) {
+      throw new Error(candidatePropertyShellsError.message);
+    }
 
-  const candidatePropertyIds = Array.from(
-    new Set(
-      (candidatePropertyShells ?? [])
-        .map((row) => row.id)
-        .filter((value): value is string => Boolean(value)),
-    ),
-  );
-
-  const earliestCloseDate = new Date(
-    Date.now() - mergedRules.maxDaysSinceClose * 24 * 60 * 60 * 1000,
-  )
-    .toISOString()
-    .slice(0, 10);
-
-  const [candidateProperties, candidatePhysicals, candidateListings] =
-    await Promise.all([
-      fetchRealPropertiesByIds(supabase, candidatePropertyIds),
-      fetchPhysicalByPropertyIds(supabase, candidatePropertyIds),
-      fetchCandidateListingsByPropertyIds(supabase, {
-        propertyIds: candidatePropertyIds,
-        sourceSystem: subjectListing.source_system,
-        subjectRealPropertyId: input.subjectRealPropertyId,
-        earliestCloseDate,
-      }),
-    ]);
-
-  const propertyMap = new Map(candidateProperties.map((row) => [row.id, row]));
-  const physicalMap = new Map(
-    candidatePhysicals.map((row) => [row.real_property_id, row]),
-  );
-
-  const now = new Date();
-
-  const rankedCandidates = candidateListings
-    .map((listing) => {
-      const property = propertyMap.get(listing.real_property_id);
-      const physical = physicalMap.get(listing.real_property_id);
-
-      if (!property || !physical) return null;
-
-      const candidateLat = toNumber(property.latitude);
-      const candidateLon = toNumber(property.longitude);
-      if (candidateLat === null || candidateLon === null) return null;
-
-      const distanceMiles = haversineMiles(
-        subjectLat,
-        subjectLon,
-        candidateLat,
-        candidateLon,
-      );
-      if (distanceMiles > mergedRules.maxDistanceMiles) return null;
-
-      const daysSinceClose = listing.close_date
-        ? daysBetween(listing.close_date, now)
-        : null;
-
-      if (
-        daysSinceClose === null ||
-        daysSinceClose < 0 ||
-        daysSinceClose > mergedRules.maxDaysSinceClose
-      ) {
-        return null;
-      }
-
-      const candidatePropertyType =
-        typeof physical.property_type === "string"
-          ? physical.property_type
-          : null;
-      const subjectPropertyType =
-        typeof subjectPhysical.property_type === "string"
-          ? subjectPhysical.property_type
-          : null;
-
-      if (
-        mergedRules.requireSamePropertyType &&
-        subjectPropertyType &&
-        candidatePropertyType &&
-        candidatePropertyType !== subjectPropertyType
-      ) {
-        return null;
-      }
-
-      const candidateLevelClass =
-        typeof physical.level_class_standardized === "string"
-          ? physical.level_class_standardized
-          : null;
-      const subjectLevelClass =
-        typeof subjectPhysical.level_class_standardized === "string"
-          ? subjectPhysical.level_class_standardized
-          : null;
-
-      if (
-        mergedRules.requireSameLevelClass &&
-        subjectLevelClass &&
-        candidateLevelClass &&
-        candidateLevelClass !== subjectLevelClass
-      ) {
-        return null;
-      }
-
-      const candidateSqft = firstNonNull(
-        toNumber(physical.above_grade_finished_area_sqft),
-        toNumber(physical.building_area_total_sqft),
-      );
-
-      const sqftDeltaPct =
-        subjectSqft !== null && candidateSqft !== null
-          ? pctDelta(subjectSqft, candidateSqft)
-          : null;
-
-      if (
-        sqftDeltaPct !== null &&
-        sqftDeltaPct > mergedRules.sqftTolerancePct
-      ) {
-        return null;
-      }
-
-      const subjectYearBuilt = toNumber(subjectPhysical.year_built);
-      const candidateYearBuilt = toNumber(physical.year_built);
-      const yearDelta =
-        subjectYearBuilt !== null && candidateYearBuilt !== null
-          ? Math.abs(candidateYearBuilt - subjectYearBuilt)
-          : null;
-
-      if (yearDelta !== null && yearDelta > mergedRules.yearToleranceYears) {
-        return null;
-      }
-
-      const subjectBeds = toNumber(subjectPhysical.bedrooms_total);
-      const candidateBeds = toNumber(physical.bedrooms_total);
-      const bedDelta =
-        subjectBeds !== null && candidateBeds !== null
-          ? Math.abs(candidateBeds - subjectBeds)
-          : null;
-
-      if (bedDelta !== null && bedDelta > mergedRules.bedTolerance) {
-        return null;
-      }
-
-      const subjectBaths = toNumber(subjectPhysical.bathrooms_total);
-      const candidateBaths = toNumber(physical.bathrooms_total);
-      const bathDelta =
-        subjectBaths !== null && candidateBaths !== null
-          ? Math.abs(candidateBaths - subjectBaths)
-          : null;
-
-      if (bathDelta !== null && bathDelta > mergedRules.bathTolerance) {
-        return null;
-      }
-
-      const closePrice = toNumber(listing.close_price);
-      const ppsf =
-        closePrice !== null && candidateSqft !== null && candidateSqft > 0
-          ? closePrice / candidateSqft
-          : null;
-
-      const rawScore = computeRawScore({
-        distanceMiles,
-        maxDistanceMiles: mergedRules.maxDistanceMiles,
-        daysSinceClose,
-        maxDaysSinceClose: mergedRules.maxDaysSinceClose,
-        sqftDeltaPct,
-        sqftTolerancePct: mergedRules.sqftTolerancePct,
-        yearDelta,
-        yearToleranceYears: mergedRules.yearToleranceYears,
-        bedDelta,
-        bedTolerance: mergedRules.bedTolerance,
-        bathDelta,
-        bathTolerance: mergedRules.bathTolerance,
-      });
-
-      return {
-        comp_listing_row_id: listing.id,
-        comp_real_property_id: listing.real_property_id,
-        distance_miles: distanceMiles,
-        days_since_close: daysSinceClose,
-        sqft_delta_pct: sqftDeltaPct,
-        raw_score: rawScore,
-        selected_yn: false,
-        metrics_json: {
-          listing_id: listing.listing_id,
-          address: property.unparsed_address,
-          close_date: listing.close_date,
-          close_price: closePrice,
-          ppsf,
-          above_grade_finished_area_sqft: candidateSqft,
-          bedrooms_total: candidateBeds,
-          bathrooms_total: candidateBaths,
-          year_built: candidateYearBuilt,
-          property_type: candidatePropertyType,
-          level_class_standardized: candidateLevelClass,
-          city: property.city,
-          state: property.state,
-          postal_code: property.postal_code,
-          property_condition_source: listing.property_condition_source,
-        },
-      };
-    })
-    .filter((row): row is NonNullable<typeof row> => Boolean(row))
-    .sort((a, b) => (b.raw_score ?? 0) - (a.raw_score ?? 0))
-    .slice(0, mergedRules.maxCandidates);
-
-  const { data: insertedRun, error: insertedRunError } = await supabase
-    .from("comparable_search_runs")
-    .insert({
-      analysis_id: input.analysisId,
-      subject_real_property_id: input.subjectRealPropertyId,
-      subject_listing_row_id: input.subjectListingRowId,
-      comparable_profile_id: profile.id,
-      purpose: profile.purpose ?? "arv",
-      status: "complete",
-      parameters_json: mergedRules,
-      summary_json: {
-        candidateCount: rankedCandidates.length,
-        sourceSystem: subjectListing.source_system,
-        subjectListingId: subjectListing.listing_id,
-      },
-    })
-    .select("id")
-    .single();
-
-  if (insertedRunError || !insertedRun) {
-    throw new Error(
-      insertedRunError?.message ?? "Failed to save comparable search run.",
+    const candidatePropertyIds = Array.from(
+      new Set(
+        (candidatePropertyShells ?? [])
+          .map((row) => row.id)
+          .filter((value): value is string => Boolean(value)),
+      ),
     );
-  }
 
-  if (rankedCandidates.length > 0) {
+    const earliestCloseDate = new Date(
+      Date.now() - mergedRules.maxDaysSinceClose * 86400000,
+    )
+      .toISOString()
+      .slice(0, 10);
+
+    const [candidateProperties, candidatePhysicals, candidateListings] =
+      await Promise.all([
+        fetchRealPropertiesByIds(supabase, candidatePropertyIds),
+        fetchPhysicalByPropertyIds(supabase, candidatePropertyIds),
+        fetchCandidateListingsByPropertyIds(supabase, {
+          propertyIds: candidatePropertyIds,
+          sourceSystem,
+          subjectRealPropertyId: input.subjectRealPropertyId,
+          earliestCloseDate,
+        }),
+      ]);
+
+    const propertyMap = new Map(candidateProperties.map((row) => [row.id, row]));
+    const physicalMap = new Map(
+      candidatePhysicals.map((row) => [row.real_property_id, row]),
+    );
+
+    const now = new Date();
+
+    const rankedCandidates = candidateListings
+      .map((listing) => {
+        const property = propertyMap.get(listing.real_property_id);
+        const physical = physicalMap.get(listing.real_property_id);
+
+        if (!property || !physical) return null;
+
+        const candidateLat = toNumber(property.latitude);
+        const candidateLon = toNumber(property.longitude);
+        if (candidateLat === null || candidateLon === null) return null;
+
+        const distanceMiles = haversineMiles(
+          subjectLat,
+          subjectLon,
+          candidateLat,
+          candidateLon,
+        );
+        if (distanceMiles > mergedRules.maxDistanceMiles) return null;
+
+        const daysSinceClose = listing.close_date
+          ? daysBetween(listing.close_date, now)
+          : null;
+
+        if (
+          daysSinceClose === null ||
+          daysSinceClose < 0 ||
+          daysSinceClose > mergedRules.maxDaysSinceClose
+        ) {
+          return null;
+        }
+
+        const candidatePropertyType = normalizeText(physical.property_type);
+        if (
+          mode.requireSamePropertyType &&
+          subjectPropertyType &&
+          candidatePropertyType &&
+          normalizedKey(candidatePropertyType) !== normalizedKey(subjectPropertyType)
+        ) {
+          return null;
+        }
+
+        const candidateBuildingForm = normalizeText(
+          physical.building_form_standardized,
+        );
+        const formMatchScore01 = mode.useBuildingFormMetric
+          ? computeFormMatchScore(subjectBuildingForm, candidateBuildingForm)
+          : null;
+
+        if (
+          mode.requireSameBuildingForm &&
+          subjectBuildingForm &&
+          candidateBuildingForm &&
+          normalizedKey(candidateBuildingForm) !== normalizedKey(subjectBuildingForm)
+        ) {
+          return null;
+        }
+
+        const candidateLevelClass = normalizeText(
+          physical.level_class_standardized,
+        );
+        const candidateLevelsRaw = normalizeText(physical.levels_raw);
+        const levelMatchScore01 = mode.useLevelMetric
+          ? computeLevelMatchScore({
+              subjectLevelClass,
+              candidateLevelClass,
+              subjectLevelsRaw,
+              candidateLevelsRaw,
+            })
+          : null;
+
+        if (
+          mode.requireSameLevelClass &&
+          subjectLevelClass &&
+          candidateLevelClass &&
+          normalizedKey(candidateLevelClass) !== normalizedKey(subjectLevelClass)
+        ) {
+          return null;
+        }
+
+        const candidateBuildingAreaTotalSqft = toNumber(
+          physical.building_area_total_sqft,
+        );
+        const candidateAboveGradeFinishedSqft = toNumber(
+          physical.above_grade_finished_area_sqft,
+        );
+        const candidateBelowGradeTotalSqft = toNumber(
+          physical.below_grade_total_sqft,
+        );
+        const candidateSqft = sizeSqftFromPhysical(physical);
+
+        const sqftDeltaPct =
+          subjectSqft !== null && candidateSqft !== null
+            ? pctDelta(subjectSqft, candidateSqft)
+            : null;
+
+        if (
+          mode.useSqftMetric &&
+          sqftDeltaPct !== null &&
+          sqftDeltaPct > mergedRules.sqftTolerancePct
+        ) {
+          return null;
+        }
+
+        const candidateLotSizeSqft = lotSizeSqftFromProperty(property);
+        const lotSizeDeltaPct =
+          subjectLotSizeSqft !== null && candidateLotSizeSqft !== null
+            ? pctDelta(subjectLotSizeSqft, candidateLotSizeSqft)
+            : null;
+
+        if (
+          mode.sizeBasis === "lot_size" &&
+          mode.useLotSizeMetric &&
+          lotSizeDeltaPct !== null &&
+          lotSizeDeltaPct > mergedRules.lotSizeTolerancePct
+        ) {
+          return null;
+        }
+
+        const candidateYearBuilt = toNumber(physical.year_built);
+        const yearDelta =
+          mode.useYearMetric &&
+          subjectYearBuilt !== null &&
+          candidateYearBuilt !== null
+            ? Math.abs(candidateYearBuilt - subjectYearBuilt)
+            : null;
+
+        if (
+          mode.useYearMetric &&
+          yearDelta !== null &&
+          yearDelta > mergedRules.yearToleranceYears
+        ) {
+          return null;
+        }
+
+        const candidateBeds = toNumber(physical.bedrooms_total);
+        const bedDelta =
+          mode.useBedMetric && subjectBeds !== null && candidateBeds !== null
+            ? Math.abs(candidateBeds - subjectBeds)
+            : null;
+
+        if (
+          mode.useBedMetric &&
+          bedDelta !== null &&
+          bedDelta > mergedRules.bedTolerance
+        ) {
+          return null;
+        }
+
+        const candidateBaths = toNumber(physical.bathrooms_total);
+        const bathDelta =
+          mode.useBathMetric && subjectBaths !== null && candidateBaths !== null
+            ? Math.abs(candidateBaths - subjectBaths)
+            : null;
+
+        if (
+          mode.useBathMetric &&
+          bathDelta !== null &&
+          bathDelta > mergedRules.bathTolerance
+        ) {
+          return null;
+        }
+
+        const candidateCondition = normalizeText(listing.property_condition_source);
+        const conditionMatchScore01 = mode.useConditionMetric
+          ? computeConditionMatchScore(subjectCondition, candidateCondition)
+          : null;
+
+        const closePrice = toNumber(listing.close_price);
+        const ppsf =
+          closePrice !== null && candidateSqft !== null && candidateSqft > 0
+            ? closePrice / candidateSqft
+            : null;
+
+        const distanceComponent = clamp01(
+          1 - distanceMiles / Math.max(mergedRules.maxDistanceMiles, 0.0001),
+        );
+        const recencyComponent = clamp01(
+          1 - daysSinceClose / Math.max(mergedRules.maxDaysSinceClose, 1),
+        );
+
+        const scoreBreakdown = buildWeightedScore({
+          weights: mode.weights,
+          components: {
+            distance: {
+              used: true,
+              score: distanceComponent,
+              missingDefault: 0.5,
+            },
+            recency: {
+              used: true,
+              score: recencyComponent,
+              missingDefault: 0.5,
+            },
+            size: {
+              used: mode.useSqftMetric,
+              score: componentScoreFromDelta(
+                sqftDeltaPct,
+                mergedRules.sqftTolerancePct,
+              ),
+              missingDefault: 0.5,
+            },
+            lotSize: {
+              used: mode.useLotSizeMetric,
+              score: componentScoreFromDelta(
+                lotSizeDeltaPct,
+                mergedRules.lotSizeTolerancePct,
+              ),
+              missingDefault: 0.5,
+            },
+            year: {
+              used: mode.useYearMetric,
+              score: componentScoreFromDelta(
+                yearDelta,
+                mergedRules.yearToleranceYears,
+              ),
+              missingDefault: 0.5,
+            },
+            beds: {
+              used: mode.useBedMetric,
+              score: componentScoreFromDelta(
+                bedDelta,
+                Math.max(mergedRules.bedTolerance, 1),
+              ),
+              missingDefault: 0.5,
+            },
+            baths: {
+              used: mode.useBathMetric,
+              score: componentScoreFromDelta(
+                bathDelta,
+                Math.max(mergedRules.bathTolerance, 0.5),
+              ),
+              missingDefault: 0.5,
+            },
+            form: {
+              used: mode.useBuildingFormMetric,
+              score: formMatchScore01,
+              missingDefault: 0.5,
+            },
+            level: {
+              used: mode.useLevelMetric,
+              score: levelMatchScore01,
+              missingDefault: 0.5,
+            },
+            condition: {
+              used: mode.useConditionMetric,
+              score: conditionMatchScore01,
+              missingDefault: 0.5,
+            },
+          },
+        });
+
+        return {
+          comp_listing_row_id: listing.id,
+          comp_real_property_id: listing.real_property_id,
+          distance_miles: roundNumber(distanceMiles),
+          days_since_close: toIntegerOrNull(daysSinceClose),
+          sqft_delta_pct:
+            sqftDeltaPct === null ? null : roundNumber(sqftDeltaPct),
+          lot_size_delta_pct:
+            lotSizeDeltaPct === null ? null : roundNumber(lotSizeDeltaPct),
+          year_built_delta: toIntegerOrNull(yearDelta),
+          bed_delta: toIntegerOrNull(bedDelta),
+          bath_delta: bathDelta === null ? null : roundNumber(bathDelta),
+          form_match_score:
+            formMatchScore01 === null
+              ? null
+              : roundNumber(formMatchScore01 * 100, 2),
+          raw_score: scoreBreakdown.rawScore,
+          selected_yn: false,
+          score_breakdown_json: {
+            purposeMode: mode.purpose,
+            sizeBasis: mode.sizeBasis,
+            subjectPropertyType,
+            subjectPropertyTypeFamily,
+            totalWeight: scoreBreakdown.totalWeight,
+            components: scoreBreakdown.breakdown,
+          },
+          metrics_json: {
+            listing_id: listing.listing_id,
+            address: property.unparsed_address,
+            close_date: listing.close_date,
+            close_price: closePrice,
+            ppsf,
+            building_area_total_sqft: candidateBuildingAreaTotalSqft,
+            above_grade_finished_area_sqft: candidateAboveGradeFinishedSqft,
+            below_grade_total_sqft: candidateBelowGradeTotalSqft,
+            lot_size_sqft: candidateLotSizeSqft,
+            size_basis: mode.sizeBasis,
+            size_basis_value:
+              mode.sizeBasis === "lot_size" ? candidateLotSizeSqft : candidateSqft,
+            bedrooms_total: candidateBeds,
+            bathrooms_total: candidateBaths,
+            year_built: candidateYearBuilt,
+            property_type: candidatePropertyType,
+            property_sub_type: normalizeText(physical.property_sub_type),
+            structure_type: normalizeText(physical.structure_type),
+            building_form_standardized: candidateBuildingForm,
+            levels_raw: candidateLevelsRaw,
+            level_class_standardized: candidateLevelClass,
+            city: property.city,
+            state: property.state,
+            postal_code: property.postal_code,
+            property_condition_source: candidateCondition,
+            distance_miles: roundNumber(distanceMiles),
+            days_since_close: toIntegerOrNull(daysSinceClose),
+            sqft_delta_pct:
+              sqftDeltaPct === null ? null : roundNumber(sqftDeltaPct),
+            lot_size_delta_pct:
+              lotSizeDeltaPct === null ? null : roundNumber(lotSizeDeltaPct),
+            year_built_delta: toIntegerOrNull(yearDelta),
+            bed_delta: toIntegerOrNull(bedDelta),
+            bath_delta: bathDelta === null ? null : roundNumber(bathDelta),
+            form_match_score:
+              formMatchScore01 === null
+                ? null
+                : roundNumber(formMatchScore01 * 100, 2),
+            level_match_score:
+              levelMatchScore01 === null
+                ? null
+                : roundNumber(levelMatchScore01 * 100, 2),
+            condition_match_score:
+              conditionMatchScore01 === null
+                ? null
+                : roundNumber(conditionMatchScore01 * 100, 2),
+          },
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => Boolean(row))
+      .sort((a, b) => (b.raw_score ?? 0) - (a.raw_score ?? 0))
+      .slice(0, mergedRules.maxCandidates);
+
     const candidateRows = rankedCandidates.map((candidate) => ({
       comparable_search_run_id: insertedRun.id,
       comp_listing_row_id: candidate.comp_listing_row_id,
@@ -707,8 +1326,14 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
       distance_miles: candidate.distance_miles,
       days_since_close: candidate.days_since_close,
       sqft_delta_pct: candidate.sqft_delta_pct,
+      lot_size_delta_pct: candidate.lot_size_delta_pct,
+      year_built_delta: candidate.year_built_delta,
+      bed_delta: candidate.bed_delta,
+      bath_delta: candidate.bath_delta,
+      form_match_score: candidate.form_match_score,
       raw_score: candidate.raw_score,
       selected_yn: candidate.selected_yn,
+      score_breakdown_json: candidate.score_breakdown_json,
       metrics_json: candidate.metrics_json,
     }));
 
@@ -743,6 +1368,17 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
         issues.push(`days_since_close=${row.days_since_close}`);
       }
 
+      if (
+        row.year_built_delta !== null &&
+        !Number.isInteger(row.year_built_delta)
+      ) {
+        issues.push(`year_built_delta=${row.year_built_delta}`);
+      }
+
+      if (row.bed_delta !== null && !Number.isInteger(row.bed_delta)) {
+        issues.push(`bed_delta=${row.bed_delta}`);
+      }
+
       if (issues.length > 0) {
         invalidIntegerCandidateRows.push({ index, issues, row });
       }
@@ -762,32 +1398,90 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
       );
     }
 
-    const { error: candidateInsertError } = await supabase
-      .from("comparable_search_candidates")
-      .insert(candidateRows);
+    if (candidateRows.length > 0) {
+      const { error: candidateInsertError } = await supabase
+        .from("comparable_search_candidates")
+        .insert(candidateRows);
 
-    if (candidateInsertError) {
+      if (candidateInsertError) {
+        console.error(
+          "[comp-pull] candidate insert failed",
+          JSON.stringify(
+            {
+              analysisId: input.analysisId,
+              runId: insertedRun.id,
+              candidateCount: candidateRows.length,
+              preview: candidateRows.slice(0, 3),
+              error: candidateInsertError,
+            },
+            null,
+            2,
+          ),
+        );
+
+        throw new Error(candidateInsertError.message);
+      }
+    }
+
+    const completeSummary = {
+      ...initialSummary,
+      candidateCount: rankedCandidates.length,
+      effectiveRules: {
+        ...mergedRules,
+        sizeBasis: mode.sizeBasis,
+        requireSamePropertyType: mode.requireSamePropertyType,
+        requireSameBuildingForm: mode.requireSameBuildingForm,
+        requireSameLevelClass: mode.requireSameLevelClass,
+      },
+    };
+
+    const { error: completeRunError } = await supabase
+      .from("comparable_search_runs")
+      .update({
+        status: "complete",
+        summary_json: completeSummary,
+      })
+      .eq("id", insertedRun.id);
+
+    if (completeRunError) {
+      throw new Error(completeRunError.message);
+    }
+
+    return {
+      runId: insertedRun.id,
+      candidateCount: rankedCandidates.length,
+    };
+  } catch (error) {
+    const failureMessage =
+      error instanceof Error ? error.message : "Comparable search failed.";
+
+    const failedSummary = {
+      ...initialSummary,
+      errorMessage: failureMessage,
+    };
+
+    const { error: failedRunError } = await supabase
+      .from("comparable_search_runs")
+      .update({
+        status: "failed",
+        summary_json: failedSummary,
+      })
+      .eq("id", insertedRun.id);
+
+    if (failedRunError && comparablesDebugEnabled) {
       console.error(
-        "[comp-pull] candidate insert failed",
+        "[comp-pull] failed to mark run failed",
         JSON.stringify(
           {
-            analysisId: input.analysisId,
             runId: insertedRun.id,
-            candidateCount: candidateRows.length,
-            preview: candidateRows.slice(0, 3),
-            error: candidateInsertError,
+            failedRunError,
           },
           null,
           2,
         ),
       );
-
-      throw new Error(candidateInsertError.message);
     }
-  }
 
-  return {
-    runId: insertedRun.id,
-    candidateCount: rankedCandidates.length,
-  };
+    throw error;
+  }
 }

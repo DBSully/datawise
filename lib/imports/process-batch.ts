@@ -1,5 +1,3 @@
-// /lib/imports/process-batch.ts
-
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
@@ -454,12 +452,14 @@ export async function processImportBatch(
 
         const listingExisted = (existingListingRows?.length ?? 0) > 0;
 
-        const mlsListingPayload = toMlsListingPayload({
-          row,
-          realPropertyId,
-          batchId,
-          listingId,
-        });
+        const mlsListingPayload = nonNullEntries(
+          toMlsListingPayload({
+            row,
+            realPropertyId,
+            batchId,
+            listingId,
+          }),
+        );
 
         const { error: mlsListingError } = await supabase
           .from("mls_listings")
