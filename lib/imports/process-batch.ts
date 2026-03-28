@@ -122,11 +122,13 @@ function deriveBuildingFormStandardized(
   if (value.startsWith("townhouse")) return "townhouse_style";
   if (value.startsWith("patio/cluster")) return "patio_cluster";
   if (value.startsWith("duplex")) return "duplex";
+  if (value.startsWith("triplex")) return "triplex";
+  if (value.startsWith("quadruplex")) return "quadruplex";
+  if (value.startsWith("manufactured house")) return "manufactured_house";
   if (value.startsWith("house")) return "house";
 
   return null;
 }
-
 
 function toPropertyPhysicalPayload(row: RawImportRow) {
   const propertySubType = getText(row, "Property Sub Type");
@@ -417,14 +419,14 @@ export async function processImportBatch(
 
         result.physicalUpserts += 1;
 
-        const financialPayload = {
+        const financialPayload = nonNullEntries({
           real_property_id: realPropertyId,
           ...toPropertyFinancialsPayload(row, listingId),
-        };
+        });
 
         const hasFinancialValues =
-          financialPayload.annual_property_tax !== null ||
-          financialPayload.annual_hoa_dues !== null;
+          "annual_property_tax" in financialPayload ||
+          "annual_hoa_dues" in financialPayload;
 
         if (hasFinancialValues) {
           const { error: propertyFinancialError } = await supabase
