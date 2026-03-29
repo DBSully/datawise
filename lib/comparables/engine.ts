@@ -1,5 +1,3 @@
-// /lib/comparables/engine.ts
-
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
@@ -51,6 +49,8 @@ type ComparableMode = {
   requireSameLevelClass: boolean;
   weights: ScoreWeights;
 };
+
+type SnapshotDateSource = "listing_contract_date" | "current_date_fallback";
 
 export type RunComparableSearchInput = {
   analysisId: string;
@@ -149,6 +149,71 @@ function toIntegerOrNull(value: number | null) {
   return value === null ? null : Math.round(value);
 }
 
+function parseIsoDateToUtcDate(value: string | null): Date | null {
+  if (!value) return null;
+
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+
+  const [, year, month, day] = match;
+  const date = new Date(
+    Date.UTC(Number(year), Number(month) - 1, Number(day)),
+  );
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function currentUtcDateMidnight() {
+  const now = new Date();
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+}
+
+function addUtcDays(date: Date, days: number) {
+  return new Date(
+    Date.UTC(
+      date.getUTCFullYear(),
+      date.getUTCMonth(),
+      date.getUTCDate() + days,
+    ),
+  );
+}
+
+function isoDateFromUtcDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function resolveSnapshotDates(input: {
+  subjectListingContractDate: string | null;
+  maxDaysSinceClose: number;
+}) {
+  const contractDate = parseIsoDateToUtcDate(input.subjectListingContractDate);
+  const recencyWindowDays = Math.max(0, Math.round(input.maxDaysSinceClose));
+
+  const snapshotReferenceDate = contractDate ?? currentUtcDateMidnight();
+  const snapshotDateSource: SnapshotDateSource = contractDate
+    ? "listing_contract_date"
+    : "current_date_fallback";
+
+  const latestCloseDateExclusive = contractDate
+    ? snapshotReferenceDate
+    : addUtcDays(snapshotReferenceDate, 1);
+
+  const earliestCloseDate = addUtcDays(
+    snapshotReferenceDate,
+    -recencyWindowDays,
+  );
+
+  return {
+    snapshotReferenceDate,
+    snapshotDateSource,
+    snapshotReferenceDateIso: isoDateFromUtcDate(snapshotReferenceDate),
+    earliestCloseDateIso: isoDateFromUtcDate(earliestCloseDate),
+    latestCloseDateExclusiveIso: isoDateFromUtcDate(latestCloseDateExclusive),
+  };
+}
+
 function mergeRules(
   defaults: Record<string, unknown> | null | undefined,
   overrides: RunComparableSearchInput["overrides"],
@@ -161,8 +226,9 @@ function mergeRules(
   const defaultSqftTolerance =
     toNumber(defaults?.sqftTolerancePct ?? defaults?.sqft_tolerance_pct) ?? 20;
   const defaultLotSizeTolerance =
-    toNumber(defaults?.lotSizeTolerancePct ?? defaults?.lot_size_tolerance_pct) ??
-    defaultSqftTolerance;
+    toNumber(
+      defaults?.lotSizeTolerancePct ?? defaults?.lot_size_tolerance_pct,
+    ) ?? defaultSqftTolerance;
   const defaultYearTolerance =
     toNumber(defaults?.yearToleranceYears ?? defaults?.year_tolerance_years) ??
     25;
@@ -360,7 +426,11 @@ function resolveComparableMode(input: {
   }
 
   const listingLikePurpose: ComparablePurpose =
-    purpose === "rental" ? "rental" : purpose === "listing" ? "listing" : "generic";
+    purpose === "rental"
+      ? "rental"
+      : purpose === "listing"
+        ? "listing"
+        : "generic";
 
   return {
     purpose: listingLikePurpose,
@@ -566,7 +636,8 @@ function buildWeightedScore(input: {
         used: false,
         weight: roundNumber(weight),
         score: null,
-        rawScore: component.score === null ? null : roundNumber(component.score * 100, 2),
+        rawScore:
+          component.score === null ? null : roundNumber(component.score * 100, 2),
       };
       return;
     }
@@ -678,14 +749,16 @@ async function fetchCandidateListingsByPropertyIds(
     propertyIds: string[];
     sourceSystem: string;
     subjectRealPropertyId: string;
-    earliestCloseDate: string;
+    earliestCloseDateIso: string;
+    latestCloseDateExclusiveIso: string;
   },
 ) {
   const {
     propertyIds,
     sourceSystem,
     subjectRealPropertyId,
-    earliestCloseDate,
+    earliestCloseDateIso,
+    latestCloseDateExclusiveIso,
   } = params;
 
   if (propertyIds.length === 0) return [];
@@ -716,7 +789,8 @@ async function fetchCandidateListingsByPropertyIds(
       .in("real_property_id", chunk)
       .neq("real_property_id", subjectRealPropertyId)
       .not("close_date", "is", null)
-      .gte("close_date", earliestCloseDate);
+      .gte("close_date", earliestCloseDateIso)
+      .lt("close_date", latestCloseDateExclusiveIso);
 
     if (error) throw new Error(error.message);
     results.push(...(data ?? []));
@@ -764,7 +838,8 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           listing_id,
           source_system,
           real_property_id,
-          property_condition_source
+          property_condition_source,
+          listing_contract_date
         `,
       )
       .eq("id", input.subjectListingRowId)
@@ -832,7 +907,8 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
   }
 
   const subjectPropertyType = normalizeText(subjectPhysical.property_type);
-  const subjectPropertyTypeFamily = resolvePropertyTypeFamily(subjectPropertyType);
+  const subjectPropertyTypeFamily =
+    resolvePropertyTypeFamily(subjectPropertyType);
   const resolvedPurpose = resolveComparablePurpose({
     slug: profile.slug,
     name: profile.name,
@@ -844,22 +920,23 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
     rules: mergedRules,
   });
 
+  const subjectListingContractDate = normalizeText(
+    subjectListing.listing_contract_date,
+  );
+  const snapshotDates = resolveSnapshotDates({
+    subjectListingContractDate,
+    maxDaysSinceClose: mergedRules.maxDaysSinceClose,
+  });
+
   const subjectSqft = sizeSqftFromPhysical(subjectPhysical);
-  const subjectBuildingAreaTotalSqft = toNumber(
-    subjectPhysical.building_area_total_sqft,
-  );
-  const subjectAboveGradeFinishedSqft = toNumber(
-    subjectPhysical.above_grade_finished_area_sqft,
-  );
-  const subjectBelowGradeTotalSqft = toNumber(
-    subjectPhysical.below_grade_total_sqft,
-  );
   const subjectLotSizeSqft = lotSizeSqftFromProperty(subjectProperty);
 
   const subjectYearBuilt = toNumber(subjectPhysical.year_built);
   const subjectBeds = toNumber(subjectPhysical.bedrooms_total);
   const subjectBaths = toNumber(subjectPhysical.bathrooms_total);
-  const subjectCondition = normalizeText(subjectListing.property_condition_source);
+  const subjectCondition = normalizeText(
+    subjectListing.property_condition_source,
+  );
   const subjectBuildingForm = normalizeText(
     subjectPhysical.building_form_standardized,
   );
@@ -872,6 +949,7 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
   const initialSummary = {
     sourceSystem,
     subjectListingId: subjectListing.listing_id,
+    subjectListingContractDate,
     subjectPropertyType,
     subjectPropertyTypeFamily,
     subjectBuildingForm,
@@ -880,6 +958,10 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
     subjectLevelsRaw,
     purposeMode: resolvedPurpose,
     sizeBasis: mode.sizeBasis,
+    marketSnapshotDate: snapshotDates.snapshotReferenceDateIso,
+    marketSnapshotDateSource: snapshotDates.snapshotDateSource,
+    earliestCloseDateInclusive: snapshotDates.earliestCloseDateIso,
+    latestCloseDateExclusive: snapshotDates.latestCloseDateExclusiveIso,
   };
 
   const { data: insertedRun, error: insertedRunError } = await supabase
@@ -913,6 +995,14 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
             profileSlug: input.profileSlug,
             rules: mergedRules,
             mode,
+            snapshot: {
+              subjectListingContractDate,
+              marketSnapshotDate: snapshotDates.snapshotReferenceDateIso,
+              marketSnapshotDateSource: snapshotDates.snapshotDateSource,
+              earliestCloseDateInclusive: snapshotDates.earliestCloseDateIso,
+              latestCloseDateExclusive:
+                snapshotDates.latestCloseDateExclusiveIso,
+            },
             subject: {
               subjectPropertyType,
               subjectPropertyTypeFamily,
@@ -963,12 +1053,6 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
       ),
     );
 
-    const earliestCloseDate = new Date(
-      Date.now() - mergedRules.maxDaysSinceClose * 86400000,
-    )
-      .toISOString()
-      .slice(0, 10);
-
     const [candidateProperties, candidatePhysicals, candidateListings] =
       await Promise.all([
         fetchRealPropertiesByIds(supabase, candidatePropertyIds),
@@ -977,7 +1061,9 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           propertyIds: candidatePropertyIds,
           sourceSystem,
           subjectRealPropertyId: input.subjectRealPropertyId,
-          earliestCloseDate,
+          earliestCloseDateIso: snapshotDates.earliestCloseDateIso,
+          latestCloseDateExclusiveIso:
+            snapshotDates.latestCloseDateExclusiveIso,
         }),
       ]);
 
@@ -985,8 +1071,6 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
     const physicalMap = new Map(
       candidatePhysicals.map((row) => [row.real_property_id, row]),
     );
-
-    const now = new Date();
 
     const rankedCandidates = candidateListings
       .map((listing) => {
@@ -1008,7 +1092,7 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
         if (distanceMiles > mergedRules.maxDistanceMiles) return null;
 
         const daysSinceClose = listing.close_date
-          ? daysBetween(listing.close_date, now)
+          ? daysBetween(listing.close_date, snapshotDates.snapshotReferenceDate)
           : null;
 
         if (
@@ -1024,7 +1108,8 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           mode.requireSamePropertyType &&
           subjectPropertyType &&
           candidatePropertyType &&
-          normalizedKey(candidatePropertyType) !== normalizedKey(subjectPropertyType)
+          normalizedKey(candidatePropertyType) !==
+            normalizedKey(subjectPropertyType)
         ) {
           return null;
         }
@@ -1040,7 +1125,8 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           mode.requireSameBuildingForm &&
           subjectBuildingForm &&
           candidateBuildingForm &&
-          normalizedKey(candidateBuildingForm) !== normalizedKey(subjectBuildingForm)
+          normalizedKey(candidateBuildingForm) !==
+            normalizedKey(subjectBuildingForm)
         ) {
           return null;
         }
@@ -1150,7 +1236,9 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           return null;
         }
 
-        const candidateCondition = normalizeText(listing.property_condition_source);
+        const candidateCondition = normalizeText(
+          listing.property_condition_source,
+        );
         const conditionMatchScore01 = mode.useConditionMetric
           ? computeConditionMatchScore(subjectCondition, candidateCondition)
           : null;
@@ -1263,6 +1351,8 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
             subjectPropertyType,
             subjectPropertyTypeFamily,
             totalWeight: scoreBreakdown.totalWeight,
+            marketSnapshotDate: snapshotDates.snapshotReferenceDateIso,
+            marketSnapshotDateSource: snapshotDates.snapshotDateSource,
             components: scoreBreakdown.breakdown,
           },
           metrics_json: {
@@ -1271,13 +1361,17 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
             close_date: listing.close_date,
             close_price: closePrice,
             ppsf,
+            market_snapshot_date: snapshotDates.snapshotReferenceDateIso,
+            market_snapshot_date_source: snapshotDates.snapshotDateSource,
             building_area_total_sqft: candidateBuildingAreaTotalSqft,
             above_grade_finished_area_sqft: candidateAboveGradeFinishedSqft,
             below_grade_total_sqft: candidateBelowGradeTotalSqft,
             lot_size_sqft: candidateLotSizeSqft,
             size_basis: mode.sizeBasis,
             size_basis_value:
-              mode.sizeBasis === "lot_size" ? candidateLotSizeSqft : candidateSqft,
+              mode.sizeBasis === "lot_size"
+                ? candidateLotSizeSqft
+                : candidateSqft,
             bedrooms_total: candidateBeds,
             bathrooms_total: candidateBaths,
             year_built: candidateYearBuilt,
@@ -1343,6 +1437,13 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
         JSON.stringify(
           {
             runId: insertedRun.id,
+            snapshot: {
+              marketSnapshotDate: snapshotDates.snapshotReferenceDateIso,
+              marketSnapshotDateSource: snapshotDates.snapshotDateSource,
+              earliestCloseDateInclusive: snapshotDates.earliestCloseDateIso,
+              latestCloseDateExclusive:
+                snapshotDates.latestCloseDateExclusiveIso,
+            },
             candidateCount: candidateRows.length,
             preview: candidateRows.slice(0, 5),
           },
