@@ -1,3 +1,5 @@
+// /app/(workspace)/analysis/properties/action.ts
+
 "use server";
 
 import { revalidatePath } from "next/cache";
@@ -33,6 +35,47 @@ function nullableInteger(formData: FormData, key: string) {
 
   const parsed = Number.parseInt(raw, 10);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function arrayTextValues(formData: FormData, key: string) {
+  return formData
+    .getAll(key)
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter((value): value is string => value.length > 0);
+}
+
+function parseComparablePurpose(value: string) {
+  if (
+    value === "standard" ||
+    value === "flip" ||
+    value === "rental" ||
+    value === "scrape"
+  ) {
+    return value;
+  }
+
+  return undefined;
+}
+
+function parseSnapshotMode(value: string) {
+  if (value === "auto" || value === "current" || value === "custom") {
+    return value;
+  }
+
+  return undefined;
+}
+
+function parseSizeBasis(value: string) {
+  if (value === "building_area_total" || value === "lot_size") {
+    return value;
+  }
+
+  return null;
+}
+
+function isIsoDateString(value: string | null) {
+  if (!value) return false;
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 type ActiveAnalysisRecord = {
@@ -330,16 +373,39 @@ export async function runComparableSearchAction(formData: FormData) {
     );
   }
 
+  const requestedPurpose = parseComparablePurpose(textValue(formData, "purpose"));
+  const snapshotMode =
+    parseSnapshotMode(textValue(formData, "snapshot_mode")) ?? "auto";
+  const customSnapshotDate = nullableText(formData, "custom_snapshot_date");
+  const allowedLevelClasses = arrayTextValues(
+    formData,
+    "allowed_level_classes",
+  );
+  const parsedSizeBasis = parseSizeBasis(textValue(formData, "size_basis"));
+
+  if (snapshotMode === "custom" && !isIsoDateString(customSnapshotDate)) {
+    redirect(
+      `/analysis/properties/${propertyId}/analyses/${analysisId}/comparables?comp_error=${encodeURIComponent(
+        "A valid custom snapshot date is required.",
+      )}`,
+    );
+  }
+
   try {
     await runComparableSearch({
       analysisId,
       subjectRealPropertyId: propertyId,
       subjectListingRowId,
       profileSlug,
+      purpose: requestedPurpose,
+      snapshotMode,
+      customSnapshotDate,
+      allowedLevelClasses,
       overrides: {
         maxDistanceMiles: nullableNumber(formData, "max_distance_miles"),
         maxDaysSinceClose: nullableInteger(formData, "max_days_since_close"),
         sqftTolerancePct: nullableNumber(formData, "sqft_tolerance_pct"),
+        lotSizeTolerancePct: nullableNumber(formData, "lot_size_tolerance_pct"),
         yearToleranceYears: nullableInteger(formData, "year_tolerance_years"),
         bedTolerance: nullableInteger(formData, "bed_tolerance"),
         bathTolerance: nullableNumber(formData, "bath_tolerance"),
@@ -347,7 +413,11 @@ export async function runComparableSearchAction(formData: FormData) {
         requireSamePropertyType:
           formData.get("require_same_property_type") === "on",
         requireSameLevelClass:
-          formData.get("require_same_level_class") === "on",
+          formData.get("require_same_level_class") === "on" ||
+          allowedLevelClasses.length > 0,
+        requireSameBuildingForm:
+          formData.get("require_same_building_form") === "on",
+        sizeBasis: parsedSizeBasis,
       },
     });
   } catch (error) {

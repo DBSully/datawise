@@ -3,7 +3,13 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 
 type SizeBasis = "building_area_total" | "lot_size";
-type ComparablePurpose = "listing" | "rental" | "flip" | "scrape" | "generic";
+type ComparablePurpose = "standard" | "rental" | "flip" | "scrape";
+type SnapshotMode = "auto" | "current" | "custom";
+type SnapshotDateSource =
+  | "listing_contract_date"
+  | "current_date_fallback"
+  | "current_override"
+  | "custom_override";
 type PropertyTypeFamily =
   | "detached"
   | "condo"
@@ -50,13 +56,15 @@ type ComparableMode = {
   weights: ScoreWeights;
 };
 
-type SnapshotDateSource = "listing_contract_date" | "current_date_fallback";
-
 export type RunComparableSearchInput = {
   analysisId: string;
   subjectRealPropertyId: string;
   subjectListingRowId: string;
   profileSlug: string;
+  purpose?: ComparablePurpose | null;
+  snapshotMode?: SnapshotMode | null;
+  customSnapshotDate?: string | null;
+  allowedLevelClasses?: string[] | null;
   overrides: {
     maxDistanceMiles: number | null;
     maxDaysSinceClose: number | null;
@@ -129,6 +137,39 @@ function parseSizeBasis(value: unknown): SizeBasis | null {
   return null;
 }
 
+function parseComparablePurpose(value: unknown): ComparablePurpose | null {
+  const normalized = normalizedKey(value);
+  if (!normalized) return null;
+
+  if (["standard", "generic", "listing"].includes(normalized)) {
+    return "standard";
+  }
+
+  if (["flip", "arv"].includes(normalized)) return "flip";
+  if (normalized === "rental" || normalized === "rent") return "rental";
+  if (
+    normalized === "scrape" ||
+    normalized === "land" ||
+    normalized === "new build" ||
+    normalized === "new_build" ||
+    normalized === "new construction"
+  ) {
+    return "scrape";
+  }
+
+  return null;
+}
+
+function parseSnapshotMode(value: unknown): SnapshotMode | null {
+  const normalized = normalizedKey(value);
+  if (normalized === "auto") return "auto";
+  if (normalized === "current" || normalized === "current market") {
+    return "current";
+  }
+  if (normalized === "custom") return "custom";
+  return null;
+}
+
 function firstNonNull<T>(...values: Array<T | null | undefined>): T | null {
   for (const value of values) {
     if (value !== null && value !== undefined) return value;
@@ -185,20 +226,42 @@ function isoDateFromUtcDate(date: Date) {
 }
 
 function resolveSnapshotDates(input: {
+  requestedSnapshotMode: SnapshotMode;
+  customSnapshotDate: string | null;
   subjectListingContractDate: string | null;
   maxDaysSinceClose: number;
 }) {
   const contractDate = parseIsoDateToUtcDate(input.subjectListingContractDate);
+  const customDate = parseIsoDateToUtcDate(input.customSnapshotDate);
   const recencyWindowDays = Math.max(0, Math.round(input.maxDaysSinceClose));
 
-  const snapshotReferenceDate = contractDate ?? currentUtcDateMidnight();
-  const snapshotDateSource: SnapshotDateSource = contractDate
-    ? "listing_contract_date"
-    : "current_date_fallback";
+  let snapshotReferenceDate: Date;
+  let snapshotDateSource: SnapshotDateSource;
+  let latestCloseDateExclusive: Date;
 
-  const latestCloseDateExclusive = contractDate
-    ? snapshotReferenceDate
-    : addUtcDays(snapshotReferenceDate, 1);
+  if (input.requestedSnapshotMode === "custom") {
+    if (!customDate) {
+      throw new Error(
+        "Custom snapshot mode requires a valid customSnapshotDate (YYYY-MM-DD).",
+      );
+    }
+
+    snapshotReferenceDate = customDate;
+    snapshotDateSource = "custom_override";
+    latestCloseDateExclusive = snapshotReferenceDate;
+  } else if (input.requestedSnapshotMode === "current") {
+    snapshotReferenceDate = currentUtcDateMidnight();
+    snapshotDateSource = "current_override";
+    latestCloseDateExclusive = addUtcDays(snapshotReferenceDate, 1);
+  } else if (contractDate) {
+    snapshotReferenceDate = contractDate;
+    snapshotDateSource = "listing_contract_date";
+    latestCloseDateExclusive = snapshotReferenceDate;
+  } else {
+    snapshotReferenceDate = currentUtcDateMidnight();
+    snapshotDateSource = "current_date_fallback";
+    latestCloseDateExclusive = addUtcDays(snapshotReferenceDate, 1);
+  }
 
   const earliestCloseDate = addUtcDays(
     snapshotReferenceDate,
@@ -206,6 +269,7 @@ function resolveSnapshotDates(input: {
   );
 
   return {
+    requestedSnapshotMode: input.requestedSnapshotMode,
     snapshotReferenceDate,
     snapshotDateSource,
     snapshotReferenceDateIso: isoDateFromUtcDate(snapshotReferenceDate),
@@ -276,7 +340,7 @@ function mergeRules(
   };
 }
 
-function resolveComparablePurpose(input: {
+function resolveComparablePurposeFromProfile(input: {
   slug?: unknown;
   name?: unknown;
   purpose?: unknown;
@@ -308,11 +372,23 @@ function resolveComparablePurpose(input: {
     return "flip";
   }
 
-  if (haystack.includes("listing") || haystack.includes("list")) {
-    return "listing";
-  }
+  return "standard";
+}
 
-  return "generic";
+function resolveComparablePurpose(input: {
+  explicitPurpose?: unknown;
+  slug?: unknown;
+  name?: unknown;
+  purpose?: unknown;
+}): ComparablePurpose {
+  return (
+    parseComparablePurpose(input.explicitPurpose) ??
+    resolveComparablePurposeFromProfile({
+      slug: input.slug,
+      name: input.name,
+      purpose: input.purpose,
+    })
+  );
 }
 
 function resolvePropertyTypeFamily(value: string | null): PropertyTypeFamily {
@@ -425,15 +501,8 @@ function resolveComparableMode(input: {
     };
   }
 
-  const listingLikePurpose: ComparablePurpose =
-    purpose === "rental"
-      ? "rental"
-      : purpose === "listing"
-        ? "listing"
-        : "generic";
-
   return {
-    purpose: listingLikePurpose,
+    purpose,
     subjectFamily,
     sizeBasis,
     useSqftMetric: true,
@@ -463,6 +532,16 @@ function resolveComparableMode(input: {
   };
 }
 
+function normalizeAllowedLevelClasses(values: string[] | null | undefined) {
+  return Array.from(
+    new Set(
+      (values ?? [])
+        .map((value) => normalizedKey(value))
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+}
+
 function haversineMiles(
   lat1: number,
   lon1: number,
@@ -485,8 +564,6 @@ function haversineMiles(
   return earthRadiusMiles * c;
 }
 
-// close_date is effectively a calendar date for comp filtering/storage.
-// Normalize both sides to UTC midnight so we get a whole-day integer.
 function daysBetween(fromDate: string, toDate: Date): number | null {
   const from = new Date(fromDate);
 
@@ -540,7 +617,8 @@ function computeLevelMatchScore(input: {
   candidateLevelClass: string | null;
   subjectLevelsRaw: string | null;
   candidateLevelsRaw: string | null;
-}): number | null {
+  allowedLevelClassesNormalized: string[];
+}) {
   const subjectRaw = normalizedKey(input.subjectLevelsRaw);
   const candidateRaw = normalizedKey(input.candidateLevelsRaw);
   const subjectClass = normalizedKey(input.subjectLevelClass);
@@ -554,8 +632,16 @@ function computeLevelMatchScore(input: {
     return 1;
   }
 
-  if (subjectClass && candidateClass) {
-    return subjectClass === candidateClass ? 0.85 : 0;
+  if (subjectClass && candidateClass && subjectClass === candidateClass) {
+    return 0.85;
+  }
+
+  if (
+    candidateClass &&
+    input.allowedLevelClassesNormalized.length > 0 &&
+    input.allowedLevelClassesNormalized.includes(candidateClass)
+  ) {
+    return 0.65;
   }
 
   if (!subjectClass || !candidateClass) {
@@ -637,7 +723,9 @@ function buildWeightedScore(input: {
         weight: roundNumber(weight),
         score: null,
         rawScore:
-          component.score === null ? null : roundNumber(component.score * 100, 2),
+          component.score === null
+            ? null
+            : roundNumber(component.score * 100, 2),
       };
       return;
     }
@@ -652,7 +740,9 @@ function buildWeightedScore(input: {
       weight: roundNumber(weight),
       score: roundNumber(resolvedScore * 100, 2),
       rawScore:
-        component.score === null ? null : roundNumber(component.score * 100, 2),
+        component.score === null
+          ? null
+          : roundNumber(component.score * 100, 2),
     };
   });
 
@@ -910,6 +1000,7 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
   const subjectPropertyTypeFamily =
     resolvePropertyTypeFamily(subjectPropertyType);
   const resolvedPurpose = resolveComparablePurpose({
+    explicitPurpose: input.purpose,
     slug: profile.slug,
     name: profile.name,
     purpose: profile.purpose,
@@ -920,17 +1011,19 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
     rules: mergedRules,
   });
 
+  const requestedSnapshotMode = parseSnapshotMode(input.snapshotMode) ?? "auto";
   const subjectListingContractDate = normalizeText(
     subjectListing.listing_contract_date,
   );
   const snapshotDates = resolveSnapshotDates({
+    requestedSnapshotMode,
+    customSnapshotDate: normalizeText(input.customSnapshotDate),
     subjectListingContractDate,
     maxDaysSinceClose: mergedRules.maxDaysSinceClose,
   });
 
   const subjectSqft = sizeSqftFromPhysical(subjectPhysical);
   const subjectLotSizeSqft = lotSizeSqftFromProperty(subjectProperty);
-
   const subjectYearBuilt = toNumber(subjectPhysical.year_built);
   const subjectBeds = toNumber(subjectPhysical.bedrooms_total);
   const subjectBaths = toNumber(subjectPhysical.bathrooms_total);
@@ -946,6 +1039,16 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
   );
   const subjectLevelsRaw = normalizeText(subjectPhysical.levels_raw);
 
+  const allowedLevelClassesNormalized = mode.useLevelMetric
+    ? normalizeAllowedLevelClasses(input.allowedLevelClasses)
+    : [];
+  const allowedLevelClassesDisplay =
+    mode.useLevelMetric && (input.allowedLevelClasses?.length ?? 0) > 0
+      ? (input.allowedLevelClasses ?? []).filter(Boolean)
+      : subjectLevelClass
+        ? [subjectLevelClass]
+        : [];
+
   const initialSummary = {
     sourceSystem,
     subjectListingId: subjectListing.listing_id,
@@ -956,12 +1059,15 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
     subjectStructureType,
     subjectLevelClass,
     subjectLevelsRaw,
+    requestedPurpose: parseComparablePurpose(input.purpose),
     purposeMode: resolvedPurpose,
     sizeBasis: mode.sizeBasis,
+    requestedSnapshotMode,
     marketSnapshotDate: snapshotDates.snapshotReferenceDateIso,
     marketSnapshotDateSource: snapshotDates.snapshotDateSource,
     earliestCloseDateInclusive: snapshotDates.earliestCloseDateIso,
     latestCloseDateExclusive: snapshotDates.latestCloseDateExclusiveIso,
+    allowedLevelClasses: allowedLevelClassesDisplay,
   };
 
   const { data: insertedRun, error: insertedRunError } = await supabase
@@ -971,9 +1077,15 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
       subject_real_property_id: input.subjectRealPropertyId,
       subject_listing_row_id: input.subjectListingRowId,
       comparable_profile_id: profile.id,
-      purpose: profile.purpose ?? "arv",
+      purpose: resolvedPurpose,
       status: "pending",
-      parameters_json: mergedRules,
+      parameters_json: {
+        ...mergedRules,
+        requestedPurpose: parseComparablePurpose(input.purpose),
+        requestedSnapshotMode,
+        customSnapshotDate: normalizeText(input.customSnapshotDate),
+        allowedLevelClasses: allowedLevelClassesDisplay,
+      },
       summary_json: initialSummary,
     })
     .select("id")
@@ -996,6 +1108,7 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
             rules: mergedRules,
             mode,
             snapshot: {
+              requestedSnapshotMode,
               subjectListingContractDate,
               marketSnapshotDate: snapshotDates.snapshotReferenceDateIso,
               marketSnapshotDateSource: snapshotDates.snapshotDateSource,
@@ -1011,6 +1124,7 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
               subjectLevelsRaw,
               subjectSqft,
               subjectLotSizeSqft,
+              allowedLevelClasses: allowedLevelClassesDisplay,
             },
           },
           null,
@@ -1134,6 +1248,7 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
         const candidateLevelClass = normalizeText(
           physical.level_class_standardized,
         );
+        const candidateLevelClassNormalized = normalizedKey(candidateLevelClass);
         const candidateLevelsRaw = normalizeText(physical.levels_raw);
         const levelMatchScore01 = mode.useLevelMetric
           ? computeLevelMatchScore({
@@ -1141,16 +1256,26 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
               candidateLevelClass,
               subjectLevelsRaw,
               candidateLevelsRaw,
+              allowedLevelClassesNormalized,
             })
           : null;
 
-        if (
-          mode.requireSameLevelClass &&
-          subjectLevelClass &&
-          candidateLevelClass &&
-          normalizedKey(candidateLevelClass) !== normalizedKey(subjectLevelClass)
-        ) {
-          return null;
+        if (mode.useLevelMetric) {
+          if (allowedLevelClassesNormalized.length > 0) {
+            if (
+              !candidateLevelClassNormalized ||
+              !allowedLevelClassesNormalized.includes(candidateLevelClassNormalized)
+            ) {
+              return null;
+            }
+          } else if (
+            mode.requireSameLevelClass &&
+            subjectLevelClass &&
+            candidateLevelClass &&
+            normalizedKey(candidateLevelClass) !== normalizedKey(subjectLevelClass)
+          ) {
+            return null;
+          }
         }
 
         const candidateBuildingAreaTotalSqft = toNumber(
@@ -1348,11 +1473,13 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           score_breakdown_json: {
             purposeMode: mode.purpose,
             sizeBasis: mode.sizeBasis,
-            subjectPropertyType,
-            subjectPropertyTypeFamily,
-            totalWeight: scoreBreakdown.totalWeight,
+            requestedSnapshotMode,
             marketSnapshotDate: snapshotDates.snapshotReferenceDateIso,
             marketSnapshotDateSource: snapshotDates.snapshotDateSource,
+            subjectPropertyType,
+            subjectPropertyTypeFamily,
+            allowedLevelClasses: allowedLevelClassesDisplay,
+            totalWeight: scoreBreakdown.totalWeight,
             components: scoreBreakdown.breakdown,
           },
           metrics_json: {
@@ -1438,6 +1565,7 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           {
             runId: insertedRun.id,
             snapshot: {
+              requestedSnapshotMode,
               marketSnapshotDate: snapshotDates.snapshotReferenceDateIso,
               marketSnapshotDateSource: snapshotDates.snapshotDateSource,
               earliestCloseDateInclusive: snapshotDates.earliestCloseDateIso,
@@ -1529,10 +1657,16 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
       candidateCount: rankedCandidates.length,
       effectiveRules: {
         ...mergedRules,
+        requestedPurpose: parseComparablePurpose(input.purpose),
+        resolvedPurpose,
+        requestedSnapshotMode,
+        customSnapshotDate: normalizeText(input.customSnapshotDate),
+        allowedLevelClasses: allowedLevelClassesDisplay,
         sizeBasis: mode.sizeBasis,
         requireSamePropertyType: mode.requireSamePropertyType,
         requireSameBuildingForm: mode.requireSameBuildingForm,
-        requireSameLevelClass: mode.requireSameLevelClass,
+        requireSameLevelClass:
+          allowedLevelClassesNormalized.length === 0 && mode.requireSameLevelClass,
       },
     };
 
