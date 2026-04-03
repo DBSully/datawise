@@ -344,7 +344,7 @@ export async function runComparableSearchAction(formData: FormData) {
   const analysisId = textValue(formData, "analysis_id");
   const subjectListingRowId = textValue(formData, "subject_listing_row_id");
   const profileSlug =
-    textValue(formData, "profile_slug") || "denver_detached_basic_v1";
+    textValue(formData, "profile_slug") || "denver_detached_standard_v1";
 
   if (!propertyId || !analysisId) {
     redirect("/analysis/properties");
@@ -373,7 +373,9 @@ export async function runComparableSearchAction(formData: FormData) {
     );
   }
 
-  const requestedPurpose = parseComparablePurpose(textValue(formData, "purpose"));
+  const requestedPurpose = parseComparablePurpose(
+    textValue(formData, "purpose"),
+  );
   const snapshotMode =
     parseSnapshotMode(textValue(formData, "snapshot_mode")) ?? "auto";
   const customSnapshotDate = nullableText(formData, "custom_snapshot_date");

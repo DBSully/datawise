@@ -1,4 +1,3 @@
-
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -9,6 +8,15 @@ type ComparablesPageProps = {
   params: Promise<{ id: string; analysisId: string }>;
   searchParams?: Promise<{ comp_run?: string; comp_error?: string }>;
 };
+
+function defaultComparableProfileSlug(propertyType: string | null) {
+  const normalized = (propertyType ?? "").trim().toLowerCase();
+
+  if (normalized === "condo") return "denver_condo_standard_v1";
+  if (normalized === "townhome") return "denver_townhome_standard_v1";
+
+  return "denver_detached_standard_v1";
+}
 
 export default async function ComparablesPage({
   params,
@@ -87,6 +95,10 @@ export default async function ComparablesPage({
   if (subjectPhysicalError) throw new Error(subjectPhysicalError.message);
   if (!property || !analysis) notFound();
 
+  const resolvedDefaultProfileSlug = defaultComparableProfileSlug(
+    subjectPhysical?.property_type ?? null,
+  );
+
   const listingSelect = `
         id,
         listing_id,
@@ -97,17 +109,15 @@ export default async function ComparablesPage({
         source_system
       `;
 
-  let subjectListing:
-    | {
-        id: string;
-        listing_id: string | null;
-        mls_status: string | null;
-        list_price: number | null;
-        property_condition_source: string | null;
-        listing_contract_date: string | null;
-        source_system: string | null;
-      }
-    | null = null;
+  let subjectListing: {
+    id: string;
+    listing_id: string | null;
+    mls_status: string | null;
+    list_price: number | null;
+    property_condition_source: string | null;
+    listing_contract_date: string | null;
+    source_system: string | null;
+  } | null = null;
 
   if (analysis.listing_id) {
     const { data: linkedListing, error: linkedListingError } = await supabase
@@ -154,7 +164,7 @@ export default async function ComparablesPage({
         rules_json
       `,
       )
-      .eq("slug", "denver_detached_basic_v1")
+      .eq("slug", resolvedDefaultProfileSlug)
       .maybeSingle(),
 
     supabase
@@ -304,7 +314,7 @@ export default async function ComparablesPage({
         subjectListingRowId={subjectListing?.id ?? null}
         subjectListingMlsNumber={subjectListing?.listing_id ?? null}
         analysisStrategyType={analysis.strategy_type ?? null}
-        defaultProfileSlug={defaultProfile?.slug ?? "denver_detached_basic_v1"}
+        defaultProfileSlug={defaultProfile?.slug ?? resolvedDefaultProfileSlug}
         latestRun={latestRun}
         latestCandidates={latestCandidates}
         defaultProfileRules={profileRules}
