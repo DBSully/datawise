@@ -1,13 +1,8 @@
-// /components/properties/comparable-workspace-panel.tsx
-
-
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
-import {
-  runComparableSearchAction,
-  toggleComparableCandidateSelectionAction,
-} from "@/app/(workspace)/analysis/properties/actions";
+import { runComparableSearchAction } from "@/app/(workspace)/analysis/properties/actions";
+import { ComparableCandidateTable } from "@/components/properties/comparable-candidate-table";
 
 type ComparableWorkspacePanelProps = {
   propertyId: string;
@@ -50,7 +45,10 @@ type ComparableWorkspacePanelProps = {
     yearBuilt: number | null;
     bedroomsTotal: number | null;
     bathroomsTotal: number | null;
+    garageSpaces: number | null;
     listingContractDate: string | null;
+    address: string | null;
+    listPrice: number | null;
   };
 };
 
@@ -298,7 +296,7 @@ function strategyToDefaultPurpose(strategyType: string | null): UiPurpose {
 
 function uiPurposeFromSummary(
   value: unknown,
-  fallbackStrategyType: string | null
+  fallbackStrategyType: string | null,
 ): UiPurpose {
   const normalized = normalizedKey(value);
 
@@ -320,7 +318,7 @@ function buildPresetConfig(params: {
   purpose: UiPurpose;
   subjectFamily: SubjectFamily;
   subjectLevelClass: string | null;
-}) : PresetConfig {
+}): PresetConfig {
   const { purpose, subjectFamily, subjectLevelClass } = params;
 
   const usesBuildingForm =
@@ -412,7 +410,11 @@ function areStringArraysEqual(a: string[], b: string[]) {
   return sortedA.every((value, index) => value === sortedB[index]);
 }
 
-function formatPercentRange(base: number | null, pct: number | null, decimals = 0) {
+function formatPercentRange(
+  base: number | null,
+  pct: number | null,
+  decimals = 0,
+) {
   if (base === null || pct === null) return "Subject data unavailable";
 
   const min = base * (1 - pct / 100);
@@ -421,12 +423,16 @@ function formatPercentRange(base: number | null, pct: number | null, decimals = 
   return `${formatNumber(min, decimals)} – ${formatNumber(max, decimals)}`;
 }
 
-function formatToleranceRange(base: number | null, tolerance: number | null, decimals = 0) {
+function formatToleranceRange(
+  base: number | null,
+  tolerance: number | null,
+  decimals = 0,
+) {
   if (base === null || tolerance === null) return "Subject data unavailable";
 
   return `${formatNumber(base - tolerance, decimals)} – ${formatNumber(
     base + tolerance,
-    decimals
+    decimals,
   )}`;
 }
 
@@ -466,13 +472,7 @@ function formatSnapshotSummary(params: {
   return "Current";
 }
 
-function DetailMini({
-  label,
-  value,
-}: {
-  label: string;
-  value: ReactNode;
-}) {
+function DetailMini({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
       <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500">
@@ -548,14 +548,14 @@ export function ComparableWorkspacePanel({
       new Set(
         [subjectContext.levelClassStandardized, ...COMMON_LEVEL_CLASS_OPTIONS]
           .map((value) => normalizeText(value))
-          .filter((value): value is string => Boolean(value))
-      )
+          .filter((value): value is string => Boolean(value)),
+      ),
     );
   }, [subjectContext.levelClassStandardized]);
 
   const initialPurpose = uiPurposeFromSummary(
     readParam(summary, "requestedPurpose", "purposeMode"),
-    analysisStrategyType
+    analysisStrategyType,
   );
 
   const initialPreset = buildPresetConfig({
@@ -576,7 +576,9 @@ export function ComparableWorkspacePanel({
   })();
 
   const initialSnapshotMode = (() => {
-    const raw = normalizedKey(readParam(summary, "requestedSnapshotMode", "snapshotMode"));
+    const raw = normalizedKey(
+      readParam(summary, "requestedSnapshotMode", "snapshotMode"),
+    );
     if (raw === "current") return "current" as const;
     if (raw === "custom") return "custom" as const;
     return "auto" as const;
@@ -584,17 +586,17 @@ export function ComparableWorkspacePanel({
 
   const initialCustomSnapshotDate =
     initialSnapshotMode === "custom"
-      ? normalizeText(
-          readParam(summary, "customSnapshotDate", "marketSnapshotDate")
-        ) ?? ""
+      ? (normalizeText(
+          readParam(summary, "customSnapshotDate", "marketSnapshotDate"),
+        ) ?? "")
       : "";
 
   const summarySizeBasis = normalizedKey(
-    readParam(summary, "sizeBasis", "preferredSizeBasis")
+    readParam(summary, "sizeBasis", "preferredSizeBasis"),
   );
 
   const paramsSizeBasis = normalizedKey(
-    readParam(activeParams, "preferredSizeBasis", "sizeBasis", "size_basis")
+    readParam(activeParams, "preferredSizeBasis", "sizeBasis", "size_basis"),
   );
 
   const initialSizeBasis: SizeBasis =
@@ -612,53 +614,62 @@ export function ComparableWorkspacePanel({
     sizeBasis: initialSizeBasis,
     maxDistanceMiles: String(
       readNumberParam(activeParams, "maxDistanceMiles", "max_distance_miles") ??
-        Number(initialPreset.maxDistanceMiles)
+        Number(initialPreset.maxDistanceMiles),
     ),
     maxDaysSinceClose: String(
-      readNumberParam(activeParams, "maxDaysSinceClose", "max_days_since_close") ??
-        Number(initialPreset.maxDaysSinceClose)
+      readNumberParam(
+        activeParams,
+        "maxDaysSinceClose",
+        "max_days_since_close",
+      ) ?? Number(initialPreset.maxDaysSinceClose),
     ),
     sqftTolerancePct: String(
       readNumberParam(activeParams, "sqftTolerancePct", "sqft_tolerance_pct") ??
-        Number(initialPreset.sqftTolerancePct)
+        Number(initialPreset.sqftTolerancePct),
     ),
     lotSizeTolerancePct: String(
-      readNumberParam(activeParams, "lotSizeTolerancePct", "lot_size_tolerance_pct") ??
-        Number(initialPreset.lotSizeTolerancePct)
+      readNumberParam(
+        activeParams,
+        "lotSizeTolerancePct",
+        "lot_size_tolerance_pct",
+      ) ?? Number(initialPreset.lotSizeTolerancePct),
     ),
     yearToleranceYears: String(
-      readNumberParam(activeParams, "yearToleranceYears", "year_tolerance_years") ??
-        Number(initialPreset.yearToleranceYears)
+      readNumberParam(
+        activeParams,
+        "yearToleranceYears",
+        "year_tolerance_years",
+      ) ?? Number(initialPreset.yearToleranceYears),
     ),
     bedTolerance: String(
       readNumberParam(activeParams, "bedTolerance", "bed_tolerance") ??
-        Number(initialPreset.bedTolerance)
+        Number(initialPreset.bedTolerance),
     ),
     bathTolerance: String(
       readNumberParam(activeParams, "bathTolerance", "bath_tolerance") ??
-        Number(initialPreset.bathTolerance)
+        Number(initialPreset.bathTolerance),
     ),
     maxCandidates: String(
       readNumberParam(activeParams, "maxCandidates", "max_candidates") ??
-        Number(initialPreset.maxCandidates)
+        Number(initialPreset.maxCandidates),
     ),
     requireSamePropertyType:
       readBooleanParam(
         activeParams,
         "requireSamePropertyType",
-        "require_same_property_type"
+        "require_same_property_type",
       ) ?? initialPreset.requireSamePropertyType,
     requireSameBuildingForm:
       readBooleanParam(
         activeParams,
         "requireSameBuildingForm",
-        "require_same_building_form"
+        "require_same_building_form",
       ) ?? initialPreset.requireSameBuildingForm,
     useLevelFilter:
       readBooleanParam(
         activeParams,
         "requireSameLevelClass",
-        "require_same_level_class"
+        "require_same_level_class",
       ) ??
       (initialAllowedLevelClasses.length > 0
         ? true
@@ -676,7 +687,7 @@ export function ComparableWorkspacePanel({
         subjectFamily,
         subjectLevelClass: subjectContext.levelClassStandardized,
       }),
-    [formState.purpose, subjectFamily, subjectContext.levelClassStandardized]
+    [formState.purpose, subjectFamily, subjectContext.levelClassStandardized],
   );
 
   const presetModified =
@@ -689,12 +700,14 @@ export function ComparableWorkspacePanel({
     formState.bedTolerance !== currentPreset.bedTolerance ||
     formState.bathTolerance !== currentPreset.bathTolerance ||
     formState.maxCandidates !== currentPreset.maxCandidates ||
-    formState.requireSamePropertyType !== currentPreset.requireSamePropertyType ||
-    formState.requireSameBuildingForm !== currentPreset.requireSameBuildingForm ||
+    formState.requireSamePropertyType !==
+      currentPreset.requireSamePropertyType ||
+    formState.requireSameBuildingForm !==
+      currentPreset.requireSameBuildingForm ||
     formState.useLevelFilter !== currentPreset.useLevelFilter ||
     !areStringArraysEqual(
       formState.allowedLevelClasses,
-      currentPreset.allowedLevelClasses
+      currentPreset.allowedLevelClasses,
     );
 
   function applyPreset(nextPurpose: UiPurpose) {
@@ -767,7 +780,7 @@ export function ComparableWorkspacePanel({
           "address",
           "unparsed_address",
           "comp_address",
-          "compAddress"
+          "compAddress",
         ) ?? "—";
 
       const closeDate = metricValue(metrics, "close_date", "closeDate");
@@ -778,7 +791,7 @@ export function ComparableWorkspacePanel({
         "building_area_total_sqft",
         "above_grade_finished_area_sqft",
         "aboveGradeFinishedAreaSqft",
-        "gla"
+        "gla",
       );
 
       const ppsf = metricValue(
@@ -786,7 +799,7 @@ export function ComparableWorkspacePanel({
         "ppsf",
         "price_per_sqft",
         "ppsf_above",
-        "ppsfAbove"
+        "ppsfAbove",
       );
 
       const listingId =
@@ -806,21 +819,23 @@ export function ComparableWorkspacePanel({
   }, [sortedCandidates]);
 
   const selectedCandidates = candidateViewRows.filter(
-    (candidate) => candidate.selected_yn
+    (candidate) => candidate.selected_yn,
   );
 
   const selectedCount = selectedCandidates.length;
 
   const avgSelectedDistance = average(
-    selectedCandidates.map((candidate) => candidate.distance_miles)
+    selectedCandidates.map((candidate) => candidate.distance_miles),
   );
 
   const avgSelectedClosePrice = average(
-    selectedCandidates.map((candidate) => parseNumericLike(candidate.closePrice))
+    selectedCandidates.map((candidate) =>
+      parseNumericLike(candidate.closePrice),
+    ),
   );
 
   const avgSelectedPpsf = average(
-    selectedCandidates.map((candidate) => parseNumericLike(candidate.ppsf))
+    selectedCandidates.map((candidate) => parseNumericLike(candidate.ppsf)),
   );
 
   const allMlsNumbers = useMemo(() => {
@@ -833,8 +848,8 @@ export function ComparableWorkspacePanel({
       new Set(
         values
           .map((value) => (typeof value === "string" ? value.trim() : ""))
-          .filter(Boolean)
-      )
+          .filter(Boolean),
+      ),
     );
   }, [subjectListingMlsNumber, candidateViewRows]);
 
@@ -848,13 +863,35 @@ export function ComparableWorkspacePanel({
       new Set(
         values
           .map((value) => (typeof value === "string" ? value.trim() : ""))
-          .filter(Boolean)
-      )
+          .filter(Boolean),
+      ),
     );
   }, [subjectListingMlsNumber, selectedCandidates]);
 
   const allMlsClipboardText = allMlsNumbers.join(", ");
   const selectedMlsClipboardText = selectedMlsNumbers.join(", ");
+
+  const subjectSummaryGla =
+    subjectContext.buildingAreaTotalSqft ??
+    subjectContext.aboveGradeFinishedAreaSqft ??
+    null;
+
+  const subjectSummary = {
+    listingId: subjectListingMlsNumber,
+    address: subjectContext.address ?? "Subject",
+    listDate: subjectContext.listingContractDate ?? null,
+    listPrice: subjectContext.listPrice ?? null,
+    gla: subjectSummaryGla,
+    bedroomsTotal: subjectContext.bedroomsTotal ?? null,
+    bathroomsTotal: subjectContext.bathroomsTotal ?? null,
+    garageSpaces: subjectContext.garageSpaces ?? null,
+    ppsf:
+      typeof subjectContext.listPrice === "number" &&
+      typeof subjectSummaryGla === "number" &&
+      subjectSummaryGla > 0
+        ? subjectContext.listPrice / subjectSummaryGla
+        : null,
+  };
 
   async function handleCopyAllMlsIds() {
     if (!allMlsClipboardText) return;
@@ -933,7 +970,11 @@ export function ComparableWorkspacePanel({
         />
         <input type="hidden" name="profile_slug" value={defaultProfileSlug} />
         <input type="hidden" name="purpose" value={formState.purpose} />
-        <input type="hidden" name="snapshot_mode" value={formState.snapshotMode} />
+        <input
+          type="hidden"
+          name="snapshot_mode"
+          value={formState.snapshotMode}
+        />
         <input type="hidden" name="size_basis" value={formState.sizeBasis} />
 
         <div className="grid gap-3 xl:grid-cols-3">
@@ -951,7 +992,7 @@ export function ComparableWorkspacePanel({
                   >
                     {purposeLabel(purpose)}
                   </SegmentedButton>
-                )
+                ),
               )}
             </div>
             <div className="mt-2 text-xs text-slate-600">
@@ -1122,10 +1163,11 @@ export function ComparableWorkspacePanel({
                   }
                 />
                 <div className="mt-1 text-[11px] text-slate-500">
-                  Subject {formatNumber(subjectContext.buildingAreaTotalSqft)} sf →{" "}
+                  Subject {formatNumber(subjectContext.buildingAreaTotalSqft)}{" "}
+                  sf →{" "}
                   {formatPercentRange(
                     subjectContext.buildingAreaTotalSqft,
-                    sqftTolerance
+                    sqftTolerance,
                   )}
                 </div>
               </div>
@@ -1149,7 +1191,7 @@ export function ComparableWorkspacePanel({
                   Subject {formatNumber(subjectContext.yearBuilt)} →{" "}
                   {formatToleranceRange(
                     subjectContext.yearBuilt,
-                    yearTolerance
+                    yearTolerance,
                   )}
                 </div>
               </div>
@@ -1173,7 +1215,7 @@ export function ComparableWorkspacePanel({
                   Subject {formatNumber(subjectContext.bedroomsTotal)} →{" "}
                   {formatToleranceRange(
                     subjectContext.bedroomsTotal,
-                    bedTolerance
+                    bedTolerance,
                   )}
                 </div>
               </div>
@@ -1198,7 +1240,7 @@ export function ComparableWorkspacePanel({
                   {formatToleranceRange(
                     subjectContext.bathroomsTotal,
                     bathTolerance,
-                    1
+                    1,
                   )}
                 </div>
               </div>
@@ -1223,7 +1265,10 @@ export function ComparableWorkspacePanel({
               />
               <div className="mt-1 text-[11px] text-slate-500">
                 Subject {formatNumber(subjectContext.lotSizeSqft)} sf →{" "}
-                {formatPercentRange(subjectContext.lotSizeSqft, lotSizeTolerance)}
+                {formatPercentRange(
+                  subjectContext.lotSizeSqft,
+                  lotSizeTolerance,
+                )}
               </div>
             </div>
           ) : null}
@@ -1295,7 +1340,8 @@ export function ComparableWorkspacePanel({
                         ...current,
                         useLevelFilter: event.target.checked,
                         allowedLevelClasses:
-                          event.target.checked && current.allowedLevelClasses.length === 0
+                          event.target.checked &&
+                          current.allowedLevelClasses.length === 0
                             ? subjectContext.levelClassStandardized
                               ? [subjectContext.levelClassStandardized]
                               : current.allowedLevelClasses
@@ -1315,7 +1361,8 @@ export function ComparableWorkspacePanel({
                 Level Class
               </div>
               <div className="mt-1 text-xs text-slate-600">
-                Start with the subject’s exact level class, then expand if you want to include compatible layouts.
+                Start with the subject’s exact level class, then expand if you
+                want to include compatible layouts.
               </div>
 
               {formState.useLevelFilter ? (
@@ -1329,7 +1376,9 @@ export function ComparableWorkspacePanel({
                         type="checkbox"
                         name="allowed_level_classes"
                         value={levelClass}
-                        checked={formState.allowedLevelClasses.includes(levelClass)}
+                        checked={formState.allowedLevelClasses.includes(
+                          levelClass,
+                        )}
                         onChange={() => toggleLevelClass(levelClass)}
                       />
                       {levelClass}
@@ -1384,19 +1433,18 @@ export function ComparableWorkspacePanel({
               : "—"
           }
         />
-        <DetailMini
-          label="Purpose"
-          value={purposeLabel(formState.purpose)}
-        />
+        <DetailMini label="Purpose" value={purposeLabel(formState.purpose)} />
         <DetailMini
           label="Snapshot"
           value={
             latestRun
               ? formatSnapshotSummary({
                   summary: latestRunSummary,
-                  subjectListingContractDate: subjectContext.listingContractDate,
+                  subjectListingContractDate:
+                    subjectContext.listingContractDate,
                 })
-              : formState.snapshotMode === "custom" && formState.customSnapshotDate
+              : formState.snapshotMode === "custom" &&
+                  formState.customSnapshotDate
                 ? formatDate(formState.customSnapshotDate)
                 : formState.snapshotMode === "current"
                   ? "Current"
@@ -1507,91 +1555,12 @@ export function ComparableWorkspacePanel({
         )}
       </div>
 
-      <div className="dw-table-wrap max-h-[420px] overflow-auto">
-        <table className="dw-table-compact">
-          <thead>
-            <tr>
-              <th>Pick</th>
-              <th>MLS#</th>
-              <th>Address</th>
-              <th>Dist</th>
-              <th>Close</th>
-              <th>Price</th>
-              <th>GLA</th>
-              <th>PSF</th>
-              <th>Score</th>
-            </tr>
-          </thead>
-          <tbody>
-            {candidateViewRows.length > 0 ? (
-              candidateViewRows.map((candidate) => (
-                <tr
-                  key={candidate.id}
-                  className={candidate.selected_yn ? "bg-slate-100" : ""}
-                >
-                  <td>
-                    <form action={toggleComparableCandidateSelectionAction}>
-                      <input
-                        type="hidden"
-                        name="candidate_id"
-                        value={candidate.id}
-                      />
-                      <input
-                        type="hidden"
-                        name="property_id"
-                        value={propertyId}
-                      />
-                      <input
-                        type="hidden"
-                        name="analysis_id"
-                        value={analysisId}
-                      />
-                      <input
-                        type="hidden"
-                        name="next_selected"
-                        value={candidate.selected_yn ? "false" : "true"}
-                      />
-                      <button
-                        type="submit"
-                        className={
-                          candidate.selected_yn
-                            ? "rounded border border-emerald-300 bg-emerald-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-800"
-                            : "rounded border border-slate-300 bg-white px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-700"
-                        }
-                      >
-                        {candidate.selected_yn ? "Picked" : "Pick"}
-                      </button>
-                    </form>
-                  </td>
-                  <td>{candidate.listingId ?? "—"}</td>
-                  <td
-                    className={
-                      candidate.selected_yn
-                        ? "font-semibold text-slate-900"
-                        : ""
-                    }
-                  >
-                    {candidate.address}
-                  </td>
-                  <td>{formatNumber(candidate.distance_miles, 2)}</td>
-                  <td>{formatDate(candidate.closeDate)}</td>
-                  <td>{formatCurrency(candidate.closePrice)}</td>
-                  <td>{formatNumber(candidate.gla)}</td>
-                  <td>{formatCurrency(candidate.ppsf)}</td>
-                  <td>{formatNumber(candidate.raw_score, 1)}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={9} className="text-slate-500">
-                  Comparable candidate list will appear here after a comp search
-                  is run.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <ComparableCandidateTable
+        propertyId={propertyId}
+        analysisId={analysisId}
+        candidateViewRows={candidateViewRows}
+        subjectSummary={subjectSummary}
+      />
     </div>
   );
 }

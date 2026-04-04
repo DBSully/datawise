@@ -197,9 +197,7 @@ function parseIsoDateToUtcDate(value: string | null): Date | null {
   if (!match) return null;
 
   const [, year, month, day] = match;
-  const date = new Date(
-    Date.UTC(Number(year), Number(month) - 1, Number(day)),
-  );
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
 
   return Number.isNaN(date.getTime()) ? null : date;
 }
@@ -312,8 +310,7 @@ function mergeRules(
     ) ?? true;
   const defaultRequireSameBuildingForm =
     toBoolean(
-      defaults?.requireSameBuildingForm ??
-        defaults?.require_same_building_form,
+      defaults?.requireSameBuildingForm ?? defaults?.require_same_building_form,
     ) ?? true;
   const defaultPreferredSizeBasis = parseSizeBasis(
     defaults?.sizeBasis ?? defaults?.size_basis,
@@ -425,8 +422,7 @@ function resolveComparableMode(input: {
   const isScrape = purpose === "scrape";
 
   const sizeBasis =
-    rules.preferredSizeBasis ??
-    (isScrape ? "lot_size" : "building_area_total");
+    rules.preferredSizeBasis ?? (isScrape ? "lot_size" : "building_area_total");
 
   const useBuildingFormMetric =
     !isScrape &&
@@ -740,9 +736,7 @@ function buildWeightedScore(input: {
       weight: roundNumber(weight),
       score: roundNumber(resolvedScore * 100, 2),
       rawScore:
-        component.score === null
-          ? null
-          : roundNumber(component.score * 100, 2),
+        component.score === null ? null : roundNumber(component.score * 100, 2),
     };
   });
 
@@ -821,7 +815,8 @@ async function fetchPhysicalByPropertyIds(
         building_area_total_sqft,
         year_built,
         bedrooms_total,
-        bathrooms_total
+        bathrooms_total,
+        garage_spaces
       `,
       )
       .in("real_property_id", chunk);
@@ -969,7 +964,8 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           building_area_total_sqft,
           year_built,
           bedrooms_total,
-          bathrooms_total
+          bathrooms_total,
+          garage_spaces
         `,
       )
       .eq("real_property_id", input.subjectRealPropertyId)
@@ -1181,7 +1177,9 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
         }),
       ]);
 
-    const propertyMap = new Map(candidateProperties.map((row) => [row.id, row]));
+    const propertyMap = new Map(
+      candidateProperties.map((row) => [row.id, row]),
+    );
     const physicalMap = new Map(
       candidatePhysicals.map((row) => [row.real_property_id, row]),
     );
@@ -1248,7 +1246,8 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
         const candidateLevelClass = normalizeText(
           physical.level_class_standardized,
         );
-        const candidateLevelClassNormalized = normalizedKey(candidateLevelClass);
+        const candidateLevelClassNormalized =
+          normalizedKey(candidateLevelClass);
         const candidateLevelsRaw = normalizeText(physical.levels_raw);
         const levelMatchScore01 = mode.useLevelMetric
           ? computeLevelMatchScore({
@@ -1264,7 +1263,9 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           if (allowedLevelClassesNormalized.length > 0) {
             if (
               !candidateLevelClassNormalized ||
-              !allowedLevelClassesNormalized.includes(candidateLevelClassNormalized)
+              !allowedLevelClassesNormalized.includes(
+                candidateLevelClassNormalized,
+              )
             ) {
               return null;
             }
@@ -1272,7 +1273,8 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
             mode.requireSameLevelClass &&
             subjectLevelClass &&
             candidateLevelClass &&
-            normalizedKey(candidateLevelClass) !== normalizedKey(subjectLevelClass)
+            normalizedKey(candidateLevelClass) !==
+              normalizedKey(subjectLevelClass)
           ) {
             return null;
           }
@@ -1348,6 +1350,7 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
         }
 
         const candidateBaths = toNumber(physical.bathrooms_total);
+        const candidateGarageSpaces = toNumber(physical.garage_spaces);
         const bathDelta =
           mode.useBathMetric && subjectBaths !== null && candidateBaths !== null
             ? Math.abs(candidateBaths - subjectBaths)
@@ -1488,8 +1491,6 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
             close_date: listing.close_date,
             close_price: closePrice,
             ppsf,
-            market_snapshot_date: snapshotDates.snapshotReferenceDateIso,
-            market_snapshot_date_source: snapshotDates.snapshotDateSource,
             building_area_total_sqft: candidateBuildingAreaTotalSqft,
             above_grade_finished_area_sqft: candidateAboveGradeFinishedSqft,
             below_grade_total_sqft: candidateBelowGradeTotalSqft,
@@ -1501,6 +1502,7 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
                 : candidateSqft,
             bedrooms_total: candidateBeds,
             bathrooms_total: candidateBaths,
+            garage_spaces: candidateGarageSpaces,
             year_built: candidateYearBuilt,
             property_type: candidatePropertyType,
             property_sub_type: normalizeText(physical.property_sub_type),
@@ -1666,7 +1668,8 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
         requireSamePropertyType: mode.requireSamePropertyType,
         requireSameBuildingForm: mode.requireSameBuildingForm,
         requireSameLevelClass:
-          allowedLevelClassesNormalized.length === 0 && mode.requireSameLevelClass,
+          allowedLevelClassesNormalized.length === 0 &&
+          mode.requireSameLevelClass,
       },
     };
 
