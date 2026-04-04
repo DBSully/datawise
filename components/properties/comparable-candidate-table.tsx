@@ -139,6 +139,7 @@ function formatSignedNumber(value: unknown, decimals = 0) {
 
   if (numeric > 0) return `+${formatted}`;
   if (numeric < 0) return `-${formatted}`;
+
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
@@ -215,20 +216,7 @@ export function ComparableCandidateTable({
   );
 
   const hasCandidates = candidateViewRows.length > 0;
-
   const subjectGla = parseNumericLike(subjectSummary?.gla);
-  const subjectPpsf = useMemo(() => {
-    if (!subjectSummary) return null;
-    if (subjectSummary.ppsf !== null && subjectSummary.ppsf !== undefined) {
-      return parseNumericLike(subjectSummary.ppsf);
-    }
-
-    const listPrice = parseNumericLike(subjectSummary.listPrice);
-    const gla = parseNumericLike(subjectSummary.gla);
-
-    if (listPrice === null || gla === null || gla <= 0) return null;
-    return listPrice / gla;
-  }, [subjectSummary]);
 
   const rowsWithExpansion = useMemo(() => {
     return candidateViewRows.map((candidate) => {
@@ -309,7 +297,7 @@ export function ComparableCandidateTable({
                   <td>{formatSmartNumber(subjectSummary.bedroomsTotal)}</td>
                   <td>{formatSmartNumber(subjectSummary.bathroomsTotal)}</td>
                   <td>{formatSmartNumber(subjectSummary.garageSpaces)}</td>
-                  <td>{formatCurrency(subjectPpsf)}</td>
+                  <td>{formatCurrency(subjectSummary.ppsf)}</td>
                   <td>—</td>
                   <td>—</td>
                 </tr>

@@ -1,3 +1,19 @@
+## 2026-04-03 - Comparable table usability improvements
+
+- Refactored the comparable candidate list into a dedicated table component for easier iteration and extension.
+- Added a subject reference row above the candidate list so the subject property can be compared in the same table layout as the comps.
+- Added signed GLA difference display to make subject-vs-comp size comparisons easier to scan.
+- Added beds, baths, and garage space columns to improve direct side-by-side comparison within the candidate list.
+- Extended the comp detail expansion panel to surface more subject-vs-candidate comparison context.
+
+## 2026-04-01 - Comparables workspace upgrades
+
+- Added visible comp-search controls for Purpose, Snapshot mode, size basis, and detached level-class selection.
+- Added historical market snapshot logic so comp windows and recency scoring can anchor to a prior market date instead of always using today.
+- Added snapshot fallback behavior for properties without a subject listing contract date.
+- Expanded comp scoring context with lot-size deltas, level-class filtering, and richer score-breakdown metadata for candidate review.
+- Improved comparables data plumbing so listing contract dates, lot size, and building-form/structure data are available to the comp engine.
+- Verified the updated comparables UI and backend flow are working end-to-end.
 
 ## 2026-03-26 — Scenario-Based Analysis Foundation, Dedicated Comparables Workspace, and Operational UI Improvements
 

@@ -83,7 +83,8 @@ export default async function ComparablesPage({
           above_grade_finished_area_sqft,
           year_built,
           bedrooms_total,
-          bathrooms_total
+          bathrooms_total,
+          garage_spaces
         `,
       )
       .eq("real_property_id", id)
@@ -340,7 +341,10 @@ export default async function ComparablesPage({
           yearBuilt: subjectPhysical?.year_built ?? null,
           bedroomsTotal: subjectPhysical?.bedrooms_total ?? null,
           bathroomsTotal: subjectPhysical?.bathrooms_total ?? null,
+          garageSpaces: subjectPhysical?.garage_spaces ?? null,
           listingContractDate: subjectListing?.listing_contract_date ?? null,
+          address: property.unparsed_address ?? null,
+          listPrice: subjectListing?.list_price ?? null,
         }}
       />
     </section>
