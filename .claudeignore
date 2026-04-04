@@ -1,0 +1,47 @@
+# Secrets and credentials
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+.aws/
+.ssh/
+
+# Dependencies (large, expensive, rarely useful to Claude)
+node_modules/
+vendor/
+.venv/
+__pycache__/
+
+# Build output
+dist/
+build/
+.next/
+.nuxt/
+out/
+.cache/
+
+# Version control internals
+.git/
+
+# IDE and OS noise
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# Test coverage and generated reports
+coverage/
+.nyc_output/
+
+# Database files
+*.sqlite
+*.db
+*.sql
+
+# Any uploaded user content
+uploads/
+public/uploads/

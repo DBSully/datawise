@@ -1,3 +1,5 @@
+## 2026-04-03 - Transition to Claude - See Handoff
+
 ## 2026-04-03 - Comparable table usability improvements
 
 - Refactored the comparable candidate list into a dedicated table component for easier iteration and extension.
