@@ -41,6 +41,8 @@ type ComparableWorkspacePanelProps = {
     levelsRaw: string | null;
     buildingAreaTotalSqft: number | null;
     aboveGradeFinishedAreaSqft: number | null;
+    belowGradeTotalSqft: number | null;
+    belowGradeFinishedAreaSqft: number | null;
     lotSizeSqft: number | null;
     yearBuilt: number | null;
     bedroomsTotal: number | null;
@@ -882,6 +884,11 @@ export function ComparableWorkspacePanel({
     listDate: subjectContext.listingContractDate ?? null,
     listPrice: subjectContext.listPrice ?? null,
     gla: subjectSummaryGla,
+    yearBuilt: subjectContext.yearBuilt ?? null,
+    levelClass: subjectContext.levelClassStandardized ?? null,
+    aboveGradeFinishedSqft: subjectContext.aboveGradeFinishedAreaSqft ?? null,
+    belowGradeTotalSqft: subjectContext.belowGradeTotalSqft ?? null,
+    belowGradeFinishedSqft: subjectContext.belowGradeFinishedAreaSqft ?? null,
     bedroomsTotal: subjectContext.bedroomsTotal ?? null,
     bathroomsTotal: subjectContext.bathroomsTotal ?? null,
     garageSpaces: subjectContext.garageSpaces ?? null,

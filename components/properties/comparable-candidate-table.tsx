@@ -28,6 +28,11 @@ export type ComparableSubjectSummary = {
   listDate: string | null;
   listPrice: number | null;
   gla: number | null;
+  yearBuilt: number | null;
+  levelClass: string | null;
+  aboveGradeFinishedSqft: number | null;
+  belowGradeTotalSqft: number | null;
+  belowGradeFinishedSqft: number | null;
   bedroomsTotal: number | null;
   bathroomsTotal: number | null;
   garageSpaces: number | null;
@@ -160,6 +165,15 @@ function formatDate(value: unknown) {
   return parsed.toLocaleDateString();
 }
 
+function formatBasementPair(total: unknown, finished: unknown) {
+  const totalNumeric = parseNumericLike(total);
+  const finishedNumeric = parseNumericLike(finished);
+
+  if (totalNumeric === null && finishedNumeric === null) return "—";
+
+  return `${formatNumber(totalNumeric)} / ${formatNumber(finishedNumeric)}`;
+}
+
 function readBreakdownComponent(
   scoreBreakdown: Record<string, unknown> | null | undefined,
   componentKey: string,
@@ -184,24 +198,27 @@ function DetailCell({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function CandidateTableHeader() {
+function HeaderCell({ children }: { children: ReactNode }) {
   return (
-    <tr>
-      <th>Pick</th>
-      <th>MLS#</th>
-      <th>Address</th>
-      <th>Dist</th>
-      <th>Date</th>
-      <th>Price</th>
-      <th>GLA</th>
-      <th>GLA Δ</th>
-      <th>Bd</th>
-      <th>Ba</th>
-      <th>Gar</th>
-      <th>PSF</th>
-      <th>Score</th>
-      <th>Why</th>
-    </tr>
+    <th className="sticky top-0 z-30 bg-slate-100 shadow-[inset_0_-1px_0_0_rgb(203_213_225)]">
+      {children}
+    </th>
+  );
+}
+
+function SubjectCell({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <td
+      className={`sticky top-[34px] z-20 bg-slate-100 shadow-[inset_0_-1px_0_0_rgb(203_213_225)] ${className}`}
+    >
+      {children}
+    </td>
   );
 }
 
@@ -231,6 +248,23 @@ export function ComparableCandidateTable({
         "garage_spaces",
         "garageSpaces",
       );
+      const candidateYearBuilt = metricValue(metrics, "year_built");
+      const candidateLevelClass = metricValue(
+        metrics,
+        "level_class_standardized",
+      );
+      const candidateAboveGradeSqft = metricValue(
+        metrics,
+        "above_grade_finished_area_sqft",
+      );
+      const candidateBelowGradeTotalSqft = metricValue(
+        metrics,
+        "below_grade_total_sqft",
+      );
+      const candidateBelowGradeFinishedSqft = metricValue(
+        metrics,
+        "below_grade_finished_area_sqft",
+      );
 
       const candidateGla = parseNumericLike(candidate.gla);
       const glaDelta =
@@ -246,6 +280,11 @@ export function ComparableCandidateTable({
         candidateBeds,
         candidateBaths,
         candidateGarageSpaces,
+        candidateYearBuilt,
+        candidateLevelClass,
+        candidateAboveGradeSqft,
+        candidateBelowGradeTotalSqft,
+        candidateBelowGradeFinishedSqft,
         glaDelta,
       };
     });
@@ -268,51 +307,101 @@ export function ComparableCandidateTable({
         </div>
       </div>
 
-      {subjectSummary ? (
-        <div className="space-y-1">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-            Subject Reference
-          </div>
-          <div className="dw-table-wrap">
-            <table className="dw-table-compact">
-              <thead>
-                <CandidateTableHeader />
-              </thead>
-              <tbody>
-                <tr className="bg-slate-100">
-                  <td>
-                    <span className="rounded border border-slate-300 bg-white px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-700">
-                      Subject
-                    </span>
-                  </td>
-                  <td>{subjectSummary.listingId ?? "—"}</td>
-                  <td className="font-semibold text-slate-900">
-                    {subjectSummary.address}
-                  </td>
-                  <td>—</td>
-                  <td>{formatDate(subjectSummary.listDate)}</td>
-                  <td>{formatCurrency(subjectSummary.listPrice)}</td>
-                  <td>{formatNumber(subjectSummary.gla)}</td>
-                  <td>{subjectGla !== null ? formatSignedNumber(0) : "—"}</td>
-                  <td>{formatSmartNumber(subjectSummary.bedroomsTotal)}</td>
-                  <td>{formatSmartNumber(subjectSummary.bathroomsTotal)}</td>
-                  <td>{formatSmartNumber(subjectSummary.garageSpaces)}</td>
-                  <td>{formatCurrency(subjectSummary.ppsf)}</td>
-                  <td>—</td>
-                  <td>—</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : null}
+      <div className="dw-table-wrap max-h-[560px] overflow-auto">
+        <table className="dw-table-compact min-w-[1700px]">
+          <colgroup>
+            <col style={{ width: 78 }} />
+            <col style={{ width: 96 }} />
+            <col />
+            <col style={{ width: 72 }} />
+            <col style={{ width: 96 }} />
+            <col style={{ width: 112 }} />
+            <col style={{ width: 84 }} />
+            <col style={{ width: 84 }} />
+            <col style={{ width: 70 }} />
+            <col style={{ width: 120 }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 118 }} />
+            <col style={{ width: 48 }} />
+            <col style={{ width: 48 }} />
+            <col style={{ width: 48 }} />
+            <col style={{ width: 76 }} />
+            <col style={{ width: 76 }} />
+            <col style={{ width: 68 }} />
+          </colgroup>
 
-      <div className="dw-table-wrap max-h-[520px] overflow-auto">
-        <table className="dw-table-compact">
           <thead>
-            <CandidateTableHeader />
+            <tr>
+              <HeaderCell>Pick</HeaderCell>
+              <HeaderCell>MLS#</HeaderCell>
+              <HeaderCell>Address</HeaderCell>
+              <HeaderCell>Dist</HeaderCell>
+              <HeaderCell>Date</HeaderCell>
+              <HeaderCell>Price</HeaderCell>
+              <HeaderCell>GLA</HeaderCell>
+              <HeaderCell>GLA Δ</HeaderCell>
+              <HeaderCell>Yr</HeaderCell>
+              <HeaderCell>Level</HeaderCell>
+              <HeaderCell>AG SF</HeaderCell>
+              <HeaderCell>Bsmt T/F</HeaderCell>
+              <HeaderCell>Bd</HeaderCell>
+              <HeaderCell>Ba</HeaderCell>
+              <HeaderCell>Gar</HeaderCell>
+              <HeaderCell>PSF</HeaderCell>
+              <HeaderCell>Score</HeaderCell>
+              <HeaderCell>Why</HeaderCell>
+            </tr>
           </thead>
+
           <tbody>
+            {subjectSummary ? (
+              <tr>
+                <SubjectCell>
+                  <span className="rounded border border-slate-300 bg-white px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-700">
+                    Subject
+                  </span>
+                </SubjectCell>
+                <SubjectCell>{subjectSummary.listingId ?? "—"}</SubjectCell>
+                <SubjectCell className="font-semibold text-slate-900">
+                  {subjectSummary.address}
+                </SubjectCell>
+                <SubjectCell>—</SubjectCell>
+                <SubjectCell>{formatDate(subjectSummary.listDate)}</SubjectCell>
+                <SubjectCell>
+                  {formatCurrency(subjectSummary.listPrice)}
+                </SubjectCell>
+                <SubjectCell>{formatNumber(subjectSummary.gla)}</SubjectCell>
+                <SubjectCell>
+                  {subjectGla !== null ? formatSignedNumber(0) : "—"}
+                </SubjectCell>
+                <SubjectCell>
+                  {formatNumber(subjectSummary.yearBuilt)}
+                </SubjectCell>
+                <SubjectCell>{subjectSummary.levelClass ?? "—"}</SubjectCell>
+                <SubjectCell>
+                  {formatNumber(subjectSummary.aboveGradeFinishedSqft)}
+                </SubjectCell>
+                <SubjectCell>
+                  {formatBasementPair(
+                    subjectSummary.belowGradeTotalSqft,
+                    subjectSummary.belowGradeFinishedSqft,
+                  )}
+                </SubjectCell>
+                <SubjectCell>
+                  {formatSmartNumber(subjectSummary.bedroomsTotal)}
+                </SubjectCell>
+                <SubjectCell>
+                  {formatSmartNumber(subjectSummary.bathroomsTotal)}
+                </SubjectCell>
+                <SubjectCell>
+                  {formatSmartNumber(subjectSummary.garageSpaces)}
+                </SubjectCell>
+                <SubjectCell>{formatCurrency(subjectSummary.ppsf)}</SubjectCell>
+                <SubjectCell>—</SubjectCell>
+                <SubjectCell>—</SubjectCell>
+              </tr>
+            ) : null}
+
             {hasCandidates ? (
               rowsWithExpansion.map(
                 ({
@@ -323,6 +412,11 @@ export function ComparableCandidateTable({
                   candidateBeds,
                   candidateBaths,
                   candidateGarageSpaces,
+                  candidateYearBuilt,
+                  candidateLevelClass,
+                  candidateAboveGradeSqft,
+                  candidateBelowGradeTotalSqft,
+                  candidateBelowGradeFinishedSqft,
                   glaDelta,
                 }) => {
                   const sizeBasis = metricValue(metrics, "size_basis");
@@ -406,6 +500,19 @@ export function ComparableCandidateTable({
                         <td>{formatCurrency(candidate.closePrice)}</td>
                         <td>{formatNumber(candidate.gla)}</td>
                         <td>{formatSignedNumber(glaDelta)}</td>
+                        <td>{formatNumber(candidateYearBuilt)}</td>
+                        <td>
+                          {typeof candidateLevelClass === "string"
+                            ? candidateLevelClass
+                            : "—"}
+                        </td>
+                        <td>{formatNumber(candidateAboveGradeSqft)}</td>
+                        <td>
+                          {formatBasementPair(
+                            candidateBelowGradeTotalSqft,
+                            candidateBelowGradeFinishedSqft,
+                          )}
+                        </td>
                         <td>{formatSmartNumber(candidateBeds)}</td>
                         <td>{formatSmartNumber(candidateBaths)}</td>
                         <td>{formatSmartNumber(candidateGarageSpaces)}</td>
@@ -428,7 +535,7 @@ export function ComparableCandidateTable({
 
                       {isExpanded ? (
                         <tr>
-                          <td colSpan={14} className="bg-slate-50 px-3 py-3">
+                          <td colSpan={18} className="bg-slate-50 px-3 py-3">
                             <div className="grid gap-3 xl:grid-cols-2">
                               <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
                                 <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -500,6 +607,19 @@ export function ComparableCandidateTable({
                                         ? condition
                                         : "—"
                                     }
+                                  />
+                                  <DetailCell
+                                    label="Above Grade SF"
+                                    value={formatNumber(
+                                      candidateAboveGradeSqft,
+                                    )}
+                                  />
+                                  <DetailCell
+                                    label="Basement T/F"
+                                    value={formatBasementPair(
+                                      candidateBelowGradeTotalSqft,
+                                      candidateBelowGradeFinishedSqft,
+                                    )}
                                   />
                                   <DetailCell
                                     label="Size Basis"
@@ -598,7 +718,7 @@ export function ComparableCandidateTable({
               )
             ) : (
               <tr>
-                <td colSpan={14} className="text-slate-500">
+                <td colSpan={18} className="text-slate-500">
                   Comparable candidate list will appear here after a comp search
                   is run.
                 </td>

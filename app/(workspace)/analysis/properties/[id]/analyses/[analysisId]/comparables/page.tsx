@@ -81,6 +81,8 @@ export default async function ComparablesPage({
           levels_raw,
           building_area_total_sqft,
           above_grade_finished_area_sqft,
+          below_grade_total_sqft,
+          below_grade_finished_area_sqft,
           year_built,
           bedrooms_total,
           bathrooms_total,
@@ -333,6 +335,9 @@ export default async function ComparablesPage({
             subjectPhysical?.building_area_total_sqft ?? null,
           aboveGradeFinishedAreaSqft:
             subjectPhysical?.above_grade_finished_area_sqft ?? null,
+          belowGradeTotalSqft: subjectPhysical?.below_grade_total_sqft ?? null,
+          belowGradeFinishedAreaSqft:
+            subjectPhysical?.below_grade_finished_area_sqft ?? null,
           lotSizeSqft:
             property.lot_size_sqft ??
             (typeof property.lot_size_acres === "number"

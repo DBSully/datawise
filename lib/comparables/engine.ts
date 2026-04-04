@@ -812,6 +812,7 @@ async function fetchPhysicalByPropertyIds(
         building_form_standardized,
         above_grade_finished_area_sqft,
         below_grade_total_sqft,
+        below_grade_finished_area_sqft,
         building_area_total_sqft,
         year_built,
         bedrooms_total,
@@ -961,6 +962,7 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           building_form_standardized,
           above_grade_finished_area_sqft,
           below_grade_total_sqft,
+          below_grade_finished_area_sqft,
           building_area_total_sqft,
           year_built,
           bedrooms_total,
@@ -1289,6 +1291,10 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
         const candidateBelowGradeTotalSqft = toNumber(
           physical.below_grade_total_sqft,
         );
+        const candidateBelowGradeFinishedSqft = toNumber(
+          physical.below_grade_finished_area_sqft,
+        );
+        const candidateGarageSpaces = toNumber(physical.garage_spaces);
         const candidateSqft = sizeSqftFromPhysical(physical);
 
         const sqftDeltaPct =
@@ -1350,7 +1356,6 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
         }
 
         const candidateBaths = toNumber(physical.bathrooms_total);
-        const candidateGarageSpaces = toNumber(physical.garage_spaces);
         const bathDelta =
           mode.useBathMetric && subjectBaths !== null && candidateBaths !== null
             ? Math.abs(candidateBaths - subjectBaths)
@@ -1494,6 +1499,7 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
             building_area_total_sqft: candidateBuildingAreaTotalSqft,
             above_grade_finished_area_sqft: candidateAboveGradeFinishedSqft,
             below_grade_total_sqft: candidateBelowGradeTotalSqft,
+            below_grade_finished_area_sqft: candidateBelowGradeFinishedSqft,
             lot_size_sqft: candidateLotSizeSqft,
             size_basis: mode.sizeBasis,
             size_basis_value:
