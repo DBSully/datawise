@@ -1,11 +1,15 @@
-// /lib/comparables/engine.ts
-
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
 
 type SizeBasis = "building_area_total" | "lot_size";
-type ComparablePurpose = "listing" | "rental" | "flip" | "scrape" | "generic";
+type ComparablePurpose = "standard" | "rental" | "flip" | "scrape";
+type SnapshotMode = "auto" | "current" | "custom";
+type SnapshotDateSource =
+  | "listing_contract_date"
+  | "current_date_fallback"
+  | "current_override"
+  | "custom_override";
 type PropertyTypeFamily =
   | "detached"
   | "condo"
@@ -57,6 +61,10 @@ export type RunComparableSearchInput = {
   subjectRealPropertyId: string;
   subjectListingRowId: string;
   profileSlug: string;
+  purpose?: ComparablePurpose | null;
+  snapshotMode?: SnapshotMode | null;
+  customSnapshotDate?: string | null;
+  allowedLevelClasses?: string[] | null;
   overrides: {
     maxDistanceMiles: number | null;
     maxDaysSinceClose: number | null;
@@ -129,6 +137,39 @@ function parseSizeBasis(value: unknown): SizeBasis | null {
   return null;
 }
 
+function parseComparablePurpose(value: unknown): ComparablePurpose | null {
+  const normalized = normalizedKey(value);
+  if (!normalized) return null;
+
+  if (["standard", "generic", "listing"].includes(normalized)) {
+    return "standard";
+  }
+
+  if (["flip", "arv"].includes(normalized)) return "flip";
+  if (normalized === "rental" || normalized === "rent") return "rental";
+  if (
+    normalized === "scrape" ||
+    normalized === "land" ||
+    normalized === "new build" ||
+    normalized === "new_build" ||
+    normalized === "new construction"
+  ) {
+    return "scrape";
+  }
+
+  return null;
+}
+
+function parseSnapshotMode(value: unknown): SnapshotMode | null {
+  const normalized = normalizedKey(value);
+  if (normalized === "auto") return "auto";
+  if (normalized === "current" || normalized === "current market") {
+    return "current";
+  }
+  if (normalized === "custom") return "custom";
+  return null;
+}
+
 function firstNonNull<T>(...values: Array<T | null | undefined>): T | null {
   for (const value of values) {
     if (value !== null && value !== undefined) return value;
@@ -149,6 +190,92 @@ function toIntegerOrNull(value: number | null) {
   return value === null ? null : Math.round(value);
 }
 
+function parseIsoDateToUtcDate(value: string | null): Date | null {
+  if (!value) return null;
+
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+
+  const [, year, month, day] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function currentUtcDateMidnight() {
+  const now = new Date();
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+}
+
+function addUtcDays(date: Date, days: number) {
+  return new Date(
+    Date.UTC(
+      date.getUTCFullYear(),
+      date.getUTCMonth(),
+      date.getUTCDate() + days,
+    ),
+  );
+}
+
+function isoDateFromUtcDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function resolveSnapshotDates(input: {
+  requestedSnapshotMode: SnapshotMode;
+  customSnapshotDate: string | null;
+  subjectListingContractDate: string | null;
+  maxDaysSinceClose: number;
+}) {
+  const contractDate = parseIsoDateToUtcDate(input.subjectListingContractDate);
+  const customDate = parseIsoDateToUtcDate(input.customSnapshotDate);
+  const recencyWindowDays = Math.max(0, Math.round(input.maxDaysSinceClose));
+
+  let snapshotReferenceDate: Date;
+  let snapshotDateSource: SnapshotDateSource;
+  let latestCloseDateExclusive: Date;
+
+  if (input.requestedSnapshotMode === "custom") {
+    if (!customDate) {
+      throw new Error(
+        "Custom snapshot mode requires a valid customSnapshotDate (YYYY-MM-DD).",
+      );
+    }
+
+    snapshotReferenceDate = customDate;
+    snapshotDateSource = "custom_override";
+    latestCloseDateExclusive = snapshotReferenceDate;
+  } else if (input.requestedSnapshotMode === "current") {
+    snapshotReferenceDate = currentUtcDateMidnight();
+    snapshotDateSource = "current_override";
+    latestCloseDateExclusive = addUtcDays(snapshotReferenceDate, 1);
+  } else if (contractDate) {
+    snapshotReferenceDate = contractDate;
+    snapshotDateSource = "listing_contract_date";
+    latestCloseDateExclusive = snapshotReferenceDate;
+  } else {
+    snapshotReferenceDate = currentUtcDateMidnight();
+    snapshotDateSource = "current_date_fallback";
+    latestCloseDateExclusive = addUtcDays(snapshotReferenceDate, 1);
+  }
+
+  const earliestCloseDate = addUtcDays(
+    snapshotReferenceDate,
+    -recencyWindowDays,
+  );
+
+  return {
+    requestedSnapshotMode: input.requestedSnapshotMode,
+    snapshotReferenceDate,
+    snapshotDateSource,
+    snapshotReferenceDateIso: isoDateFromUtcDate(snapshotReferenceDate),
+    earliestCloseDateIso: isoDateFromUtcDate(earliestCloseDate),
+    latestCloseDateExclusiveIso: isoDateFromUtcDate(latestCloseDateExclusive),
+  };
+}
+
 function mergeRules(
   defaults: Record<string, unknown> | null | undefined,
   overrides: RunComparableSearchInput["overrides"],
@@ -161,8 +288,9 @@ function mergeRules(
   const defaultSqftTolerance =
     toNumber(defaults?.sqftTolerancePct ?? defaults?.sqft_tolerance_pct) ?? 20;
   const defaultLotSizeTolerance =
-    toNumber(defaults?.lotSizeTolerancePct ?? defaults?.lot_size_tolerance_pct) ??
-    defaultSqftTolerance;
+    toNumber(
+      defaults?.lotSizeTolerancePct ?? defaults?.lot_size_tolerance_pct,
+    ) ?? defaultSqftTolerance;
   const defaultYearTolerance =
     toNumber(defaults?.yearToleranceYears ?? defaults?.year_tolerance_years) ??
     25;
@@ -182,8 +310,7 @@ function mergeRules(
     ) ?? true;
   const defaultRequireSameBuildingForm =
     toBoolean(
-      defaults?.requireSameBuildingForm ??
-        defaults?.require_same_building_form,
+      defaults?.requireSameBuildingForm ?? defaults?.require_same_building_form,
     ) ?? true;
   const defaultPreferredSizeBasis = parseSizeBasis(
     defaults?.sizeBasis ?? defaults?.size_basis,
@@ -210,7 +337,7 @@ function mergeRules(
   };
 }
 
-function resolveComparablePurpose(input: {
+function resolveComparablePurposeFromProfile(input: {
   slug?: unknown;
   name?: unknown;
   purpose?: unknown;
@@ -242,11 +369,23 @@ function resolveComparablePurpose(input: {
     return "flip";
   }
 
-  if (haystack.includes("listing") || haystack.includes("list")) {
-    return "listing";
-  }
+  return "standard";
+}
 
-  return "generic";
+function resolveComparablePurpose(input: {
+  explicitPurpose?: unknown;
+  slug?: unknown;
+  name?: unknown;
+  purpose?: unknown;
+}): ComparablePurpose {
+  return (
+    parseComparablePurpose(input.explicitPurpose) ??
+    resolveComparablePurposeFromProfile({
+      slug: input.slug,
+      name: input.name,
+      purpose: input.purpose,
+    })
+  );
 }
 
 function resolvePropertyTypeFamily(value: string | null): PropertyTypeFamily {
@@ -283,8 +422,7 @@ function resolveComparableMode(input: {
   const isScrape = purpose === "scrape";
 
   const sizeBasis =
-    rules.preferredSizeBasis ??
-    (isScrape ? "lot_size" : "building_area_total");
+    rules.preferredSizeBasis ?? (isScrape ? "lot_size" : "building_area_total");
 
   const useBuildingFormMetric =
     !isScrape &&
@@ -359,11 +497,8 @@ function resolveComparableMode(input: {
     };
   }
 
-  const listingLikePurpose: ComparablePurpose =
-    purpose === "rental" ? "rental" : purpose === "listing" ? "listing" : "generic";
-
   return {
-    purpose: listingLikePurpose,
+    purpose,
     subjectFamily,
     sizeBasis,
     useSqftMetric: true,
@@ -393,6 +528,16 @@ function resolveComparableMode(input: {
   };
 }
 
+function normalizeAllowedLevelClasses(values: string[] | null | undefined) {
+  return Array.from(
+    new Set(
+      (values ?? [])
+        .map((value) => normalizedKey(value))
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+}
+
 function haversineMiles(
   lat1: number,
   lon1: number,
@@ -415,8 +560,6 @@ function haversineMiles(
   return earthRadiusMiles * c;
 }
 
-// close_date is effectively a calendar date for comp filtering/storage.
-// Normalize both sides to UTC midnight so we get a whole-day integer.
 function daysBetween(fromDate: string, toDate: Date): number | null {
   const from = new Date(fromDate);
 
@@ -470,7 +613,8 @@ function computeLevelMatchScore(input: {
   candidateLevelClass: string | null;
   subjectLevelsRaw: string | null;
   candidateLevelsRaw: string | null;
-}): number | null {
+  allowedLevelClassesNormalized: string[];
+}) {
   const subjectRaw = normalizedKey(input.subjectLevelsRaw);
   const candidateRaw = normalizedKey(input.candidateLevelsRaw);
   const subjectClass = normalizedKey(input.subjectLevelClass);
@@ -484,8 +628,16 @@ function computeLevelMatchScore(input: {
     return 1;
   }
 
-  if (subjectClass && candidateClass) {
-    return subjectClass === candidateClass ? 0.85 : 0;
+  if (subjectClass && candidateClass && subjectClass === candidateClass) {
+    return 0.85;
+  }
+
+  if (
+    candidateClass &&
+    input.allowedLevelClassesNormalized.length > 0 &&
+    input.allowedLevelClassesNormalized.includes(candidateClass)
+  ) {
+    return 0.65;
   }
 
   if (!subjectClass || !candidateClass) {
@@ -566,7 +718,10 @@ function buildWeightedScore(input: {
         used: false,
         weight: roundNumber(weight),
         score: null,
-        rawScore: component.score === null ? null : roundNumber(component.score * 100, 2),
+        rawScore:
+          component.score === null
+            ? null
+            : roundNumber(component.score * 100, 2),
       };
       return;
     }
@@ -657,10 +812,12 @@ async function fetchPhysicalByPropertyIds(
         building_form_standardized,
         above_grade_finished_area_sqft,
         below_grade_total_sqft,
+        below_grade_finished_area_sqft,
         building_area_total_sqft,
         year_built,
         bedrooms_total,
-        bathrooms_total
+        bathrooms_total,
+        garage_spaces
       `,
       )
       .in("real_property_id", chunk);
@@ -678,14 +835,16 @@ async function fetchCandidateListingsByPropertyIds(
     propertyIds: string[];
     sourceSystem: string;
     subjectRealPropertyId: string;
-    earliestCloseDate: string;
+    earliestCloseDateIso: string;
+    latestCloseDateExclusiveIso: string;
   },
 ) {
   const {
     propertyIds,
     sourceSystem,
     subjectRealPropertyId,
-    earliestCloseDate,
+    earliestCloseDateIso,
+    latestCloseDateExclusiveIso,
   } = params;
 
   if (propertyIds.length === 0) return [];
@@ -716,7 +875,8 @@ async function fetchCandidateListingsByPropertyIds(
       .in("real_property_id", chunk)
       .neq("real_property_id", subjectRealPropertyId)
       .not("close_date", "is", null)
-      .gte("close_date", earliestCloseDate);
+      .gte("close_date", earliestCloseDateIso)
+      .lt("close_date", latestCloseDateExclusiveIso);
 
     if (error) throw new Error(error.message);
     results.push(...(data ?? []));
@@ -764,7 +924,8 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           listing_id,
           source_system,
           real_property_id,
-          property_condition_source
+          property_condition_source,
+          listing_contract_date
         `,
       )
       .eq("id", input.subjectListingRowId)
@@ -801,10 +962,12 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           building_form_standardized,
           above_grade_finished_area_sqft,
           below_grade_total_sqft,
+          below_grade_finished_area_sqft,
           building_area_total_sqft,
           year_built,
           bedrooms_total,
-          bathrooms_total
+          bathrooms_total,
+          garage_spaces
         `,
       )
       .eq("real_property_id", input.subjectRealPropertyId)
@@ -832,8 +995,10 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
   }
 
   const subjectPropertyType = normalizeText(subjectPhysical.property_type);
-  const subjectPropertyTypeFamily = resolvePropertyTypeFamily(subjectPropertyType);
+  const subjectPropertyTypeFamily =
+    resolvePropertyTypeFamily(subjectPropertyType);
   const resolvedPurpose = resolveComparablePurpose({
+    explicitPurpose: input.purpose,
     slug: profile.slug,
     name: profile.name,
     purpose: profile.purpose,
@@ -844,22 +1009,25 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
     rules: mergedRules,
   });
 
-  const subjectSqft = sizeSqftFromPhysical(subjectPhysical);
-  const subjectBuildingAreaTotalSqft = toNumber(
-    subjectPhysical.building_area_total_sqft,
+  const requestedSnapshotMode = parseSnapshotMode(input.snapshotMode) ?? "auto";
+  const subjectListingContractDate = normalizeText(
+    subjectListing.listing_contract_date,
   );
-  const subjectAboveGradeFinishedSqft = toNumber(
-    subjectPhysical.above_grade_finished_area_sqft,
-  );
-  const subjectBelowGradeTotalSqft = toNumber(
-    subjectPhysical.below_grade_total_sqft,
-  );
-  const subjectLotSizeSqft = lotSizeSqftFromProperty(subjectProperty);
+  const snapshotDates = resolveSnapshotDates({
+    requestedSnapshotMode,
+    customSnapshotDate: normalizeText(input.customSnapshotDate),
+    subjectListingContractDate,
+    maxDaysSinceClose: mergedRules.maxDaysSinceClose,
+  });
 
+  const subjectSqft = sizeSqftFromPhysical(subjectPhysical);
+  const subjectLotSizeSqft = lotSizeSqftFromProperty(subjectProperty);
   const subjectYearBuilt = toNumber(subjectPhysical.year_built);
   const subjectBeds = toNumber(subjectPhysical.bedrooms_total);
   const subjectBaths = toNumber(subjectPhysical.bathrooms_total);
-  const subjectCondition = normalizeText(subjectListing.property_condition_source);
+  const subjectCondition = normalizeText(
+    subjectListing.property_condition_source,
+  );
   const subjectBuildingForm = normalizeText(
     subjectPhysical.building_form_standardized,
   );
@@ -869,17 +1037,35 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
   );
   const subjectLevelsRaw = normalizeText(subjectPhysical.levels_raw);
 
+  const allowedLevelClassesNormalized = mode.useLevelMetric
+    ? normalizeAllowedLevelClasses(input.allowedLevelClasses)
+    : [];
+  const allowedLevelClassesDisplay =
+    mode.useLevelMetric && (input.allowedLevelClasses?.length ?? 0) > 0
+      ? (input.allowedLevelClasses ?? []).filter(Boolean)
+      : subjectLevelClass
+        ? [subjectLevelClass]
+        : [];
+
   const initialSummary = {
     sourceSystem,
     subjectListingId: subjectListing.listing_id,
+    subjectListingContractDate,
     subjectPropertyType,
     subjectPropertyTypeFamily,
     subjectBuildingForm,
     subjectStructureType,
     subjectLevelClass,
     subjectLevelsRaw,
+    requestedPurpose: parseComparablePurpose(input.purpose),
     purposeMode: resolvedPurpose,
     sizeBasis: mode.sizeBasis,
+    requestedSnapshotMode,
+    marketSnapshotDate: snapshotDates.snapshotReferenceDateIso,
+    marketSnapshotDateSource: snapshotDates.snapshotDateSource,
+    earliestCloseDateInclusive: snapshotDates.earliestCloseDateIso,
+    latestCloseDateExclusive: snapshotDates.latestCloseDateExclusiveIso,
+    allowedLevelClasses: allowedLevelClassesDisplay,
   };
 
   const { data: insertedRun, error: insertedRunError } = await supabase
@@ -889,9 +1075,15 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
       subject_real_property_id: input.subjectRealPropertyId,
       subject_listing_row_id: input.subjectListingRowId,
       comparable_profile_id: profile.id,
-      purpose: profile.purpose ?? "arv",
+      purpose: resolvedPurpose,
       status: "pending",
-      parameters_json: mergedRules,
+      parameters_json: {
+        ...mergedRules,
+        requestedPurpose: parseComparablePurpose(input.purpose),
+        requestedSnapshotMode,
+        customSnapshotDate: normalizeText(input.customSnapshotDate),
+        allowedLevelClasses: allowedLevelClassesDisplay,
+      },
       summary_json: initialSummary,
     })
     .select("id")
@@ -913,6 +1105,15 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
             profileSlug: input.profileSlug,
             rules: mergedRules,
             mode,
+            snapshot: {
+              requestedSnapshotMode,
+              subjectListingContractDate,
+              marketSnapshotDate: snapshotDates.snapshotReferenceDateIso,
+              marketSnapshotDateSource: snapshotDates.snapshotDateSource,
+              earliestCloseDateInclusive: snapshotDates.earliestCloseDateIso,
+              latestCloseDateExclusive:
+                snapshotDates.latestCloseDateExclusiveIso,
+            },
             subject: {
               subjectPropertyType,
               subjectPropertyTypeFamily,
@@ -921,6 +1122,7 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
               subjectLevelsRaw,
               subjectSqft,
               subjectLotSizeSqft,
+              allowedLevelClasses: allowedLevelClassesDisplay,
             },
           },
           null,
@@ -963,12 +1165,6 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
       ),
     );
 
-    const earliestCloseDate = new Date(
-      Date.now() - mergedRules.maxDaysSinceClose * 86400000,
-    )
-      .toISOString()
-      .slice(0, 10);
-
     const [candidateProperties, candidatePhysicals, candidateListings] =
       await Promise.all([
         fetchRealPropertiesByIds(supabase, candidatePropertyIds),
@@ -977,16 +1173,18 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           propertyIds: candidatePropertyIds,
           sourceSystem,
           subjectRealPropertyId: input.subjectRealPropertyId,
-          earliestCloseDate,
+          earliestCloseDateIso: snapshotDates.earliestCloseDateIso,
+          latestCloseDateExclusiveIso:
+            snapshotDates.latestCloseDateExclusiveIso,
         }),
       ]);
 
-    const propertyMap = new Map(candidateProperties.map((row) => [row.id, row]));
+    const propertyMap = new Map(
+      candidateProperties.map((row) => [row.id, row]),
+    );
     const physicalMap = new Map(
       candidatePhysicals.map((row) => [row.real_property_id, row]),
     );
-
-    const now = new Date();
 
     const rankedCandidates = candidateListings
       .map((listing) => {
@@ -1008,7 +1206,7 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
         if (distanceMiles > mergedRules.maxDistanceMiles) return null;
 
         const daysSinceClose = listing.close_date
-          ? daysBetween(listing.close_date, now)
+          ? daysBetween(listing.close_date, snapshotDates.snapshotReferenceDate)
           : null;
 
         if (
@@ -1024,7 +1222,8 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           mode.requireSamePropertyType &&
           subjectPropertyType &&
           candidatePropertyType &&
-          normalizedKey(candidatePropertyType) !== normalizedKey(subjectPropertyType)
+          normalizedKey(candidatePropertyType) !==
+            normalizedKey(subjectPropertyType)
         ) {
           return null;
         }
@@ -1040,7 +1239,8 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           mode.requireSameBuildingForm &&
           subjectBuildingForm &&
           candidateBuildingForm &&
-          normalizedKey(candidateBuildingForm) !== normalizedKey(subjectBuildingForm)
+          normalizedKey(candidateBuildingForm) !==
+            normalizedKey(subjectBuildingForm)
         ) {
           return null;
         }
@@ -1048,6 +1248,8 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
         const candidateLevelClass = normalizeText(
           physical.level_class_standardized,
         );
+        const candidateLevelClassNormalized =
+          normalizedKey(candidateLevelClass);
         const candidateLevelsRaw = normalizeText(physical.levels_raw);
         const levelMatchScore01 = mode.useLevelMetric
           ? computeLevelMatchScore({
@@ -1055,16 +1257,29 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
               candidateLevelClass,
               subjectLevelsRaw,
               candidateLevelsRaw,
+              allowedLevelClassesNormalized,
             })
           : null;
 
-        if (
-          mode.requireSameLevelClass &&
-          subjectLevelClass &&
-          candidateLevelClass &&
-          normalizedKey(candidateLevelClass) !== normalizedKey(subjectLevelClass)
-        ) {
-          return null;
+        if (mode.useLevelMetric) {
+          if (allowedLevelClassesNormalized.length > 0) {
+            if (
+              !candidateLevelClassNormalized ||
+              !allowedLevelClassesNormalized.includes(
+                candidateLevelClassNormalized,
+              )
+            ) {
+              return null;
+            }
+          } else if (
+            mode.requireSameLevelClass &&
+            subjectLevelClass &&
+            candidateLevelClass &&
+            normalizedKey(candidateLevelClass) !==
+              normalizedKey(subjectLevelClass)
+          ) {
+            return null;
+          }
         }
 
         const candidateBuildingAreaTotalSqft = toNumber(
@@ -1076,6 +1291,10 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
         const candidateBelowGradeTotalSqft = toNumber(
           physical.below_grade_total_sqft,
         );
+        const candidateBelowGradeFinishedSqft = toNumber(
+          physical.below_grade_finished_area_sqft,
+        );
+        const candidateGarageSpaces = toNumber(physical.garage_spaces);
         const candidateSqft = sizeSqftFromPhysical(physical);
 
         const sqftDeltaPct =
@@ -1150,7 +1369,9 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           return null;
         }
 
-        const candidateCondition = normalizeText(listing.property_condition_source);
+        const candidateCondition = normalizeText(
+          listing.property_condition_source,
+        );
         const conditionMatchScore01 = mode.useConditionMetric
           ? computeConditionMatchScore(subjectCondition, candidateCondition)
           : null;
@@ -1260,8 +1481,12 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           score_breakdown_json: {
             purposeMode: mode.purpose,
             sizeBasis: mode.sizeBasis,
+            requestedSnapshotMode,
+            marketSnapshotDate: snapshotDates.snapshotReferenceDateIso,
+            marketSnapshotDateSource: snapshotDates.snapshotDateSource,
             subjectPropertyType,
             subjectPropertyTypeFamily,
+            allowedLevelClasses: allowedLevelClassesDisplay,
             totalWeight: scoreBreakdown.totalWeight,
             components: scoreBreakdown.breakdown,
           },
@@ -1274,12 +1499,16 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
             building_area_total_sqft: candidateBuildingAreaTotalSqft,
             above_grade_finished_area_sqft: candidateAboveGradeFinishedSqft,
             below_grade_total_sqft: candidateBelowGradeTotalSqft,
+            below_grade_finished_area_sqft: candidateBelowGradeFinishedSqft,
             lot_size_sqft: candidateLotSizeSqft,
             size_basis: mode.sizeBasis,
             size_basis_value:
-              mode.sizeBasis === "lot_size" ? candidateLotSizeSqft : candidateSqft,
+              mode.sizeBasis === "lot_size"
+                ? candidateLotSizeSqft
+                : candidateSqft,
             bedrooms_total: candidateBeds,
             bathrooms_total: candidateBaths,
+            garage_spaces: candidateGarageSpaces,
             year_built: candidateYearBuilt,
             property_type: candidatePropertyType,
             property_sub_type: normalizeText(physical.property_sub_type),
@@ -1343,6 +1572,14 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
         JSON.stringify(
           {
             runId: insertedRun.id,
+            snapshot: {
+              requestedSnapshotMode,
+              marketSnapshotDate: snapshotDates.snapshotReferenceDateIso,
+              marketSnapshotDateSource: snapshotDates.snapshotDateSource,
+              earliestCloseDateInclusive: snapshotDates.earliestCloseDateIso,
+              latestCloseDateExclusive:
+                snapshotDates.latestCloseDateExclusiveIso,
+            },
             candidateCount: candidateRows.length,
             preview: candidateRows.slice(0, 5),
           },
@@ -1428,10 +1665,17 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
       candidateCount: rankedCandidates.length,
       effectiveRules: {
         ...mergedRules,
+        requestedPurpose: parseComparablePurpose(input.purpose),
+        resolvedPurpose,
+        requestedSnapshotMode,
+        customSnapshotDate: normalizeText(input.customSnapshotDate),
+        allowedLevelClasses: allowedLevelClassesDisplay,
         sizeBasis: mode.sizeBasis,
         requireSamePropertyType: mode.requireSamePropertyType,
         requireSameBuildingForm: mode.requireSameBuildingForm,
-        requireSameLevelClass: mode.requireSameLevelClass,
+        requireSameLevelClass:
+          allowedLevelClassesNormalized.length === 0 &&
+          mode.requireSameLevelClass,
       },
     };
 

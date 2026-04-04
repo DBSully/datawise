@@ -9,6 +9,15 @@ type ComparablesPageProps = {
   searchParams?: Promise<{ comp_run?: string; comp_error?: string }>;
 };
 
+function defaultComparableProfileSlug(propertyType: string | null) {
+  const normalized = (propertyType ?? "").trim().toLowerCase();
+
+  if (normalized === "condo") return "denver_condo_standard_v1";
+  if (normalized === "townhome") return "denver_townhome_standard_v1";
+
+  return "denver_detached_standard_v1";
+}
+
 export default async function ComparablesPage({
   params,
   searchParams,
@@ -24,6 +33,7 @@ export default async function ComparablesPage({
   const [
     { data: property, error: propertyError },
     { data: analysis, error: analysisError },
+    { data: subjectPhysical, error: subjectPhysicalError },
   ] = await Promise.all([
     supabase
       .from("real_properties")
@@ -33,7 +43,9 @@ export default async function ComparablesPage({
           unparsed_address,
           city,
           state,
-          postal_code
+          postal_code,
+          lot_size_sqft,
+          lot_size_acres
         `,
       )
       .eq("id", id)
@@ -56,34 +68,95 @@ export default async function ComparablesPage({
       .eq("created_by_user_id", user?.id ?? "")
       .eq("is_archived", false)
       .maybeSingle(),
+
+    supabase
+      .from("property_physical")
+      .select(
+        `
+          real_property_id,
+          property_type,
+          property_sub_type,
+          building_form_standardized,
+          level_class_standardized,
+          levels_raw,
+          building_area_total_sqft,
+          above_grade_finished_area_sqft,
+          below_grade_total_sqft,
+          below_grade_finished_area_sqft,
+          year_built,
+          bedrooms_total,
+          bathrooms_total,
+          garage_spaces
+        `,
+      )
+      .eq("real_property_id", id)
+      .maybeSingle(),
   ]);
 
   if (propertyError) throw new Error(propertyError.message);
   if (analysisError) throw new Error(analysisError.message);
+  if (subjectPhysicalError) throw new Error(subjectPhysicalError.message);
   if (!property || !analysis) notFound();
 
-  const [
-    { data: latestListing, error: listingError },
-    { data: defaultProfile, error: profileError },
-    { data: latestRun, error: latestRunError },
-  ] = await Promise.all([
-    supabase
-      .from("mls_listings")
-      .select(
-        `
+  const resolvedDefaultProfileSlug = defaultComparableProfileSlug(
+    subjectPhysical?.property_type ?? null,
+  );
+
+  const listingSelect = `
         id,
         listing_id,
         mls_status,
         list_price,
-        property_condition_source
-      `,
-      )
+        property_condition_source,
+        listing_contract_date,
+        source_system
+      `;
+
+  let subjectListing: {
+    id: string;
+    listing_id: string | null;
+    mls_status: string | null;
+    list_price: number | null;
+    property_condition_source: string | null;
+    listing_contract_date: string | null;
+    source_system: string | null;
+  } | null = null;
+
+  if (analysis.listing_id) {
+    const { data: linkedListing, error: linkedListingError } = await supabase
+      .from("mls_listings")
+      .select(listingSelect)
       .eq("real_property_id", id)
-      .order("listing_contract_date", { ascending: false, nullsFirst: true })
+      .eq("listing_id", analysis.listing_id)
       .order("created_at", { ascending: false })
       .limit(1)
-      .maybeSingle(),
+      .maybeSingle();
 
+    if (linkedListingError) throw new Error(linkedListingError.message);
+    subjectListing = linkedListing;
+  }
+
+  if (!subjectListing) {
+    const { data: latestListing, error: listingError } = await supabase
+      .from("mls_listings")
+      .select(listingSelect)
+      .eq("real_property_id", id)
+      .order("listing_contract_date", {
+        ascending: false,
+        nullsFirst: false,
+      })
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (listingError) throw new Error(listingError.message);
+    subjectListing = latestListing;
+  }
+
+  const [
+    { data: defaultProfile, error: profileError },
+    { data: latestRun, error: latestRunError },
+  ] = await Promise.all([
     supabase
       .from("comparable_profiles")
       .select(
@@ -94,7 +167,7 @@ export default async function ComparablesPage({
         rules_json
       `,
       )
-      .eq("slug", "denver_detached_basic_v1")
+      .eq("slug", resolvedDefaultProfileSlug)
       .maybeSingle(),
 
     supabase
@@ -114,7 +187,6 @@ export default async function ComparablesPage({
       .maybeSingle(),
   ]);
 
-  if (listingError) throw new Error(listingError.message);
   if (profileError) throw new Error(profileError.message);
   if (latestRunError) throw new Error(latestRunError.message);
 
@@ -128,6 +200,7 @@ export default async function ComparablesPage({
     raw_score: number | null;
     selected_yn: boolean;
     metrics_json: Record<string, unknown> | null;
+    score_breakdown_json: Record<string, unknown> | null;
   }> = [];
 
   if (latestRun?.id) {
@@ -142,7 +215,8 @@ export default async function ComparablesPage({
         sqft_delta_pct,
         raw_score,
         selected_yn,
-        metrics_json
+        metrics_json,
+        score_breakdown_json
       `,
       )
       .eq("comparable_search_run_id", latestRun.id)
@@ -160,6 +234,7 @@ export default async function ComparablesPage({
         raw_score: number | null;
         selected_yn: boolean;
         metrics_json: Record<string, unknown> | null;
+        score_breakdown_json: Record<string, unknown> | null;
       }>) ?? [];
 
     const compListingRowIds = Array.from(
@@ -239,13 +314,43 @@ export default async function ComparablesPage({
       <ComparableWorkspacePanel
         propertyId={property.id}
         analysisId={analysis.id}
-        subjectListingRowId={latestListing?.id ?? null}
-        subjectListingMlsNumber={latestListing?.listing_id ?? null}
+        subjectListingRowId={subjectListing?.id ?? null}
+        subjectListingMlsNumber={subjectListing?.listing_id ?? null}
+        analysisStrategyType={analysis.strategy_type ?? null}
+        defaultProfileSlug={defaultProfile?.slug ?? resolvedDefaultProfileSlug}
         latestRun={latestRun}
         latestCandidates={latestCandidates}
         defaultProfileRules={profileRules}
         compRunMessage={resolvedSearchParams?.comp_run ?? null}
         compErrorMessage={resolvedSearchParams?.comp_error ?? null}
+        subjectContext={{
+          propertyType: subjectPhysical?.property_type ?? null,
+          propertySubType: subjectPhysical?.property_sub_type ?? null,
+          buildingFormStandardized:
+            subjectPhysical?.building_form_standardized ?? null,
+          levelClassStandardized:
+            subjectPhysical?.level_class_standardized ?? null,
+          levelsRaw: subjectPhysical?.levels_raw ?? null,
+          buildingAreaTotalSqft:
+            subjectPhysical?.building_area_total_sqft ?? null,
+          aboveGradeFinishedAreaSqft:
+            subjectPhysical?.above_grade_finished_area_sqft ?? null,
+          belowGradeTotalSqft: subjectPhysical?.below_grade_total_sqft ?? null,
+          belowGradeFinishedAreaSqft:
+            subjectPhysical?.below_grade_finished_area_sqft ?? null,
+          lotSizeSqft:
+            property.lot_size_sqft ??
+            (typeof property.lot_size_acres === "number"
+              ? property.lot_size_acres * 43560
+              : null),
+          yearBuilt: subjectPhysical?.year_built ?? null,
+          bedroomsTotal: subjectPhysical?.bedrooms_total ?? null,
+          bathroomsTotal: subjectPhysical?.bathrooms_total ?? null,
+          garageSpaces: subjectPhysical?.garage_spaces ?? null,
+          listingContractDate: subjectListing?.listing_contract_date ?? null,
+          address: property.unparsed_address ?? null,
+          listPrice: subjectListing?.list_price ?? null,
+        }}
       />
     </section>
   );
