@@ -112,10 +112,10 @@ export async function promoteToAnalysisAction(formData: FormData): Promise<void>
     throw new Error("Missing result_id");
   }
 
-  // Load the screening result
+  // Load the screening result with comp run linkage
   const { data: result, error: resultError } = await supabase
     .from("screening_results")
-    .select("id, real_property_id, arv_aggregate, screening_batch_id")
+    .select("id, real_property_id, arv_aggregate, screening_batch_id, comp_search_run_id")
     .eq("id", resultId)
     .single();
 
@@ -138,6 +138,15 @@ export async function promoteToAnalysisAction(formData: FormData): Promise<void>
 
   if (analysisError || !analysis) {
     throw new Error(analysisError?.message ?? "Failed to create analysis");
+  }
+
+  // Link the screening's comp search run to the new analysis
+  // so the analysis workspace opens with comps pre-loaded
+  if (result.comp_search_run_id) {
+    await supabase
+      .from("comparable_search_runs")
+      .update({ analysis_id: analysis.id })
+      .eq("id", result.comp_search_run_id);
   }
 
   // Mark the screening result as promoted

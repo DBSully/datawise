@@ -4,6 +4,11 @@
 // Orchestrates the full fix-and-flip screening pipeline for a batch of
 // subject properties. Pre-loads the comp pool once into memory, then
 // processes each subject without additional DB queries.
+//
+// Comp scoring uses the shared scoring functions from lib/comparables/scoring.ts
+// so that screening and analysis produce identical scoring output.
+// Comps are persisted to comparable_search_runs + comparable_search_candidates
+// for seamless transition from screening into analysis.
 // ---------------------------------------------------------------------------
 
 import "server-only";
@@ -21,6 +26,39 @@ import type {
   CompArvInput,
   ScreeningResultRow,
 } from "./types";
+import {
+  haversineMiles,
+  pctDelta,
+  componentScoreFromDelta,
+  computeFormMatchScore,
+  computeLevelMatchScore,
+  computeConditionMatchScore,
+  resolvePropertyTypeFamily,
+  resolveComparableMode,
+  buildWeightedScore,
+  clamp01,
+  roundNumber,
+  type ComparableSearchRules,
+} from "@/lib/comparables/scoring";
+
+// ---------------------------------------------------------------------------
+// Screening-specific search rules (wider net than analysis defaults)
+// ---------------------------------------------------------------------------
+
+const SCREENING_RULES: ComparableSearchRules = {
+  maxDistanceMiles: 0.75,
+  maxDaysSinceClose: 365,
+  sqftTolerancePct: 30,
+  lotSizeTolerancePct: 30,
+  yearToleranceYears: 25,
+  bedTolerance: 2,
+  bathTolerance: 2,
+  maxCandidates: 25,
+  requireSamePropertyType: true,
+  requireSameLevelClass: true,
+  requireSameBuildingForm: true,
+  preferredSizeBasis: "building_area_total",
+};
 
 // ---------------------------------------------------------------------------
 // In-memory pool types (loaded once per batch)
@@ -30,15 +68,20 @@ type PoolProperty = {
   id: string;
   unparsed_address: string;
   city: string;
+  state: string;
+  postal_code: string | null;
   latitude: number;
   longitude: number;
+  lot_size_sqft: number | null;
 };
 
 type PoolPhysical = {
   real_property_id: string;
   property_type: string | null;
+  property_sub_type: string | null;
   structure_type: string | null;
   level_class_standardized: string | null;
+  levels_raw: string | null;
   building_form_standardized: string | null;
   building_area_total_sqft: number | null;
   above_grade_finished_area_sqft: number | null;
@@ -48,6 +91,7 @@ type PoolPhysical = {
   year_built: number | null;
   bedrooms_total: number | null;
   bathrooms_total: number | null;
+  garage_spaces: number | null;
 };
 
 type PoolListing = {
@@ -80,14 +124,16 @@ type SubjectData = {
   financials: PoolFinancials | null;
 };
 
+/** Scored candidate ready for DB persistence and ARV calculation. */
+type ScoredCandidate = {
+  compArvInput: CompArvInput;
+  candidateRow: Record<string, unknown>;
+};
+
 // ---------------------------------------------------------------------------
 // Supabase helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Fetch all rows from a table, paginating through Supabase's row limit.
- * Returns the full array or throws on error.
- */
 async function fetchAllRows<T>(
   supabase: any,
   table: string,
@@ -120,26 +166,6 @@ async function fetchAllRows<T>(
 }
 
 // ---------------------------------------------------------------------------
-// Haversine distance
-// ---------------------------------------------------------------------------
-
-function haversineMiles(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number,
-): number {
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const R = 3958.7613;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-// ---------------------------------------------------------------------------
 // Numeric helpers
 // ---------------------------------------------------------------------------
 
@@ -150,19 +176,11 @@ function toNum(v: unknown): number {
 }
 
 function pickBuildingSqft(p: PoolPhysical): number {
-  return (
-    toNum(p.building_area_total_sqft) ||
-    toNum(p.above_grade_finished_area_sqft) ||
-    0
-  );
+  return toNum(p.building_area_total_sqft) || toNum(p.above_grade_finished_area_sqft) || 0;
 }
 
 function pickAboveGradeSqft(p: PoolPhysical): number {
-  return (
-    toNum(p.above_grade_finished_area_sqft) ||
-    toNum(p.building_area_total_sqft) ||
-    0
-  );
+  return toNum(p.above_grade_finished_area_sqft) || toNum(p.building_area_total_sqft) || 0;
 }
 
 function belowGradeFinished(p: PoolPhysical): number {
@@ -173,9 +191,7 @@ function belowGradeUnfinished(p: PoolPhysical): number {
   if (toNum(p.below_grade_unfinished_area_sqft) > 0) {
     return toNum(p.below_grade_unfinished_area_sqft);
   }
-  const total = toNum(p.below_grade_total_sqft);
-  const finished = toNum(p.below_grade_finished_area_sqft);
-  return Math.max(0, total - finished);
+  return Math.max(0, toNum(p.below_grade_total_sqft) - toNum(p.below_grade_finished_area_sqft));
 }
 
 // ---------------------------------------------------------------------------
@@ -194,13 +210,13 @@ async function loadCompPool(
     fetchAllRows<PoolProperty>(
       supabase,
       "real_properties",
-      "id, unparsed_address, city, latitude, longitude",
+      "id, unparsed_address, city, state, postal_code, latitude, longitude, lot_size_sqft",
       (q: any) => q.not("latitude", "is", null).not("longitude", "is", null),
     ),
     fetchAllRows<PoolPhysical>(
       supabase,
       "property_physical",
-      "real_property_id, property_type, structure_type, level_class_standardized, building_form_standardized, building_area_total_sqft, above_grade_finished_area_sqft, below_grade_total_sqft, below_grade_finished_area_sqft, below_grade_unfinished_area_sqft, year_built, bedrooms_total, bathrooms_total",
+      "real_property_id, property_type, property_sub_type, structure_type, level_class_standardized, levels_raw, building_form_standardized, building_area_total_sqft, above_grade_finished_area_sqft, below_grade_total_sqft, below_grade_finished_area_sqft, below_grade_unfinished_area_sqft, year_built, bedrooms_total, bathrooms_total, garage_spaces",
     ),
     fetchAllRows<PoolListing>(
       supabase,
@@ -221,18 +237,11 @@ async function loadCompPool(
   const closedByProperty = new Map<string, PoolListing[]>();
   for (const listing of closedListings) {
     const existing = closedByProperty.get(listing.real_property_id);
-    if (existing) {
-      existing.push(listing);
-    } else {
-      closedByProperty.set(listing.real_property_id, [listing]);
-    }
+    if (existing) existing.push(listing);
+    else closedByProperty.set(listing.real_property_id, [listing]);
   }
 
-  return {
-    properties: propertyMap,
-    physicals: physicalMap,
-    closedListingsByProperty: closedByProperty,
-  };
+  return { properties: propertyMap, physicals: physicalMap, closedListingsByProperty: closedByProperty };
 }
 
 // ---------------------------------------------------------------------------
@@ -244,14 +253,12 @@ async function loadSubjects(
   propertyIds: string[],
   pool: CompPool,
 ): Promise<Map<string, SubjectData>> {
-  // Chunk IDs to avoid Supabase/PostgREST URL length limits on .in() filters
   const ID_CHUNK_SIZE = 200;
   const idChunks: string[][] = [];
   for (let i = 0; i < propertyIds.length; i += ID_CHUNK_SIZE) {
     idChunks.push(propertyIds.slice(i, i + ID_CHUNK_SIZE));
   }
 
-  // Load financials for subjects (chunked)
   const financials: PoolFinancials[] = [];
   for (const chunk of idChunks) {
     const rows = await fetchAllRows<PoolFinancials>(
@@ -262,11 +269,8 @@ async function loadSubjects(
     );
     financials.push(...rows);
   }
-  const financialsMap = new Map(
-    financials.map((f) => [f.real_property_id, f]),
-  );
+  const financialsMap = new Map(financials.map((f) => [f.real_property_id, f]));
 
-  // Load latest active listing for each subject (chunked)
   const activeListings: PoolListing[] = [];
   for (const chunk of idChunks) {
     const rows = await fetchAllRows<PoolListing>(
@@ -282,7 +286,6 @@ async function loadSubjects(
     activeListings.push(...rows);
   }
 
-  // Keep latest listing per property
   const latestListingByProperty = new Map<string, PoolListing>();
   for (const listing of activeListings) {
     if (!latestListingByProperty.has(listing.real_property_id)) {
@@ -295,7 +298,6 @@ async function loadSubjects(
     const property = pool.properties.get(id);
     const physical = pool.physicals.get(id);
     if (!property || !physical) continue;
-
     subjects.set(id, {
       property,
       physical,
@@ -303,34 +305,34 @@ async function loadSubjects(
       financials: financialsMap.get(id) ?? null,
     });
   }
-
   return subjects;
 }
 
 // ---------------------------------------------------------------------------
-// Find comps for a subject (in-memory)
+// Score comps for a subject (in-memory, using shared scoring)
 // ---------------------------------------------------------------------------
 
-function findCompsForSubject(
+function scoreCompsForSubject(
   subject: SubjectData,
   pool: CompPool,
-  maxDistanceMiles: number,
-  maxDaysSinceClose: number,
+  rules: ComparableSearchRules,
   referenceDate: Date,
-): CompArvInput[] {
+): ScoredCandidate[] {
   const subjectLat = subject.property.latitude;
   const subjectLon = subject.property.longitude;
-  const subjectType = resolvePropertyTypeKey(subject.physical.property_type);
-  const subjectLevelClass = subject.physical.level_class_standardized;
-  const subjectStructureType = subject.physical.structure_type;
+  const subjectFamily = resolvePropertyTypeFamily(subject.physical.property_type);
+  const subjectSqft = pickBuildingSqft(subject.physical);
+  const subjectAbove = pickAboveGradeSqft(subject.physical);
+  const subjectCondition = subject.listing?.property_condition_source ?? null;
 
-  const candidates: CompArvInput[] = [];
+  const mode = resolveComparableMode({ purpose: "flip", subjectFamily, rules });
 
   // Bounding box pre-filter
-  const latDelta = maxDistanceMiles / 69;
-  const lonDivisor =
-    Math.max(0.2, Math.cos((subjectLat * Math.PI) / 180)) * 69.172;
-  const lonDelta = maxDistanceMiles / lonDivisor;
+  const latDelta = rules.maxDistanceMiles / 69;
+  const lonDivisor = Math.max(0.2, Math.cos((subjectLat * Math.PI) / 180)) * 69.172;
+  const lonDelta = rules.maxDistanceMiles / lonDivisor;
+
+  const scored: ScoredCandidate[] = [];
 
   for (const [compPropertyId, compListings] of pool.closedListingsByProperty) {
     if (compPropertyId === subject.property.id) continue;
@@ -343,87 +345,203 @@ function findCompsForSubject(
     if (
       Math.abs(compProperty.latitude - subjectLat) > latDelta ||
       Math.abs(compProperty.longitude - subjectLon) > lonDelta
-    ) {
-      continue;
-    }
+    ) continue;
 
     // Property type match
-    const compType = resolvePropertyTypeKey(compPhysical.property_type);
-    if (compType !== subjectType) continue;
-
-    // Structure type / level class match for detached
-    if (subjectType === "detached") {
-      if (
-        subjectLevelClass &&
-        compPhysical.level_class_standardized &&
-        subjectLevelClass !== compPhysical.level_class_standardized
-      ) {
-        continue;
-      }
+    if (mode.requireSamePropertyType) {
+      const compFamily = resolvePropertyTypeFamily(compPhysical.property_type);
+      if (compFamily !== subjectFamily) continue;
     }
 
-    const distance = haversineMiles(
-      subjectLat,
-      subjectLon,
-      compProperty.latitude,
-      compProperty.longitude,
+    // Building form match
+    const formScore = computeFormMatchScore(
+      subject.physical.building_form_standardized,
+      compPhysical.building_form_standardized,
     );
-    if (distance > maxDistanceMiles) continue;
+    if (mode.requireSameBuildingForm && formScore !== null && formScore < 1) continue;
 
-    // Score best listing for this property (most recent close)
+    // Level class match
+    const levelScore = computeLevelMatchScore({
+      subjectLevelClass: subject.physical.level_class_standardized,
+      candidateLevelClass: compPhysical.level_class_standardized,
+      subjectLevelsRaw: subject.physical.levels_raw ?? null,
+      candidateLevelsRaw: compPhysical.levels_raw ?? null,
+      allowedLevelClassesNormalized: [],
+    });
+    if (mode.requireSameLevelClass && levelScore !== null && levelScore < 0.85) continue;
+
+    const distanceMiles = haversineMiles(
+      subjectLat, subjectLon, compProperty.latitude, compProperty.longitude,
+    );
+    if (distanceMiles > rules.maxDistanceMiles) continue;
+
+    // Use first (most recent) closed listing per property
     for (const listing of compListings) {
       if (!listing.close_date || !listing.close_price) continue;
 
       const closeDateMs = new Date(listing.close_date).getTime();
-      const daysSinceClose = Math.floor(
-        (referenceDate.getTime() - closeDateMs) / 86_400_000,
-      );
-      if (daysSinceClose > maxDaysSinceClose) continue;
+      const daysSinceClose = Math.floor((referenceDate.getTime() - closeDateMs) / 86_400_000);
+      if (daysSinceClose < 0 || daysSinceClose > rules.maxDaysSinceClose) continue;
 
-      candidates.push({
+      const compSqft = pickBuildingSqft(compPhysical);
+      const compAbove = pickAboveGradeSqft(compPhysical);
+
+      // Tolerance filters
+      const sqftDeltaPct = subjectSqft > 0 && compSqft > 0 ? pctDelta(subjectSqft, compSqft) : null;
+      if (mode.useSqftMetric && sqftDeltaPct !== null && sqftDeltaPct > rules.sqftTolerancePct) continue;
+
+      const yearDelta = subject.physical.year_built !== null && compPhysical.year_built !== null
+        ? Math.abs(subject.physical.year_built - compPhysical.year_built)
+        : null;
+      if (mode.useYearMetric && yearDelta !== null && yearDelta > rules.yearToleranceYears) continue;
+
+      const bedDelta = subject.physical.bedrooms_total !== null && compPhysical.bedrooms_total !== null
+        ? Math.abs(subject.physical.bedrooms_total - compPhysical.bedrooms_total)
+        : null;
+      if (mode.useBedMetric && bedDelta !== null && bedDelta > rules.bedTolerance) continue;
+
+      const bathDelta = subject.physical.bathrooms_total !== null && compPhysical.bathrooms_total !== null
+        ? Math.abs(toNum(subject.physical.bathrooms_total) - toNum(compPhysical.bathrooms_total))
+        : null;
+      if (mode.useBathMetric && bathDelta !== null && bathDelta > rules.bathTolerance) continue;
+
+      // Condition match
+      const conditionScore = computeConditionMatchScore(subjectCondition, listing.property_condition_source);
+
+      // PSF
+      const ppsf = compSqft > 0 ? roundNumber(toNum(listing.close_price) / compSqft, 2) : null;
+
+      // Build weighted score (same logic as analysis engine)
+      const distanceComponent = clamp01(1 - distanceMiles / rules.maxDistanceMiles);
+      const recencyComponent = clamp01(1 - daysSinceClose / rules.maxDaysSinceClose);
+
+      const scoreResult = buildWeightedScore({
+        weights: mode.weights,
+        components: {
+          distance: { used: true, score: distanceComponent },
+          recency: { used: true, score: recencyComponent },
+          size: { used: mode.useSqftMetric, score: componentScoreFromDelta(sqftDeltaPct, rules.sqftTolerancePct) },
+          lotSize: { used: false, score: null },
+          year: { used: mode.useYearMetric, score: componentScoreFromDelta(yearDelta, rules.yearToleranceYears) },
+          beds: { used: mode.useBedMetric, score: componentScoreFromDelta(bedDelta, Math.max(rules.bedTolerance, 1)) },
+          baths: { used: mode.useBathMetric, score: componentScoreFromDelta(bathDelta, Math.max(rules.bathTolerance, 0.5)) },
+          form: { used: mode.useBuildingFormMetric, score: formScore },
+          level: { used: mode.useLevelMetric, score: levelScore },
+          condition: { used: mode.useConditionMetric, score: conditionScore },
+        },
+      });
+
+      const distRounded = roundNumber(distanceMiles, 3);
+
+      // Build candidate row for DB persistence (same structure as analysis engine)
+      const candidateRow = {
+        comp_listing_row_id: listing.id,
+        comp_real_property_id: compPropertyId,
+        distance_miles: distRounded,
+        days_since_close: daysSinceClose,
+        sqft_delta_pct: sqftDeltaPct !== null ? roundNumber(sqftDeltaPct, 3) : null,
+        lot_size_delta_pct: null,
+        year_built_delta: yearDelta,
+        bed_delta: bedDelta,
+        bath_delta: bathDelta !== null ? roundNumber(bathDelta, 2) : null,
+        form_match_score: formScore !== null ? roundNumber(formScore * 100, 2) : null,
+        raw_score: scoreResult.rawScore,
+        selected_yn: false,
+        score_breakdown_json: {
+          purposeMode: "flip",
+          sizeBasis: "building_area_total",
+          totalWeight: scoreResult.totalWeight,
+          components: scoreResult.breakdown,
+        },
+        metrics_json: {
+          listing_id: listing.listing_id,
+          address: compProperty.unparsed_address,
+          city: compProperty.city,
+          state: compProperty.state,
+          postal_code: compProperty.postal_code,
+          close_date: listing.close_date,
+          close_price: listing.close_price,
+          ppsf,
+          building_area_total_sqft: compPhysical.building_area_total_sqft,
+          above_grade_finished_area_sqft: compPhysical.above_grade_finished_area_sqft,
+          below_grade_total_sqft: compPhysical.below_grade_total_sqft,
+          below_grade_finished_area_sqft: compPhysical.below_grade_finished_area_sqft,
+          lot_size_sqft: compProperty.lot_size_sqft,
+          size_basis: "building_area_total",
+          size_basis_value: compSqft,
+          bedrooms_total: compPhysical.bedrooms_total,
+          bathrooms_total: compPhysical.bathrooms_total,
+          garage_spaces: compPhysical.garage_spaces,
+          year_built: compPhysical.year_built,
+          property_type: compPhysical.property_type,
+          property_sub_type: compPhysical.property_sub_type,
+          structure_type: compPhysical.structure_type,
+          building_form_standardized: compPhysical.building_form_standardized,
+          levels_raw: compPhysical.levels_raw,
+          level_class_standardized: compPhysical.level_class_standardized,
+          property_condition_source: listing.property_condition_source,
+          distance_miles: distRounded,
+          days_since_close: daysSinceClose,
+          sqft_delta_pct: sqftDeltaPct !== null ? roundNumber(sqftDeltaPct, 3) : null,
+          year_built_delta: yearDelta,
+          bed_delta: bedDelta,
+          bath_delta: bathDelta !== null ? roundNumber(bathDelta, 2) : null,
+          form_match_score: formScore !== null ? roundNumber(formScore * 100, 2) : null,
+          level_match_score: levelScore !== null ? roundNumber(levelScore * 100, 2) : null,
+          condition_match_score: conditionScore !== null ? roundNumber(conditionScore * 100, 2) : null,
+        },
+      };
+
+      // Build ARV input
+      const compArvInput: CompArvInput = {
         compListingRowId: listing.id,
         compRealPropertyId: compPropertyId,
         listingId: listing.listing_id,
         address: compProperty.unparsed_address,
         closePrice: toNum(listing.close_price),
         closeDateIso: listing.close_date,
-        compBuildingSqft: pickBuildingSqft(compPhysical),
-        compAboveGradeSqft: pickAboveGradeSqft(compPhysical),
-        distanceMiles: Math.round(distance * 1000) / 1000,
+        compBuildingSqft: compSqft,
+        compAboveGradeSqft: compAbove,
+        distanceMiles: distRounded,
         yearBuilt: compPhysical.year_built,
         bedroomsTotal: compPhysical.bedrooms_total,
         bathroomsTotal: compPhysical.bathrooms_total,
         propertyType: compPhysical.property_type,
         levelClass: compPhysical.level_class_standardized,
         mlsStatus: listing.mls_status,
-      });
+      };
 
-      break; // Use the first (most recent) closed listing per property
+      scored.push({ compArvInput, candidateRow });
+      break; // Use first (most recent) closed listing per property
     }
   }
 
-  // Sort by distance, then recency
-  candidates.sort((a, b) => {
-    if (a.distanceMiles !== b.distanceMiles)
-      return a.distanceMiles - b.distanceMiles;
-    return (
-      new Date(b.closeDateIso).getTime() - new Date(a.closeDateIso).getTime()
-    );
+  // Sort by raw_score descending
+  scored.sort((a, b) => {
+    const sa = a.candidateRow.raw_score as number;
+    const sb = b.candidateRow.raw_score as number;
+    if (sb !== sa) return sb - sa;
+    return (a.compArvInput.distanceMiles - b.compArvInput.distanceMiles);
   });
 
-  return candidates.slice(0, 25); // Cap at 25 comps per subject
+  return scored.slice(0, rules.maxCandidates);
 }
 
 // ---------------------------------------------------------------------------
 // Screen one subject
 // ---------------------------------------------------------------------------
 
+type ScreeningSubjectResult = {
+  result: ScreeningResultRow;
+  candidateRows: Record<string, unknown>[];
+};
+
 function screenSubject(
   subject: SubjectData,
   pool: CompPool,
   profile: FlipStrategyProfile,
   referenceDate: Date,
-): ScreeningResultRow {
+): ScreeningSubjectResult {
   const propertyType = resolvePropertyTypeKey(subject.physical.property_type);
   const buildingSqft = pickBuildingSqft(subject.physical);
   const aboveGradeSqft = pickAboveGradeSqft(subject.physical);
@@ -444,53 +562,23 @@ function screenSubject(
     subjectYearBuilt: subject.physical.year_built,
   };
 
-  // Skip if missing critical data
-  if (buildingSqft <= 0) {
-    return {
+  const skipResult = (msg: string): ScreeningSubjectResult => ({
+    result: {
       ...base,
-      arv: null,
-      rehab: null,
-      holding: null,
-      transaction: null,
-      dealMath: null,
-      qualification: {
-        isPrimeCandidate: false,
-        qualifyingCompCount: 0,
-        reasons: [],
-        disqualifiers: ["Missing building square footage"],
-      },
-      screeningStatus: "skipped",
-      errorMessage: "Missing building square footage",
-    };
-  }
+      arv: null, rehab: null, holding: null, transaction: null, dealMath: null,
+      qualification: { isPrimeCandidate: false, qualifyingCompCount: 0, reasons: [], disqualifiers: [msg] },
+      screeningStatus: "skipped", errorMessage: msg,
+    },
+    candidateRows: [],
+  });
 
-  if (listPrice <= 0) {
-    return {
-      ...base,
-      arv: null,
-      rehab: null,
-      holding: null,
-      transaction: null,
-      dealMath: null,
-      qualification: {
-        isPrimeCandidate: false,
-        qualifyingCompCount: 0,
-        reasons: [],
-        disqualifiers: ["Missing list price"],
-      },
-      screeningStatus: "skipped",
-      errorMessage: "Missing list price",
-    };
-  }
+  if (buildingSqft <= 0) return skipResult("Missing building square footage");
+  if (listPrice <= 0) return skipResult("Missing list price");
 
-  // Find comps
-  const comps = findCompsForSubject(
-    subject,
-    pool,
-    0.75, // Max distance for comp search (wider than qualification threshold)
-    365, // Max days since close for comp search
-    referenceDate,
-  );
+  // Score comps using shared scoring
+  const scored = scoreCompsForSubject(subject, pool, SCREENING_RULES, referenceDate);
+  const comps = scored.map((s) => s.compArvInput);
+  const candidateRows = scored.map((s) => s.candidateRow);
 
   // ARV
   const arv = calculateArv({
@@ -504,93 +592,138 @@ function screenSubject(
 
   if (!arv || arv.arvAggregate <= 0) {
     return {
-      ...base,
-      arv: null,
-      rehab: null,
-      holding: null,
-      transaction: null,
-      dealMath: null,
-      qualification: {
-        isPrimeCandidate: false,
-        qualifyingCompCount: 0,
-        reasons: [],
-        disqualifiers: ["No usable comparable sales found"],
+      result: {
+        ...base, arv: null, rehab: null, holding: null, transaction: null, dealMath: null,
+        qualification: { isPrimeCandidate: false, qualifyingCompCount: 0, reasons: [], disqualifiers: ["No usable comparable sales found"] },
+        screeningStatus: "screened", errorMessage: null,
       },
-      screeningStatus: "screened",
-      errorMessage: null,
+      candidateRows,
     };
   }
 
-  // Rehab
   const rehab = calculateRehab({
-    propertyType,
-    aboveGradeSqft,
+    propertyType, aboveGradeSqft,
     belowGradeFinishedSqft: belowGradeFinished(subject.physical),
     belowGradeUnfinishedSqft: belowGradeUnfinished(subject.physical),
-    buildingSqft,
-    listPrice,
+    buildingSqft, listPrice,
     yearBuilt: subject.physical.year_built,
     condition: subject.listing?.property_condition_source ?? null,
     config: profile.rehab,
   });
 
-  // Holding
   const holding = calculateHolding({
-    buildingSqft,
-    listPrice,
+    buildingSqft, listPrice,
     annualTax: subject.financials?.annual_property_tax ?? null,
     annualHoa: subject.financials?.annual_hoa_dues ?? null,
     config: profile.holding,
   });
 
-  // Transaction
   const transaction = calculateTransaction({
     acquisitionPrice: listPrice,
     arvPrice: arv.arvAggregate,
     config: profile.transaction,
   });
 
-  // Deal math
   const dealMath = calculateDealMath({
-    arv: arv.arvAggregate,
-    listPrice,
-    buildingSqft,
-    rehabTotal: rehab.total,
-    holdTotal: holding.total,
+    arv: arv.arvAggregate, listPrice, buildingSqft,
+    rehabTotal: rehab.total, holdTotal: holding.total,
     transactionTotal: transaction.total,
     targetProfit: profile.targetProfitDefault,
   });
 
-  // Qualification
   const qualification = evaluateQualification({
-    comps: arv.perCompDetails,
-    config: profile.qualification,
-    listPrice,
-    buildingSqft,
-    arv: arv.arvAggregate,
+    comps: arv.perCompDetails, config: profile.qualification,
+    listPrice, buildingSqft, arv: arv.arvAggregate,
   });
 
   return {
-    ...base,
-    arv,
-    rehab,
-    holding,
-    transaction,
-    dealMath,
-    qualification,
-    screeningStatus: "screened",
-    errorMessage: null,
+    result: {
+      ...base, arv, rehab, holding, transaction, dealMath, qualification,
+      screeningStatus: "screened", errorMessage: null,
+    },
+    candidateRows,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Write results to DB
+// Write comp search runs + candidates to DB
 // ---------------------------------------------------------------------------
 
-async function writeResults(
+async function writeCompRuns(
+  supabase: any,
+  runRows: Array<{
+    subjectPropertyId: string;
+    subjectListingId: string | null;
+    candidateRows: Record<string, unknown>[];
+  }>,
+  profileId: string | null,
+): Promise<Map<string, string>> {
+  // Returns: Map<subjectPropertyId, compSearchRunId>
+  const runIdMap = new Map<string, string>();
+  const chunkSize = 100;
+
+  for (let i = 0; i < runRows.length; i += chunkSize) {
+    const chunk = runRows.slice(i, i + chunkSize);
+
+    const runInserts = chunk.map((r) => ({
+      analysis_id: null,
+      comparable_profile_id: profileId,
+      subject_real_property_id: r.subjectPropertyId,
+      subject_listing_row_id: r.subjectListingId,
+      purpose: "flip",
+      run_type: "screening",
+      status: "complete",
+      parameters_json: SCREENING_RULES,
+      summary_json: { candidateCount: r.candidateRows.length, source: "screening_batch" },
+    }));
+
+    const { data: runs, error: runError } = await supabase
+      .from("comparable_search_runs")
+      .insert(runInserts)
+      .select("id");
+
+    if (runError) throw new Error(`Failed to write comp runs: ${runError.message}`);
+
+    // Map run IDs back to subjects
+    for (let j = 0; j < chunk.length; j++) {
+      const runId = runs[j]?.id;
+      if (runId) {
+        runIdMap.set(chunk[j].subjectPropertyId, runId);
+
+        // Write candidates for this run
+        if (chunk[j].candidateRows.length > 0) {
+          const candidates = chunk[j].candidateRows.map((c) => ({
+            comparable_search_run_id: runId,
+            ...c,
+          }));
+
+          const candChunkSize = 200;
+          for (let k = 0; k < candidates.length; k += candChunkSize) {
+            const candChunk = candidates.slice(k, k + candChunkSize);
+            const { error: candError } = await supabase
+              .from("comparable_search_candidates")
+              .insert(candChunk);
+            if (candError) {
+              throw new Error(`Failed to write comp candidates: ${candError.message}`);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return runIdMap;
+}
+
+// ---------------------------------------------------------------------------
+// Write screening results to DB
+// ---------------------------------------------------------------------------
+
+async function writeScreeningResults(
   supabase: any,
   batchId: string,
   results: ScreeningResultRow[],
+  compRunIds: Map<string, string>,
   profile: FlipStrategyProfile,
 ): Promise<void> {
   const chunkSize = 200;
@@ -602,6 +735,7 @@ async function writeResults(
       screening_batch_id: batchId,
       real_property_id: r.realPropertyId,
       listing_row_id: r.listingRowId,
+      comp_search_run_id: compRunIds.get(r.realPropertyId) ?? null,
 
       subject_address: r.subjectAddress,
       subject_city: r.subjectCity,
@@ -625,17 +759,11 @@ async function writeResults(
       rehab_systems: r.rehab?.systems ?? null,
       rehab_composite_multiplier: r.rehab?.compositeMultiplier ?? null,
       rehab_detail_json: r.rehab
-        ? {
-            typeMultiplier: r.rehab.typeMultiplier,
-            conditionMultiplier: r.rehab.conditionMultiplier,
-            priceMultiplier: r.rehab.priceMultiplier,
-            ageMultiplier: r.rehab.ageMultiplier,
-          }
+        ? { typeMultiplier: r.rehab.typeMultiplier, conditionMultiplier: r.rehab.conditionMultiplier, priceMultiplier: r.rehab.priceMultiplier, ageMultiplier: r.rehab.ageMultiplier }
         : null,
 
       hold_total: r.holding?.total ?? null,
       hold_days: r.holding?.daysHeld ?? null,
-
       transaction_total: r.transaction?.total ?? null,
 
       target_profit: profile.targetProfitDefault,
@@ -656,9 +784,7 @@ async function writeResults(
     }));
 
     const { error } = await supabase.from("screening_results").insert(rows);
-    if (error) {
-      throw new Error(`Failed to write screening results: ${error.message}`);
-    }
+    if (error) throw new Error(`Failed to write screening results: ${error.message}`);
   }
 }
 
@@ -685,34 +811,46 @@ export async function runScreeningBatch(
 ): Promise<RunScreeningBatchResult> {
   const { supabase, batchId, subjectPropertyIds, profile } = input;
 
-  // Mark batch as running
   await supabase
     .from("screening_batches")
-    .update({
-      status: "running",
-      started_at: new Date().toISOString(),
-      total_subjects: subjectPropertyIds.length,
-    })
+    .update({ status: "running", started_at: new Date().toISOString(), total_subjects: subjectPropertyIds.length })
     .eq("id", batchId);
 
   try {
-    // Pre-load comp pool
     const pool = await loadCompPool(supabase, 365);
-
-    // Load subject-specific data
     const subjects = await loadSubjects(supabase, subjectPropertyIds, pool);
+
+    // Look up a comparable profile ID for the comp run records
+    const compProfileSlug = profile.compProfileSlugByType.detached;
+    const { data: compProfile } = await supabase
+      .from("comparable_profiles")
+      .select("id")
+      .eq("slug", compProfileSlug)
+      .maybeSingle();
+    const compProfileId = compProfile?.id ?? null;
 
     const referenceDate = new Date();
     const results: ScreeningResultRow[] = [];
+    const compRunData: Array<{
+      subjectPropertyId: string;
+      subjectListingId: string | null;
+      candidateRows: Record<string, unknown>[];
+    }> = [];
 
-    // Process each subject in-memory
     for (const propertyId of subjectPropertyIds) {
       const subject = subjects.get(propertyId);
       if (!subject) continue;
 
       try {
-        const result = screenSubject(subject, pool, profile, referenceDate);
+        const { result, candidateRows } = screenSubject(subject, pool, profile, referenceDate);
         results.push(result);
+        if (candidateRows.length > 0) {
+          compRunData.push({
+            subjectPropertyId: propertyId,
+            subjectListingId: subject.listing?.id ?? null,
+            candidateRows,
+          });
+        }
       } catch (err) {
         results.push({
           realPropertyId: propertyId,
@@ -724,51 +862,31 @@ export async function runScreeningBatch(
           subjectBuildingSqft: pickBuildingSqft(subject.physical),
           subjectAboveGradeSqft: pickAboveGradeSqft(subject.physical),
           subjectYearBuilt: subject.physical.year_built,
-          arv: null,
-          rehab: null,
-          holding: null,
-          transaction: null,
-          dealMath: null,
-          qualification: {
-            isPrimeCandidate: false,
-            qualifyingCompCount: 0,
-            reasons: [],
-            disqualifiers: ["Processing error"],
-          },
+          arv: null, rehab: null, holding: null, transaction: null, dealMath: null,
+          qualification: { isPrimeCandidate: false, qualifyingCompCount: 0, reasons: [], disqualifiers: ["Processing error"] },
           screeningStatus: "error",
-          errorMessage:
-            err instanceof Error ? err.message : "Unknown processing error",
+          errorMessage: err instanceof Error ? err.message : "Unknown processing error",
         });
       }
     }
 
-    // Write all results
-    await writeResults(supabase, batchId, results, profile);
+    // Write comp runs + candidates to relational tables
+    const compRunIds = await writeCompRuns(supabase, compRunData, compProfileId);
 
-    // Compute summary
+    // Write screening results (with comp_search_run_id linkage)
+    await writeScreeningResults(supabase, batchId, results, compRunIds, profile);
+
     const screened = results.filter((r) => r.screeningStatus === "screened").length;
     const skipped = results.filter((r) => r.screeningStatus === "skipped").length;
     const errors = results.filter((r) => r.screeningStatus === "error").length;
-    const primeCandidates = results.filter(
-      (r) => r.qualification.isPrimeCandidate,
-    ).length;
+    const primeCandidates = results.filter((r) => r.qualification.isPrimeCandidate).length;
 
-    // Update batch
     await supabase
       .from("screening_batches")
       .update({
-        status: "complete",
-        screened_count: screened,
-        qualified_count: screened,
-        prime_candidate_count: primeCandidates,
-        completed_at: new Date().toISOString(),
-        summary_json: {
-          screened,
-          skipped,
-          errors,
-          primeCandidates,
-          totalSubjects: subjectPropertyIds.length,
-        },
+        status: "complete", screened_count: screened, qualified_count: screened,
+        prime_candidate_count: primeCandidates, completed_at: new Date().toISOString(),
+        summary_json: { screened, skipped, errors, primeCandidates, totalSubjects: subjectPropertyIds.length },
       })
       .eq("id", batchId);
 
@@ -776,14 +894,8 @@ export async function runScreeningBatch(
   } catch (err) {
     await supabase
       .from("screening_batches")
-      .update({
-        status: "error",
-        summary_json: {
-          error: err instanceof Error ? err.message : "Unknown error",
-        },
-      })
+      .update({ status: "error", summary_json: { error: err instanceof Error ? err.message : "Unknown error" } })
       .eq("id", batchId);
-
     throw err;
   }
 }

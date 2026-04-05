@@ -1,60 +1,26 @@
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
-
-type SizeBasis = "building_area_total" | "lot_size";
-type ComparablePurpose = "standard" | "rental" | "flip" | "scrape";
-type SnapshotMode = "auto" | "current" | "custom";
-type SnapshotDateSource =
-  | "listing_contract_date"
-  | "current_date_fallback"
-  | "current_override"
-  | "custom_override";
-type PropertyTypeFamily =
-  | "detached"
-  | "condo"
-  | "townhome"
-  | "manufactured"
-  | "multifamily"
-  | "new_home_community"
-  | "other";
-
-type ScoreWeights = {
-  distance: number;
-  recency: number;
-  size: number;
-  lotSize: number;
-  year: number;
-  beds: number;
-  baths: number;
-  form: number;
-  level: number;
-  condition: number;
-};
-
-type ScoreComponent = {
-  used: boolean;
-  score: number | null;
-  missingDefault?: number;
-};
-
-type ComparableMode = {
-  purpose: ComparablePurpose;
-  subjectFamily: PropertyTypeFamily;
-  sizeBasis: SizeBasis;
-  useSqftMetric: boolean;
-  useLotSizeMetric: boolean;
-  useYearMetric: boolean;
-  useBedMetric: boolean;
-  useBathMetric: boolean;
-  useBuildingFormMetric: boolean;
-  useLevelMetric: boolean;
-  useConditionMetric: boolean;
-  requireSamePropertyType: boolean;
-  requireSameBuildingForm: boolean;
-  requireSameLevelClass: boolean;
-  weights: ScoreWeights;
-};
+// Scoring types and pure functions are also available in lib/comparables/scoring.ts
+// for use by the screening pipeline. The engine keeps its own local definitions
+// to avoid a risky refactor of this large file — both produce identical output.
+import {
+  type SizeBasis,
+  type ComparablePurpose,
+  type SnapshotMode,
+  type SnapshotDateSource,
+  type PropertyTypeFamily,
+  type ScoreWeights,
+  type ScoreComponent,
+  type ComparableMode,
+  type ComparableSearchRules,
+  normalizedKey,
+  toNumber,
+  firstNonNull,
+  clamp01,
+  roundNumber,
+  resolvePropertyTypeFamily,
+} from "./scoring";
 
 export type RunComparableSearchInput = {
   analysisId: string;
@@ -81,21 +47,6 @@ export type RunComparableSearchInput = {
   };
 };
 
-type ComparableSearchRules = {
-  maxDistanceMiles: number;
-  maxDaysSinceClose: number;
-  sqftTolerancePct: number;
-  lotSizeTolerancePct: number;
-  yearToleranceYears: number;
-  bedTolerance: number;
-  bathTolerance: number;
-  maxCandidates: number;
-  requireSamePropertyType: boolean;
-  requireSameLevelClass: boolean;
-  requireSameBuildingForm: boolean;
-  preferredSizeBasis: SizeBasis | null;
-};
-
 const comparablesDebugEnabled =
   process.env.COMPARABLES_DEBUG === "1" ||
   process.env.COMPARABLES_DEBUG === "true";
@@ -104,20 +55,6 @@ function normalizeText(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
-}
-
-function normalizedKey(value: unknown): string | null {
-  const normalized = normalizeText(value);
-  return normalized ? normalized.toLowerCase() : null;
-}
-
-function toNumber(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
 }
 
 function toBoolean(value: unknown): boolean | null {
@@ -168,22 +105,6 @@ function parseSnapshotMode(value: unknown): SnapshotMode | null {
   }
   if (normalized === "custom") return "custom";
   return null;
-}
-
-function firstNonNull<T>(...values: Array<T | null | undefined>): T | null {
-  for (const value of values) {
-    if (value !== null && value !== undefined) return value;
-  }
-  return null;
-}
-
-function clamp01(value: number) {
-  return Math.max(0, Math.min(1, value));
-}
-
-function roundNumber(value: number, digits = 4) {
-  const factor = 10 ** digits;
-  return Math.round(value * factor) / factor;
 }
 
 function toIntegerOrNull(value: number | null) {
@@ -386,27 +307,6 @@ function resolveComparablePurpose(input: {
       purpose: input.purpose,
     })
   );
-}
-
-function resolvePropertyTypeFamily(value: string | null): PropertyTypeFamily {
-  const normalized = normalizedKey(value);
-
-  switch (normalized) {
-    case "detached":
-      return "detached";
-    case "condo":
-      return "condo";
-    case "townhome":
-      return "townhome";
-    case "manufactured":
-      return "manufactured";
-    case "multi-family":
-      return "multifamily";
-    case "new home community":
-      return "new_home_community";
-    default:
-      return "other";
-  }
 }
 
 function resolveComparableMode(input: {

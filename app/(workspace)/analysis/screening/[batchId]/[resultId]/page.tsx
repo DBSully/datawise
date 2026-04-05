@@ -82,6 +82,32 @@ export default async function DealDetailPage({ params }: DealDetailPageProps) {
 
   if (error || !result) notFound();
 
+  // Load comps from relational table if comp run exists
+  let compCandidates: Array<{
+    id: string;
+    comp_listing_row_id: string;
+    distance_miles: number | null;
+    days_since_close: number | null;
+    sqft_delta_pct: number | null;
+    year_built_delta: number | null;
+    bed_delta: number | null;
+    bath_delta: number | null;
+    raw_score: number | null;
+    selected_yn: boolean;
+    metrics_json: Record<string, unknown> | null;
+    score_breakdown_json: Record<string, unknown> | null;
+  }> = [];
+
+  if (result.comp_search_run_id) {
+    const { data: candidates } = await supabase
+      .from("comparable_search_candidates")
+      .select("id, comp_listing_row_id, distance_miles, days_since_close, sqft_delta_pct, year_built_delta, bed_delta, bath_delta, raw_score, selected_yn, metrics_json, score_breakdown_json")
+      .eq("comparable_search_run_id", result.comp_search_run_id)
+      .order("raw_score", { ascending: false });
+    compCandidates = candidates ?? [];
+  }
+
+  // Fallback to ARV detail JSON if no relational comps
   const arvDetail = (result.arv_detail_json ?? []) as Array<{
     listingId: string;
     address: string;
@@ -309,13 +335,59 @@ export default async function DealDetailPage({ params }: DealDetailPageProps) {
         </div>
       </SectionCard>
 
-      {/* ARV Comps */}
-      <SectionCard title={`Comparable Sales (${arvDetail.length} comps)`}>
-        {arvDetail.length === 0 ? (
-          <p className="py-4 text-center text-sm text-slate-400">
-            No comparable sales data.
-          </p>
-        ) : (
+      {/* Comparable Sales */}
+      <SectionCard title={`Comparable Sales (${compCandidates.length > 0 ? compCandidates.length : arvDetail.length} comps)`}>
+        {compCandidates.length > 0 ? (
+          <div className="dw-table-wrap">
+            <table className="dw-table-compact min-w-[1500px]">
+              <thead>
+                <tr>
+                  <th>MLS#</th>
+                  <th>Address</th>
+                  <th className="text-right">Close Price</th>
+                  <th>Close Date</th>
+                  <th className="text-right">Dist</th>
+                  <th className="text-right">Days</th>
+                  <th className="text-right">GLA</th>
+                  <th className="text-right">GLA Δ%</th>
+                  <th className="text-right">Yr</th>
+                  <th className="text-right">Yr Δ</th>
+                  <th className="text-right">Bd</th>
+                  <th className="text-right">Ba</th>
+                  <th className="text-right">Gar</th>
+                  <th>Level</th>
+                  <th className="text-right">PSF</th>
+                  <th className="text-right">Score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {compCandidates.map((c) => {
+                  const m = (c.metrics_json ?? {}) as Record<string, unknown>;
+                  return (
+                    <tr key={c.id}>
+                      <td className="font-mono text-xs">{String(m.listing_id ?? "—")}</td>
+                      <td>{String(m.address ?? "—")}</td>
+                      <td className="text-right">{formatCurrency(m.close_price as number)}</td>
+                      <td className="text-xs">{m.close_date ? new Date(String(m.close_date)).toLocaleDateString() : "—"}</td>
+                      <td className="text-right">{formatNumber(c.distance_miles, 2)}</td>
+                      <td className="text-right">{c.days_since_close ?? "—"}</td>
+                      <td className="text-right">{formatNumber(m.building_area_total_sqft as number)}</td>
+                      <td className="text-right">{c.sqft_delta_pct !== null ? `${formatNumber(c.sqft_delta_pct, 1)}%` : "—"}</td>
+                      <td className="text-right">{String(m.year_built ?? "—")}</td>
+                      <td className="text-right">{c.year_built_delta ?? "—"}</td>
+                      <td className="text-right">{String(m.bedrooms_total ?? "—")}</td>
+                      <td className="text-right">{String(m.bathrooms_total ?? "—")}</td>
+                      <td className="text-right">{String(m.garage_spaces ?? "—")}</td>
+                      <td className="text-xs">{String(m.level_class_standardized ?? "—")}</td>
+                      <td className="text-right">{m.ppsf ? formatCurrency(m.ppsf as number) : "—"}</td>
+                      <td className="text-right font-semibold">{c.raw_score !== null ? formatNumber(c.raw_score, 1) : "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : arvDetail.length > 0 ? (
           <div className="dw-table-wrap">
             <table className="dw-table-compact min-w-[1200px]">
               <thead>
@@ -324,62 +396,38 @@ export default async function DealDetailPage({ params }: DealDetailPageProps) {
                   <th>Address</th>
                   <th className="text-right">Close Price</th>
                   <th>Close Date</th>
-                  <th className="text-right">Dist (mi)</th>
+                  <th className="text-right">Dist</th>
                   <th className="text-right">Days</th>
                   <th className="text-right">Bldg Sqft</th>
                   <th className="text-right">PSF Bldg</th>
-                  <th className="text-right">PSF Above</th>
                   <th className="text-right">ARV Blended</th>
-                  <th className="text-right">Time Adj</th>
                   <th className="text-right">ARV Adjusted</th>
                   <th className="text-right">Confidence</th>
-                  <th className="text-right">Weight</th>
                 </tr>
               </thead>
               <tbody>
-                {arvDetail.map(
-                  (comp, idx) => (
-                    <tr key={idx}>
-                      <td className="font-mono text-xs">{comp.listingId}</td>
-                      <td>{comp.address}</td>
-                      <td className="text-right">
-                        {formatCurrency(comp.closePrice)}
-                      </td>
-                      <td className="text-xs">
-                        {new Date(comp.closeDateIso).toLocaleDateString()}
-                      </td>
-                      <td className="text-right">
-                        {formatNumber(comp.distanceMiles, 2)}
-                      </td>
-                      <td className="text-right">{comp.daysSinceClose}</td>
-                      <td className="text-right">
-                        {formatNumber(comp.compBuildingSqft)}
-                      </td>
-                      <td className="text-right">
-                        {formatCurrency(comp.psfBuilding)}
-                      </td>
-                      <td className="text-right">
-                        {formatCurrency(comp.psfAboveGrade)}
-                      </td>
-                      <td className="text-right font-medium">
-                        {formatCurrency(comp.arvBlended)}
-                      </td>
-                      <td className="text-right text-slate-500">
-                        {formatCurrency(comp.timeAdjustment)}
-                      </td>
-                      <td className="text-right font-semibold">
-                        {formatCurrency(comp.arvTimeAdjusted)}
-                      </td>
-                      <td className="text-right">{comp.confidence}</td>
-                      <td className="text-right">
-                        {formatNumber(comp.decayWeight, 3)}
-                      </td>
-                    </tr>
-                  ),
-                )}
+                {arvDetail.map((comp, idx) => (
+                  <tr key={idx}>
+                    <td className="font-mono text-xs">{comp.listingId}</td>
+                    <td>{comp.address}</td>
+                    <td className="text-right">{formatCurrency(comp.closePrice)}</td>
+                    <td className="text-xs">{new Date(comp.closeDateIso).toLocaleDateString()}</td>
+                    <td className="text-right">{formatNumber(comp.distanceMiles, 2)}</td>
+                    <td className="text-right">{comp.daysSinceClose}</td>
+                    <td className="text-right">{formatNumber(comp.compBuildingSqft)}</td>
+                    <td className="text-right">{formatCurrency(comp.psfBuilding)}</td>
+                    <td className="text-right font-medium">{formatCurrency(comp.arvBlended)}</td>
+                    <td className="text-right font-semibold">{formatCurrency(comp.arvTimeAdjusted)}</td>
+                    <td className="text-right">{comp.confidence}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
+        ) : (
+          <p className="py-4 text-center text-sm text-slate-400">
+            No comparable sales data.
+          </p>
         )}
       </SectionCard>
 

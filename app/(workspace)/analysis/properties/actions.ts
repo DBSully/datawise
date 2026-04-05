@@ -491,3 +491,124 @@ export async function toggleComparableCandidateSelectionAction(
     `/analysis/properties/${propertyId}/analyses/${analysisId}/comparables`,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Add analysis note
+// ---------------------------------------------------------------------------
+
+export async function addAnalysisNoteAction(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return;
+
+  const analysisId = textValue(formData, "analysis_id");
+  const noteType = textValue(formData, "note_type") || "general";
+  const noteBody = textValue(formData, "note_body");
+  const isPublic = formData.get("is_public") === "on";
+
+  if (!analysisId || !noteBody) return;
+
+  const { error } = await supabase.from("analysis_notes").insert({
+    analysis_id: analysisId,
+    note_type: noteType,
+    note_body: noteBody,
+    is_public: isPublic,
+  });
+
+  if (error) throw new Error(error.message);
+
+  // Find property ID to revalidate
+  const { data: analysis } = await supabase
+    .from("analyses")
+    .select("real_property_id")
+    .eq("id", analysisId)
+    .maybeSingle();
+
+  if (analysis) {
+    revalidatePath(
+      `/analysis/properties/${analysis.real_property_id}/analyses/${analysisId}`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Delete analysis note
+// ---------------------------------------------------------------------------
+
+export async function deleteAnalysisNoteAction(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return;
+
+  const noteId = textValue(formData, "note_id");
+  const analysisId = textValue(formData, "analysis_id");
+  if (!noteId) return;
+
+  const { error } = await supabase
+    .from("analysis_notes")
+    .delete()
+    .eq("id", noteId);
+
+  if (error) throw new Error(error.message);
+
+  if (analysisId) {
+    const { data: analysis } = await supabase
+      .from("analyses")
+      .select("real_property_id")
+      .eq("id", analysisId)
+      .maybeSingle();
+
+    if (analysis) {
+      revalidatePath(
+        `/analysis/properties/${analysis.real_property_id}/analyses/${analysisId}`,
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Save pipeline status
+// ---------------------------------------------------------------------------
+
+export async function savePipelineAction(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return;
+
+  const analysisId = textValue(formData, "analysis_id");
+  if (!analysisId) return;
+
+  const interestLevel = nullableText(formData, "interest_level");
+  const showingStatus = nullableText(formData, "showing_status");
+  const offerStatus = nullableText(formData, "offer_status");
+
+  const { error } = await supabase.from("analysis_pipeline").upsert(
+    {
+      analysis_id: analysisId,
+      interest_level: interestLevel,
+      showing_status: showingStatus,
+      offer_status: offerStatus,
+    },
+    { onConflict: "analysis_id" },
+  );
+
+  if (error) throw new Error(error.message);
+
+  const { data: analysis } = await supabase
+    .from("analyses")
+    .select("real_property_id")
+    .eq("id", analysisId)
+    .maybeSingle();
+
+  if (analysis) {
+    revalidatePath(
+      `/analysis/properties/${analysis.real_property_id}/analyses/${analysisId}`,
+    );
+  }
+}

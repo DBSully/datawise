@@ -1,374 +1,399 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { createAnalysisScenarioAction } from "@/app/(workspace)/analysis/properties/actions";
+import { calculateArv } from "@/lib/screening/arv-engine";
+import { calculateRehab } from "@/lib/screening/rehab-engine";
+import { calculateHolding } from "@/lib/screening/holding-engine";
+import { calculateTransaction } from "@/lib/screening/transaction-engine";
+import { calculateDealMath } from "@/lib/screening/deal-math";
+import {
+  DENVER_FLIP_V1,
+  resolvePropertyTypeKey,
+} from "@/lib/screening/strategy-profiles";
+import { AnalysisWorkstation } from "./analysis-workstation";
 
-type PropertyHubPageProps = {
-  params: Promise<{ id: string }>;
+export const dynamic = "force-dynamic";
+
+type AnalysisPageProps = {
+  params: Promise<{ id: string; analysisId: string }>;
 };
 
-function formatCurrency(value: number | null | undefined) {
-  if (value === null || value === undefined) return "—";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(value);
+function defaultComparableProfileSlug(propertyType: string | null) {
+  const normalized = (propertyType ?? "").trim().toLowerCase();
+  if (normalized === "condo") return "denver_condo_standard_v1";
+  if (normalized === "townhome") return "denver_townhome_standard_v1";
+  return "denver_detached_standard_v1";
 }
 
-function formatNumber(value: number | null | undefined, decimals = 0) {
-  if (value === null || value === undefined) return "—";
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  }).format(value);
+function toNum(v: unknown): number {
+  if (v === null || v === undefined || v === "") return 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
 }
 
-function formatDateTime(value: string | null | undefined) {
-  if (!value) return "—";
-  return new Date(value).toLocaleString();
-}
-
-function DetailItem({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="dw-detail-item">
-      <div className="dw-detail-label">{label}</div>
-      <div className="dw-detail-value">{value}</div>
-    </div>
-  );
-}
-
-function StatChip({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
-      <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500">
-        {label}
-      </div>
-      <div className="mt-1 text-sm font-semibold text-slate-900">{value}</div>
-    </div>
-  );
-}
-
-const strategyButtons = [
-  { strategy: "flip", label: "New Flip Analysis" },
-  { strategy: "rental", label: "New Rental Analysis" },
-  { strategy: "wholesale", label: "New Wholesale Analysis" },
-  { strategy: "listing", label: "New Listing Analysis" },
-  { strategy: "new_build", label: "New Build Analysis" },
-];
-
-export default async function PropertyHubPage({
-  params,
-}: PropertyHubPageProps) {
-  const { id } = await params;
+export default async function AnalysisPage({ params }: AnalysisPageProps) {
+  noStore();
+  const { id: propertyId, analysisId } = await params;
   const supabase = await createClient();
-
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { data: property, error: propertyError } = await supabase
-    .from("real_properties")
-    .select(
-      `
-      id,
-      public_code,
-      unparsed_address,
-      city,
-      county,
-      state,
-      postal_code,
-      unit_number,
-      parcel_id,
-      lot_size_sqft,
-      lot_size_acres,
-      created_at,
-      updated_at
-    `,
-    )
-    .eq("id", id)
-    .maybeSingle();
-
-  if (propertyError) throw new Error(propertyError.message);
-  if (!property) notFound();
-
+  // ---- Load all data in parallel ----
   const [
-    { data: physical, error: physicalError },
-    { data: listings, error: listingsError },
-    { data: analyses, error: analysesError },
+    { data: property, error: propErr },
+    { data: physical, error: physErr },
+    { data: financials, error: finErr },
+    { data: analysis, error: analysisErr },
+    { data: manualAnalysis, error: manualErr },
+    { data: pipeline, error: pipeErr },
+    { data: notes, error: notesErr },
   ] = await Promise.all([
     supabase
-      .from("property_physical")
-      .select(
-        `
-        property_type,
-        property_sub_type,
-        structure_type,
-        level_class_standardized,
-        bedrooms_total,
-        bathrooms_total,
-        garage_spaces,
-        year_built,
-        above_grade_finished_area_sqft
-      `,
-      )
-      .eq("real_property_id", id)
+      .from("real_properties")
+      .select("id, unparsed_address, city, county, state, postal_code, parcel_id, latitude, longitude, lot_size_sqft, lot_size_acres")
+      .eq("id", propertyId)
       .maybeSingle(),
-
     supabase
-      .from("mls_listings")
-      .select(
-        `
-        id,
-        listing_id,
-        mls_status,
-        list_price,
-        close_price,
-        listing_contract_date,
-        created_at
-      `,
-      )
-      .eq("real_property_id", id)
-      .order("listing_contract_date", { ascending: false, nullsFirst: true })
-      .order("created_at", { ascending: false }),
-
+      .from("property_physical")
+      .select("property_type, property_sub_type, structure_type, level_class_standardized, levels_raw, building_form_standardized, building_area_total_sqft, above_grade_finished_area_sqft, below_grade_total_sqft, below_grade_finished_area_sqft, below_grade_unfinished_area_sqft, year_built, bedrooms_total, bathrooms_total, garage_spaces")
+      .eq("real_property_id", propertyId)
+      .maybeSingle(),
+    supabase
+      .from("property_financials")
+      .select("annual_property_tax, annual_hoa_dues")
+      .eq("real_property_id", propertyId)
+      .maybeSingle(),
     supabase
       .from("analyses")
-      .select(
-        `
-        id,
-        scenario_name,
-        strategy_type,
-        status,
-        created_by_user_id,
-        created_at,
-        updated_at,
-        listing_id
-      `,
-      )
-      .eq("real_property_id", id)
+      .select("id, real_property_id, listing_id, scenario_name, strategy_type, status, created_at")
+      .eq("id", analysisId)
+      .eq("real_property_id", propertyId)
       .eq("created_by_user_id", user?.id ?? "")
       .eq("is_archived", false)
-      .order("updated_at", { ascending: false }),
+      .maybeSingle(),
+    supabase
+      .from("manual_analysis")
+      .select("*")
+      .eq("analysis_id", analysisId)
+      .maybeSingle(),
+    supabase
+      .from("analysis_pipeline")
+      .select("*")
+      .eq("analysis_id", analysisId)
+      .maybeSingle(),
+    supabase
+      .from("analysis_notes")
+      .select("id, note_type, note_body, is_public, created_at, updated_at")
+      .eq("analysis_id", analysisId)
+      .order("created_at", { ascending: true }),
   ]);
 
-  if (physicalError) throw new Error(physicalError.message);
-  if (listingsError) throw new Error(listingsError.message);
-  if (analysesError) throw new Error(analysesError.message);
+  if (propErr) throw new Error(propErr.message);
+  if (physErr) throw new Error(physErr.message);
+  if (analysisErr) throw new Error(analysisErr.message);
+  if (!property || !analysis) notFound();
 
-  const latestListing = listings?.[0] ?? null;
+  // Load listing
+  const listingSelect = "id, listing_id, mls_status, list_price, close_price, listing_contract_date, property_condition_source, source_system, original_list_price";
+  let listing: Record<string, unknown> | null = null;
 
-  return (
-    <section className="dw-section-stack-compact">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="mb-1">
-            <Link
-              href="/analysis/properties"
-              className="text-[11px] uppercase tracking-[0.16em] text-slate-500 hover:text-slate-900"
-            >
-              ← Back to Properties
-            </Link>
-          </div>
+  if (analysis.listing_id) {
+    const { data } = await supabase
+      .from("mls_listings")
+      .select(listingSelect)
+      .eq("real_property_id", propertyId)
+      .eq("listing_id", analysis.listing_id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    listing = data;
+  }
+  if (!listing) {
+    const { data } = await supabase
+      .from("mls_listings")
+      .select(listingSelect)
+      .eq("real_property_id", propertyId)
+      .order("listing_contract_date", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    listing = data;
+  }
 
-          <h1 className="dw-page-title">{property.unparsed_address}</h1>
-          <p className="dw-page-copy">
-            Property hub for subject facts, scenario creation, and analysis
-            navigation.
-          </p>
-        </div>
+  // Load screening result (if promoted from screening)
+  const { data: screeningResult } = await supabase
+    .from("screening_results")
+    .select("arv_aggregate, arv_per_sqft, arv_comp_count, rehab_total, hold_total, hold_days, transaction_total, max_offer, est_gap_per_sqft, spread, offer_pct, rehab_composite_multiplier, target_profit")
+    .eq("promoted_analysis_id", analysisId)
+    .maybeSingle();
 
-        <div className="flex items-center gap-2">
-          {property.public_code ? (
-            <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-medium uppercase tracking-[0.14em] text-slate-600">
-              {property.public_code}
-            </span>
-          ) : null}
-          <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-medium uppercase tracking-[0.14em] text-slate-600">
-            Property Hub
-          </span>
-        </div>
-      </div>
+  // Load latest comp run for this analysis
+  const { data: latestRun } = await supabase
+    .from("comparable_search_runs")
+    .select("id, status, parameters_json, summary_json, created_at")
+    .eq("analysis_id", analysisId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-7">
-        <StatChip label="Type" value={physical?.property_type ?? "—"} />
-        <StatChip
-          label="Beds / Baths"
-          value={`${formatNumber(physical?.bedrooms_total as number | null)} / ${formatNumber(
-            physical?.bathrooms_total as number | null,
-            1,
-          )}`}
-        />
-        <StatChip
-          label="Above Grade"
-          value={formatNumber(
-            physical?.above_grade_finished_area_sqft as number | null,
-          )}
-        />
-        <StatChip
-          label="Lot Sq Ft"
-          value={formatNumber(property.lot_size_sqft as number | null)}
-        />
-        <StatChip
-          label="Year Built"
-          value={formatNumber(physical?.year_built as number | null)}
-        />
-        <StatChip
-          label="Latest List Price"
-          value={formatCurrency(latestListing?.list_price as number | null)}
-        />
-        <StatChip
-          label="Latest Status"
-          value={latestListing?.mls_status ?? "—"}
-        />
-      </div>
+  // Load comp candidates
+  let compCandidates: Array<Record<string, unknown>> = [];
+  if (latestRun?.id) {
+    const { data: rawCandidates } = await supabase
+      .from("comparable_search_candidates")
+      .select("id, comp_listing_row_id, comp_real_property_id, distance_miles, days_since_close, sqft_delta_pct, raw_score, selected_yn, metrics_json, score_breakdown_json")
+      .eq("comparable_search_run_id", latestRun.id)
+      .order("raw_score", { ascending: false });
 
-      <div className="grid gap-3 xl:grid-cols-[0.85fr_1.15fr]">
-        <div className="dw-card-compact space-y-3">
-          <div className="dw-card-header-compact">
-            <h2 className="dw-card-title-compact">Subject Snapshot</h2>
-            <p className="dw-card-copy-compact">
-              High-level subject property facts for strategy selection.
-            </p>
-          </div>
+    if (rawCandidates) {
+      // Resolve listing IDs
+      const compListingIds = Array.from(
+        new Set(rawCandidates.map((c: any) => c.comp_listing_row_id).filter(Boolean)),
+      );
+      let listingIdMap = new Map<string, string>();
+      if (compListingIds.length > 0) {
+        const { data: compListings } = await supabase
+          .from("mls_listings")
+          .select("id, listing_id")
+          .in("id", compListingIds.slice(0, 200));
+        listingIdMap = new Map((compListings ?? []).map((r: any) => [r.id, r.listing_id]));
+      }
+      compCandidates = rawCandidates.map((c: any) => ({
+        ...c,
+        listing_id: c.comp_listing_row_id ? listingIdMap.get(c.comp_listing_row_id) ?? null : null,
+      }));
+    }
+  }
 
-          <div className="dw-detail-grid">
-            <DetailItem
-              label="Property Type"
-              value={physical?.property_type ?? "—"}
-            />
-            <DetailItem
-              label="Sub Type"
-              value={physical?.property_sub_type ?? "—"}
-            />
-            <DetailItem
-              label="Structure"
-              value={physical?.structure_type ?? "—"}
-            />
-            <DetailItem
-              label="Level Class"
-              value={physical?.level_class_standardized ?? "—"}
-            />
-            <DetailItem
-              label="Beds"
-              value={formatNumber(physical?.bedrooms_total as number | null)}
-            />
-            <DetailItem
-              label="Baths"
-              value={formatNumber(
-                physical?.bathrooms_total as number | null,
-                1,
-              )}
-            />
-            <DetailItem
-              label="Garage"
-              value={formatNumber(physical?.garage_spaces as number | null, 1)}
-            />
-            <DetailItem
-              label="Year Built"
-              value={formatNumber(physical?.year_built as number | null)}
-            />
-            <DetailItem label="Parcel ID" value={property.parcel_id ?? "—"} />
-            <DetailItem label="City" value={property.city} />
-            <DetailItem label="County" value={property.county ?? "—"} />
-            <DetailItem
-              label="Latest MLS#"
-              value={latestListing?.listing_id ?? "—"}
-            />
-          </div>
-        </div>
+  // ---- Compute deal analysis values ----
+  const profile = DENVER_FLIP_V1;
+  const propertyType = resolvePropertyTypeKey(physical?.property_type);
+  const buildingSqft = toNum(physical?.building_area_total_sqft) || toNum(physical?.above_grade_finished_area_sqft);
+  const aboveGradeSqft = toNum(physical?.above_grade_finished_area_sqft) || buildingSqft;
+  const listPrice = toNum(listing?.list_price);
 
-        <div className="dw-card-compact space-y-3">
-          <div className="dw-card-header-compact">
-            <h2 className="dw-card-title-compact">Create Analysis Scenario</h2>
-            <p className="dw-card-copy-compact">
-              Start a separate scenario for a different strategy or
-              recommendation path.
-            </p>
-          </div>
+  // Auto ARV (from screening, frozen)
+  const autoArv = screeningResult?.arv_aggregate ? toNum(screeningResult.arv_aggregate) : null;
+  const autoRehab = screeningResult?.rehab_total ? toNum(screeningResult.rehab_total) : null;
 
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {strategyButtons.map((item) => (
-              <form key={item.strategy} action={createAnalysisScenarioAction}>
-                <input type="hidden" name="property_id" value={property.id} />
-                <input
-                  type="hidden"
-                  name="listing_id"
-                  value={latestListing?.listing_id ?? ""}
-                />
-                <input
-                  type="hidden"
-                  name="strategy_type"
-                  value={item.strategy}
-                />
-                <button type="submit" className="dw-button-secondary w-full">
-                  {item.label}
-                </button>
-              </form>
-            ))}
-          </div>
-        </div>
-      </div>
+  // Selected ARV (from currently selected comps)
+  const selectedComps = compCandidates.filter((c: any) => c.selected_yn);
+  let selectedArv: number | null = null;
 
-      <div className="dw-card-compact space-y-3">
-        <div className="dw-card-header-compact">
-          <h2 className="dw-card-title-compact">Your Analysis Scenarios</h2>
-          <p className="dw-card-copy-compact">
-            Each scenario is an independent strategy path for this property.
-          </p>
-        </div>
+  if (selectedComps.length > 0 && buildingSqft > 0) {
+    const compInputs = selectedComps.map((c: any) => {
+      const m = (c.metrics_json ?? {}) as Record<string, unknown>;
+      return {
+        compListingRowId: String(c.comp_listing_row_id ?? ""),
+        compRealPropertyId: String(c.comp_real_property_id ?? ""),
+        listingId: String(m.listing_id ?? c.listing_id ?? ""),
+        address: String(m.address ?? ""),
+        closePrice: toNum(m.close_price),
+        closeDateIso: String(m.close_date ?? ""),
+        compBuildingSqft: toNum(m.building_area_total_sqft) || toNum(m.above_grade_finished_area_sqft),
+        compAboveGradeSqft: toNum(m.above_grade_finished_area_sqft) || toNum(m.building_area_total_sqft),
+        distanceMiles: toNum(c.distance_miles),
+        yearBuilt: m.year_built !== null && m.year_built !== undefined ? Number(m.year_built) : null,
+        bedroomsTotal: m.bedrooms_total !== null && m.bedrooms_total !== undefined ? Number(m.bedrooms_total) : null,
+        bathroomsTotal: m.bathrooms_total !== null && m.bathrooms_total !== undefined ? Number(m.bathrooms_total) : null,
+        propertyType: m.property_type ? String(m.property_type) : null,
+        levelClass: m.level_class_standardized ? String(m.level_class_standardized) : null,
+        mlsStatus: null,
+      };
+    });
 
-        {analyses && analyses.length > 0 ? (
-          <div className="dw-table-wrap">
-            <table className="dw-table-compact">
-              <thead>
-                <tr>
-                  <th>Scenario</th>
-                  <th>Strategy</th>
-                  <th>Status</th>
-                  <th>Updated</th>
-                  <th>Overview</th>
-                  <th>Comparables</th>
-                </tr>
-              </thead>
-              <tbody>
-                {analyses.map((analysis) => (
-                  <tr key={analysis.id}>
-                    <td>{analysis.scenario_name ?? "Untitled Analysis"}</td>
-                    <td>{analysis.strategy_type ?? "general"}</td>
-                    <td>{analysis.status ?? "draft"}</td>
-                    <td>{formatDateTime(analysis.updated_at)}</td>
-                    <td>
-                      <Link
-                        href={`/analysis/properties/${property.id}/analyses/${analysis.id}`}
-                        className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-600 hover:text-slate-900"
-                      >
-                        Open
-                      </Link>
-                    </td>
-                    <td>
-                      <Link
-                        href={`/analysis/properties/${property.id}/analyses/${analysis.id}/comparables`}
-                        className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-600 hover:text-slate-900"
-                      >
-                        Open
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="dw-card-tight">
-            <p className="text-sm text-slate-600">
-              No analysis scenarios exist for this property yet. Create one to
-              begin.
-            </p>
-          </div>
-        )}
-      </div>
-    </section>
-  );
+    const arvResult = calculateArv({
+      subjectBuildingSqft: buildingSqft,
+      subjectAboveGradeSqft: aboveGradeSqft,
+      comps: compInputs,
+      config: profile.arv,
+      propertyType,
+    });
+
+    selectedArv = arvResult?.arvAggregate ?? null;
+  }
+
+  // Final ARV (manual override)
+  const finalArv = manualAnalysis?.arv_manual ? toNum(manualAnalysis.arv_manual) : null;
+
+  // Effective ARV = Final ?? Selected ?? Auto
+  const effectiveArv = finalArv ?? selectedArv ?? autoArv ?? 0;
+
+  // Rehab
+  const manualRehab = manualAnalysis?.rehab_manual ? toNum(manualAnalysis.rehab_manual) : null;
+  let computedRehab: number | null = null;
+  if (buildingSqft > 0) {
+    const rehabResult = calculateRehab({
+      propertyType,
+      aboveGradeSqft,
+      belowGradeFinishedSqft: toNum(physical?.below_grade_finished_area_sqft),
+      belowGradeUnfinishedSqft: Math.max(0, toNum(physical?.below_grade_total_sqft) - toNum(physical?.below_grade_finished_area_sqft)),
+      buildingSqft,
+      listPrice,
+      yearBuilt: physical?.year_built ?? null,
+      condition: listing?.property_condition_source ? String(listing.property_condition_source) : null,
+      config: profile.rehab,
+    });
+    computedRehab = rehabResult.total;
+  }
+  const effectiveRehab = manualRehab ?? computedRehab ?? autoRehab ?? 0;
+
+  // Holding
+  const holdResult = buildingSqft > 0 ? calculateHolding({
+    buildingSqft,
+    listPrice,
+    annualTax: financials?.annual_property_tax ? toNum(financials.annual_property_tax) : null,
+    annualHoa: financials?.annual_hoa_dues ? toNum(financials.annual_hoa_dues) : null,
+    config: profile.holding,
+  }) : null;
+
+  // Transaction
+  const transResult = effectiveArv > 0 ? calculateTransaction({
+    acquisitionPrice: listPrice,
+    arvPrice: effectiveArv,
+    config: profile.transaction,
+  }) : null;
+
+  // Deal math
+  const dealMath = effectiveArv > 0 ? calculateDealMath({
+    arv: effectiveArv,
+    listPrice,
+    buildingSqft,
+    rehabTotal: effectiveRehab,
+    holdTotal: holdResult?.total ?? 0,
+    transactionTotal: transResult?.total ?? 0,
+    targetProfit: profile.targetProfitDefault,
+  }) : null;
+
+  // Comp summary stats
+  const totalComps = compCandidates.length;
+  const selectedCount = selectedComps.length;
+  const avgSelectedPrice = selectedCount > 0
+    ? Math.round(selectedComps.reduce((sum: number, c: any) => sum + toNum((c.metrics_json as any)?.close_price), 0) / selectedCount)
+    : null;
+  const avgSelectedPsf = selectedCount > 0
+    ? Math.round(selectedComps.reduce((sum: number, c: any) => sum + toNum((c.metrics_json as any)?.ppsf), 0) / selectedCount)
+    : null;
+  const avgSelectedDist = selectedCount > 0
+    ? Math.round(selectedComps.reduce((sum: number, c: any) => sum + toNum(c.distance_miles), 0) / selectedCount * 100) / 100
+    : null;
+
+  // Build the data payload for the client component
+  const workstationData = {
+    propertyId,
+    analysisId,
+    analysis: {
+      scenarioName: analysis.scenario_name,
+      strategyType: analysis.strategy_type,
+      status: analysis.status,
+    },
+    property: {
+      address: property.unparsed_address,
+      city: property.city,
+      county: property.county,
+      state: property.state,
+      postalCode: property.postal_code,
+      latitude: property.latitude ? toNum(property.latitude) : null,
+      longitude: property.longitude ? toNum(property.longitude) : null,
+    },
+    physical: physical ? {
+      propertyType: physical.property_type,
+      propertySubType: physical.property_sub_type,
+      structureType: physical.structure_type,
+      levelClass: physical.level_class_standardized,
+      buildingSqft,
+      aboveGradeSqft,
+      belowGradeTotalSqft: toNum(physical.below_grade_total_sqft),
+      belowGradeFinishedSqft: toNum(physical.below_grade_finished_area_sqft),
+      yearBuilt: physical.year_built,
+      bedroomsTotal: physical.bedrooms_total,
+      bathroomsTotal: physical.bathrooms_total,
+      garageSpaces: physical.garage_spaces,
+      lotSizeSqft: toNum(property.lot_size_sqft),
+    } : null,
+    listing: listing ? {
+      listingId: listing.listing_id as string,
+      mlsStatus: listing.mls_status as string | null,
+      listPrice,
+      originalListPrice: toNum(listing.original_list_price),
+      listingContractDate: listing.listing_contract_date as string | null,
+    } : null,
+    financials: financials ? {
+      annualTax: toNum(financials.annual_property_tax),
+      annualHoa: toNum(financials.annual_hoa_dues),
+    } : null,
+    arv: {
+      auto: autoArv,
+      selected: selectedArv,
+      final: finalArv,
+      effective: effectiveArv,
+    },
+    rehab: {
+      auto: autoRehab,
+      computed: computedRehab,
+      manual: manualRehab,
+      effective: effectiveRehab,
+    },
+    holding: holdResult ? {
+      total: holdResult.total,
+      daysHeld: holdResult.daysHeld,
+    } : null,
+    transaction: transResult ? { total: transResult.total } : null,
+    dealMath,
+    compSummary: {
+      totalComps,
+      selectedCount,
+      avgSelectedPrice,
+      avgSelectedPsf,
+      avgSelectedDist,
+    },
+    manualAnalysis: manualAnalysis ?? null,
+    pipeline: pipeline ?? null,
+    notes: (notes ?? []) as Array<{
+      id: string;
+      note_type: string;
+      note_body: string;
+      is_public: boolean;
+      created_at: string;
+    }>,
+    // Comp data for modal
+    compModalData: {
+      subjectListingRowId: listing?.id as string ?? null,
+      subjectListingMlsNumber: listing?.listing_id as string ?? null,
+      defaultProfileSlug: defaultComparableProfileSlug(physical?.property_type ?? null),
+      latestRun: latestRun ? {
+        id: latestRun.id as string,
+        status: latestRun.status as string | null,
+        created_at: latestRun.created_at as string | null,
+        parameters_json: latestRun.parameters_json as Record<string, unknown> | null,
+        summary_json: latestRun.summary_json as Record<string, unknown> | null,
+      } : null,
+      compCandidates,
+    },
+    // Subject context for comp panel
+    subjectContext: {
+      propertyType: physical?.property_type ?? null,
+      propertySubType: physical?.property_sub_type ?? null,
+      buildingFormStandardized: physical?.building_form_standardized ?? null,
+      levelClassStandardized: physical?.level_class_standardized ?? null,
+      levelsRaw: physical?.levels_raw ?? null,
+      buildingAreaTotalSqft: toNum(physical?.building_area_total_sqft),
+      aboveGradeFinishedAreaSqft: toNum(physical?.above_grade_finished_area_sqft),
+      belowGradeTotalSqft: toNum(physical?.below_grade_total_sqft),
+      belowGradeFinishedAreaSqft: toNum(physical?.below_grade_finished_area_sqft),
+      lotSizeSqft: toNum(property.lot_size_sqft),
+      yearBuilt: physical?.year_built ?? null,
+      bedroomsTotal: physical?.bedrooms_total ?? null,
+      bathroomsTotal: physical?.bathrooms_total ?? null,
+      garageSpaces: physical?.garage_spaces ?? null,
+      listingContractDate: listing?.listing_contract_date as string | null ?? null,
+      address: property.unparsed_address,
+      listPrice,
+    },
+  };
+
+  return <AnalysisWorkstation data={workstationData} />;
 }

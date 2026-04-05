@@ -101,6 +101,12 @@ export default async function BatchResultsPage({
         nullsFirst: false,
       });
       break;
+    case "offer_pct_desc":
+      query = query.order("offer_pct", {
+        ascending: false,
+        nullsFirst: false,
+      });
+      break;
     default:
       query = query.order("est_gap_per_sqft", {
         ascending: false,
@@ -136,6 +142,7 @@ export default async function BatchResultsPage({
     { value: "arv_desc", label: "ARV" },
     { value: "offer_desc", label: "Max Offer" },
     { value: "rehab_asc", label: "Rehab (low→high)" },
+    { value: "offer_pct_desc", label: "Offer %" },
   ];
 
   return (

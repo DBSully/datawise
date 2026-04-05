@@ -34,6 +34,7 @@ function getSectionConfig(pathname: string): SectionConfig {
           exact: true,
         },
         { href: "/analysis/screening", label: "Screening" },
+        { href: "/analysis/queue", label: "Queue" },
         { href: "/analysis/imports", label: "Imports", exact: true },
         { href: "/analysis/analyses", label: "Analyses", exact: true },
       ],

@@ -1,3 +1,183 @@
+## 2026-04-05 — Screening → Analysis Continuity and Single-Page Analysis Workstation
+
+### Summary
+
+This update delivers two major milestones: (1) unified comp scoring and seamless data flow between screening and analysis, and (2) a complete single-page analysis workstation where the analyst can review comps, adjust deal math, write notes, track pipeline status, and prepare for report generation — all without leaving the page.
+
+---
+
+### Screening → Analysis Continuity
+
+#### Shared comp scoring system
+
+Extracted all scoring functions from `lib/comparables/engine.ts` into a new shared module `lib/comparables/scoring.ts`. Both the analysis comparables engine and the screening bulk runner now use the same 10-component weighted scoring system (distance, recency, size, lot size, year, beds, baths, building form, level class, condition) with purpose-driven weights.
+
+Functions shared:
+- `resolveComparableMode()` — determines scoring weights and metric flags based on purpose (flip/rental/scrape/standard) and property type family
+- `buildWeightedScore()` — assembles weighted composite score from individual components
+- `componentScoreFromDelta()` — linear decay scoring for tolerance-based metrics
+- Match score functions for building form, level class, and condition
+- `haversineMiles()`, `pctDelta()`, and utility helpers
+
+This ensures that comps scored during screening produce identical scoring output to comps scored during interactive analysis.
+
+#### Screening now uses tolerance-based filtering
+
+The bulk runner's comp finder was rewritten to apply the same tolerance-based filtering as the analysis engine, but with wider thresholds to cast a broader net:
+
+| Parameter | Screening | Analysis Default |
+|-----------|-----------|-----------------|
+| Max Distance | 0.75 mi | 0.5 mi |
+| Sqft Tolerance | ±30% | ±20% |
+| Year Tolerance | ±25 years | ±25 years |
+| Bed Tolerance | ±2 | ±1 |
+| Bath Tolerance | ±2 | ±1 |
+| Max Candidates | 25 | 15 |
+
+Previously, screening had no size/year/bed/bath tolerance filtering at all — it accepted any comp within distance and sorted by proximity. Now it filters and scores the same way analysis does, just wider.
+
+#### Relational comp persistence
+
+Screening now creates `comparable_search_runs` and `comparable_search_candidates` records for every screened property, with full `metrics_json` and `score_breakdown_json` — the same relational structure used by the analysis comparables engine. Previously, comps were only stored as a JSON blob in `screening_results.arv_detail_json`.
+
+This means:
+- Screening comps are stored in the same tables as analysis comps
+- Each comp has a score, delta metrics, and full detail breakdown
+- The screening detail page now shows comps with analysis-style columns (MLS#, GLA, GLA Δ%, Year, Beds, Baths, Garage, Level, PSF, Score) instead of the old ARV-only view
+
+#### Comp carry-forward on promotion
+
+When a screening result is promoted to a full analysis via "Promote to Analysis", the screening's `comparable_search_runs` record is linked to the new analysis by updating `analysis_id`. The analysis workstation opens with comps pre-loaded — no need to re-run the comp search from scratch.
+
+#### Analysis Queue
+
+Added a new "Analysis Queue" page at `/analysis/queue` — a consolidated view of the latest screening result per property, deduplicated across all screening batches. This is the analyst's daily workspace for finding the next deal to work.
+
+Features:
+- Filters: city, property type, prime candidate toggle
+- Sorts: gap/sqft, offer %, spread, ARV, max offer, rehab, list price
+- Shows promoted/not-promoted status with links to analysis if promoted
+- Pagination support
+
+Database: new `analysis_queue_v` view using `DISTINCT ON (real_property_id)` to show only the latest screening result per property.
+
+Navigation: added "Queue" tab to the Analysis section in app chrome.
+
+#### Offer % sort
+
+Added Offer % as a sort option on the screening batch results page.
+
+---
+
+### Single-Page Analysis Workstation
+
+#### Complete rewrite of the analysis overview page
+
+The analysis overview page at `/analysis/properties/[id]/analyses/[analysisId]` was previously broken (showing property hub content). It has been completely rewritten as a single-page analysis workstation. The analyst never needs to leave this page.
+
+#### Page layout
+
+The workstation is organized into these sections:
+
+1. **Header** — property address, city/state, MLS number, strategy type badge, listing status
+2. **Stat chips** — list price, type, beds/baths, building sqft, year built, effective ARV, max offer
+3. **Property Facts + Deal Analysis** (two-column grid)
+   - Left: physical details, financial details (taxes, HOA)
+   - Right: three-tier ARV display, deal math waterfall, rehab/hold summary
+4. **Analyst Overrides** — inline form for manual ARV, manual rehab, days held, condition, location rating, rent estimate
+5. **Comp Summary** — selected count with average metrics, "Edit Comps" button
+6. **Notes** — categorized notes with add/delete and public/internal toggle
+7. **Pipeline** — interest level, showing status, offer status dropdowns
+
+#### Three-tier ARV
+
+The deal analysis section displays three ARV values:
+- **Auto ARV** — from the screening result (frozen, never changes after screening)
+- **Selected ARV** — recalculated live from currently selected comps using the ARV engine with exponential decay weighting
+- **Final ARV** — manual override entered by the analyst
+
+The "effective ARV" used in deal math calculations = Final ?? Selected ?? Auto. This cascade ensures the most informed value is always used while preserving the original automated estimate for reference.
+
+#### Deal math waterfall
+
+Displays the full deal math calculation inline:
+```
+Effective ARV
+− Rehab (manual override or auto-calculated)
+− Holding costs (computed from property data + strategy profile)
+− Transaction costs (computed from effective ARV + strategy profile)
+− Target profit ($40,000 default)
+────────────────
+= Max Offer
+```
+
+Also shows: offer %, spread (ARV − list price), and gap/sqft.
+
+Holding and transaction costs are computed on the fly using the screening pipeline's pure engine functions — no additional database storage needed.
+
+#### Comp selection modal
+
+The "Edit Comps" button opens a partial-screen modal (85% width, 90% height) with backdrop blur. The modal wraps the existing `ComparableWorkspacePanel` component with all its search controls, candidate table, pick/unpick, and selected comp summary.
+
+The modal is intentionally not full-screen — the analyst can see the analysis page behind it, maintaining context that they are taking a brief focus break rather than navigating away.
+
+When the modal is closed, the page refreshes and Selected ARV recalculates from the updated comp selection.
+
+#### Categorized notes
+
+Notes are organized by category: Location, Scope, Valuation, Property, Internal, Offer. Each note has:
+- A category badge with icon
+- The note text
+- A public/internal toggle (public notes appear on reports; internal notes do not)
+- A delete button
+
+The "Internal" category defaults to non-public. All other categories default to public.
+
+Server actions: `addAnalysisNoteAction`, `deleteAnalysisNoteAction`.
+
+#### Pipeline tracking
+
+Inline dropdowns for:
+- Interest Level: Low / Medium / High / Hot
+- Showing Status: Not Scheduled / Scheduled / Complete / Virtual Complete
+- Offer Status: No Offer / Drafting / Submitted / Accepted / Expired / Rejected
+
+Saves to the existing `analysis_pipeline` table via `savePipelineAction`.
+
+---
+
+### Database changes
+
+#### New migration: `20260404200000_analysis_queue_view.sql`
+- `analysis_queue_v` view — latest screening result per property, deduplicated
+
+#### New migration: `20260405100000_analysis_workspace_updates.sql`
+- `analysis_notes.is_public` — boolean flag for report visibility (default true)
+- `analysis_pipeline` — added date columns: `showing_date`, `offer_submitted_date`, `offer_deadline_date`, `offer_accepted_date`
+- `analysis_reports` table — for future report snapshot storage (id, analysis_id, report_type, title, content_json, access_token)
+- RLS policies including public read access via access_token for shared report links
+
+---
+
+### Current state
+
+DataWise now has a complete Screen → Analyze workflow:
+
+1. **Screen** — batch screen properties with unified comp scoring, tolerance filtering, and deal qualification
+2. **Queue** — browse all screened properties in one consolidated view, filter to Prime Candidates
+3. **Promote** — one click to carry comps and deal data into a full analysis
+4. **Analyze** — single-page workstation with 3-tier ARV, deal math waterfall, comp modal, categorized notes, pipeline tracking
+5. **Next: Report** — report generation infrastructure is in place (table created, report page planned)
+
+---
+
+### Immediate next priorities
+
+- Comp map with Leaflet (subject + comp pins with lat/lng)
+- Report generation (snapshot → printable report page with DataWiseRE branding)
+- Auto-screening on import
+- Financing calculations (optional per deal)
+
 ## 2026-04-04 — Fix-and-Flip Screening Pipeline
 
 ### Summary
