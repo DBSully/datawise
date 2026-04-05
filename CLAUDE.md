@@ -16,8 +16,75 @@ Checkpoint summary for continuing development with Claude.
 - scenario-based analysis foundations
 - a proof-of-concept comparables workflow
 - a clear architecture for scaling into multiple analysts, multiple scenarios, multiple strategies, and owner-facing reports
+- **a fully automated fix-and-flip screening pipeline** (see Phase 4 below)
 
 This work did not just build pages. It established the conceptual and structural foundation for the next stages of the product.
+
+---
+
+## Phase 4: Fix-and-Flip Screening Pipeline (2026-04-04)
+
+> Full details in `CHANGELOG.md` under the 2026-04-04 entry.
+
+### What it does
+
+Batch-screens any subset of properties through the full fix-and-flip underwriting workflow:
+
+**comp search → ARV → rehab budget → holding costs → transaction costs → offer price → Prime Candidate qualification**
+
+Users select a filter (e.g. Active listings, Coming Soon) and the system screens all matching properties in one run, ranking them by opportunity and flagging **Prime Candidates** — deals with strong comp-supported ARV gaps.
+
+### Key architecture decisions
+
+- **Screening is a funnel, not an analysis.** Results live in `screening_batches` / `screening_results`, not `analyses`. This keeps analyses clean for human-reviewed work. A screening result can be "promoted" to a full analysis with one click.
+- **Strategy profiles bundle all assumptions.** A `FlipStrategyProfile` (in `lib/screening/strategy-profiles.ts`) contains every configurable parameter: ARV weights, rehab rates, holding formulas, transaction percentages, qualification thresholds. The default is `DENVER_FLIP_V1`. To change any assumption, edit the profile — not engine code.
+- **Property type intelligence.** Different property types (detached/condo/townhome) get different ARV blending weights, rehab rates, and comp profiles, driven by keyed lookups in the strategy profile.
+- **Bulk runner pre-loads the comp pool.** `lib/screening/bulk-runner.ts` loads all closed sales into memory once, then processes each subject without additional DB queries. This makes screening thousands of properties feasible.
+- **Exponential decay weighted ARV.** Replaces the legacy -5%/year linear adjustment. Aggregate ARV is `Sum(ARV × e^(-days/365)) / Sum(e^(-days/365))`, naturally weighting recent comps more heavily.
+
+### Module structure
+
+```
+lib/screening/
+  types.ts                — Shared types (ArvResult, RehabResult, etc.)
+  strategy-profiles.ts    — FlipStrategyProfile type + DENVER_FLIP_V1 default
+  arv-engine.ts           — Per-comp size-adjusted blended ARV + decay aggregation
+  rehab-engine.ts         — Multiplier system (type × condition × price × age) × base rates
+  holding-engine.ts       — Auto days held + daily tax/insurance/HOA/utility
+  transaction-engine.ts   — Acquisition/disposition title + commissions
+  deal-math.ts            — Max offer, spread, gap/sqft, offer %
+  qualification-engine.ts — Prime Candidate identification
+  bulk-runner.ts          — Batch orchestrator with pre-loaded comp pool
+```
+
+All engines are **pure functions** with no DB dependencies — the bulk runner is the only module that touches Supabase.
+
+### Database tables
+
+- `screening_batches` — One row per screening run (status, counts, filter criteria)
+- `screening_results` — One row per screened property (denormalized subject snapshot, ARV, rehab, hold, transaction, deal math, qualification, promotion link)
+
+### UI routes
+
+- `/analysis/screening` — Dashboard with quick-action buttons and recent batches
+- `/analysis/screening/[batchId]` — Ranked deal table with Prime toggle and sort controls
+- `/analysis/screening/[batchId]/[resultId]` — Full deal detail with ARV comps, rehab breakdown, deal math waterfall, and "Promote to Analysis" button
+
+### Legacy logic ported from MS Access
+
+- ARV: per-comp size adjustments with dampening factors (0.3 building, 0.4 above-grade), 40/60 blend, time adjustment, confidence tiers
+- Rehab: composite multiplier (type/condition/price/age) applied to per-sqft base rates with property-type-specific exterior/landscaping/systems
+- Holding: auto days held formula, daily cost rates
+- Transaction: title and commission percentages
+- Prime Candidates (formerly "Bangers"): ≥2 comps within 0.4mi, 7 months, $60/sqft gap
+
+### What's next
+
+- Auto-screening on import (new listings screened automatically)
+- Financing calculations (optional per deal)
+- Market trend-based time adjustment (replacing fixed -5%/year rate)
+- Rental and listing strategy profiles
+- Investment proposal generation
 
 ---
 
