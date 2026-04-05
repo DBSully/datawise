@@ -37,6 +37,15 @@ function nullableInteger(formData: FormData, key: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/** Parse a percentage input (e.g. "11" for 11%) and store as decimal (0.11). */
+function nullablePctToDecimal(formData: FormData, key: string) {
+  const raw = textValue(formData, key);
+  if (raw === "") return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed / 100;
+}
+
 function arrayTextValues(formData: FormData, key: string) {
   return formData
     .getAll(key)
@@ -286,6 +295,10 @@ export async function saveManualAnalysisAction(
     rehab_manual: nullableNumber(formData, "rehab_manual"),
     days_held_manual: nullableInteger(formData, "days_held_manual"),
     rent_estimate_monthly: nullableNumber(formData, "rent_estimate_monthly"),
+    target_profit_manual: nullableNumber(formData, "target_profit_manual"),
+    financing_rate_manual: nullablePctToDecimal(formData, "financing_rate_manual"),
+    financing_points_manual: nullablePctToDecimal(formData, "financing_points_manual"),
+    financing_ltv_manual: nullablePctToDecimal(formData, "financing_ltv_manual"),
     design_rating: nullableText(formData, "design_rating"),
     location_rating: nullableText(formData, "location_rating"),
   });

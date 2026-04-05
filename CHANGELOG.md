@@ -1,3 +1,215 @@
+## 2026-04-05 — Financing Engine, Methodology Report, and Map Enrichments
+
+### Summary
+
+Implemented hard money financing costs as a new calculation engine in the fix-and-flip pipeline. This was the #1 priority gap identified during a full methodology audit — max offer was systematically overstated by $5k–$25k+ per deal because loan interest and origination fees were not included. Also generated a comprehensive methodology report documenting every formula in the system, and enriched the comp map with rich tooltips and gap/sqft color-coded borders.
+
+---
+
+### Financing Engine
+
+#### New module: `lib/screening/financing-engine.ts`
+
+Pure function following the same pattern as all other engines. Loan amount is based on ARV × LTV, which breaks the circular dependency between financing costs and offer price — ARV is already computed upstream, matching how hard money lenders actually underwrite.
+
+**Core formulas:**
+
+```
+loanAmount      = ARV × LTV
+interestCost    = loanAmount × annualRate × (daysHeld / 365)
+originationCost = loanAmount × pointsRate
+totalFinancing  = interestCost + originationCost
+```
+
+**Reference values also computed:** monthly interest-only payment, daily interest rate.
+
+#### Strategy profile: `DENVER_FLIP_V1` financing defaults
+
+| Parameter | Default | Override Field |
+|-----------|---------|---------------|
+| Annual Rate | 11% | `financing_rate_manual` |
+| Origination Points | 1% | `financing_points_manual` |
+| LTV (of ARV) | 80% | `financing_ltv_manual` |
+| Enabled | true | Profile-level only |
+
+The `financingEnabled` flag was removed from `TransactionConfig` and replaced with a proper `FinancingConfig` type on the strategy profile, with its own `enabled` boolean.
+
+#### Type system updates (`lib/screening/types.ts`)
+
+- New `FinancingResult` type with 10 fields: `loanAmount`, `ltvPct`, `annualRate`, `pointsRate`, `daysHeld`, `interestCost`, `originationCost`, `monthlyPayment`, `dailyInterest`, `total`
+- `DealMathResult` now includes `financingTotal`
+- `ScreeningResultRow` now includes `financing: FinancingResult | null`
+
+#### Deal math updated (`lib/screening/deal-math.ts`)
+
+Total costs formula changed from:
+```
+totalCosts = rehabTotal + holdTotal + transactionTotal
+```
+to:
+```
+totalCosts = rehabTotal + holdTotal + transactionTotal + financingTotal
+```
+
+Max offer is now lower (more conservative) by the amount of financing costs, which is the correct behavior.
+
+#### Bulk runner integration (`lib/screening/bulk-runner.ts`)
+
+- Imports and calls `calculateFinancing()` between transaction and deal math
+- Financing is computed only when `profile.financing.enabled` is true
+- Results written to 5 new `screening_results` columns + detail JSON
+- All early-return/error paths updated to include `financing: null`
+
+#### Database migration: `20260405160000_add_financing_costs.sql`
+
+**screening_results** — 5 new columns:
+- `financing_total` (numeric 14,2)
+- `financing_interest` (numeric 14,2)
+- `financing_origination` (numeric 14,2)
+- `financing_loan_amount` (numeric 14,2)
+- `financing_detail_json` (jsonb) — stores LTV, rate, points, days, monthly payment, daily interest
+
+**manual_analysis** — 3 new override columns:
+- `financing_rate_manual` (numeric 6,4) — constrained 0–1
+- `financing_points_manual` (numeric 6,4) — constrained 0–0.2
+- `financing_ltv_manual` (numeric 6,4) — constrained 0–1
+
+All three have CHECK constraints to prevent invalid values.
+
+#### Analysis workstation integration
+
+**Server-side (`page.tsx`):**
+- Reads financing overrides from `manual_analysis`
+- Calls `calculateFinancing()` with overrides (analyst override → profile default)
+- Passes full `FinancingResult` to the workstation component
+
+**Client-side (`analysis-workstation.tsx`):**
+- **Deal waterfall:** "− Financing" line added between Transaction and Target Profit. Clickable — opens the financing detail modal.
+- **Cost breakdown summary:** Financing line shows rate and LTV at a glance (e.g., "Financing (11.0% @ 80.0% LTV)")
+- **Financing detail modal:** Partial-screen popup showing:
+  - Loan Parameters: ARV basis, LTV, loan amount, annual rate, points, hold period
+  - Cost Breakdown: interest cost, origination fee, total financing
+  - Reference: monthly payment (I/O), daily interest
+- **Analyst Overrides form:** 3 new fields — Loan Rate %, Points %, LTV % — entered as human-readable percentages (e.g., "11" for 11%), converted to decimals (0.11) for storage
+
+**Server action (`actions.ts`):**
+- New `nullablePctToDecimal()` helper — parses percentage input and divides by 100 for storage
+- Saves `financing_rate_manual`, `financing_points_manual`, `financing_ltv_manual` in the `manual_analysis` upsert
+
+#### Screening pages integration
+
+**Batch results table (`/screening/[batchId]`):**
+- New "Fin." column between Trans. and Max Offer showing `financing_total`
+- Table min-width increased from 1400px to 1500px
+- Empty-state colspan updated
+
+**Result detail page (`/screening/[batchId]/[resultId]`):**
+- "− Financing" line added to Deal Math waterfall
+- New **Financing Costs** section after Holding Costs with two-column layout:
+  - Left: Loan Amount, Interest Cost, Origination Fee, Total Financing
+  - Right: LTV, Annual Rate, Points, Hold Period, Monthly Payment (I/O), Daily Interest
+- Parses `financing_detail_json` for the detailed breakdown
+
+#### Backward compatibility
+
+Existing screening results (pre-financing) have null in all financing columns. The UI conditionally renders financing sections only when data is present, so old results display correctly without the financing line.
+
+---
+
+### Methodology Report
+
+Generated a comprehensive "DataWiseRE Methodology Report" documenting every formula and calculation in the system.
+
+**Output:** `reports/DataWiseRE_Methodology_Report.pdf` (also `reports/methodology-report.html` source)
+
+**Structure:**
+1. Executive Overview — pipeline summary, design philosophy, source file index
+2. System Architecture Map — end-to-end data flow diagram, database schema summary, page/component map
+3. Comparable Selection & Scoring — hard filters, 10-component weighted scoring, Haversine formula
+4. ARV Calculations — dual-layer size adjustment, dampening, time adjustment, exponential decay aggregation
+5. Rehab Budget — 4-factor composite multiplier system, 6 line items, property-type rates
+6. Holding Costs — size-scaled days held, daily tax/insurance/HOA/utility
+7. Transaction Costs — acquisition/disposition title, agent commissions
+7.5. Financing Costs — hard money loan interest and origination (new section)
+8. Deal Math & Max Offer — waterfall with financing included, updated example
+9. Prime Candidate Qualification — multi-comp confirmation rules
+10. Manual Override System — 3-tier priority waterfall
+11. Complete Strategy Profile Reference — every DENVER_FLIP_V1 parameter
+12. Cross-Cutting Recommendations — 12 prioritized suggestions (financing now marked resolved)
+
+Each category includes: formulas with variable names, input/output mapping to database columns and UI components, configurable parameters, and an assessment with strengths and improvement suggestions.
+
+---
+
+### Comp Map Enrichments
+
+#### Rich tooltips (`comp-map.tsx`)
+
+- New `MapPinTooltipData` type with 10 optional fields: closePrice, closeDate, sqft, sqftDelta, sqftDeltaPct, ppsf, distance, gapPerSqft, listPrice
+- Subject tooltip shows: list price, sqft, gap/sqft
+- Comp tooltips show: sale price, close date, PSF, sqft with delta (e.g., "+150 (+8.3%)"), distance, gap/sqft
+- Selected comps show "Click to deselect", candidates show "Click to select"
+- Delta coloring: green for positive, red for negative
+- Gap/sqft coloring: green ≥$60, amber ≥$30, gray below
+
+#### Smart tooltip positioning
+
+- Tooltips dynamically reposition toward the map center on each hover
+- Calculates best direction (top/bottom/left/right) based on pin position relative to map center
+- Prevents tooltips from being clipped at map edges
+
+#### Gap-coded candidate borders
+
+- Candidate pin border color reflects gap/sqft: green (≥$60), amber (≥$30), red (below)
+- Provides instant visual deal quality assessment on the map
+
+#### Tooltip styling (`globals.css`)
+
+- New `.comp-map-tooltip` class: white background, subtle border, rounded corners, shadow, max-width 260px
+
+#### Workstation map pin data (`analysis-workstation.tsx`)
+
+- Subject pin now includes listPrice, sqft, gapPerSqft in tooltipData
+- Comp pins include: closePrice, closeDate, sqft, sqftDelta, sqftDeltaPct, ppsf, distance, perCompGapPerSqft
+- Per-comp gap calculated as: `(compClosePrice − subjectListPrice) / subjectSqft`
+
+---
+
+### Target Profit Manual Override
+
+#### Database migration: `20260405140000_add_target_profit_manual.sql`
+
+- Added `target_profit_manual` (numeric 14,2) to `manual_analysis` with CHECK constraint ≥ 0
+- Enables per-deal override of the $40,000 default target profit
+
+This was already wired into the workstation UI and server action in the prior commit but the migration was not yet applied.
+
+---
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `lib/screening/financing-engine.ts` | **New** — Pure function financing calculator |
+| `lib/screening/types.ts` | Added `FinancingResult`, updated `DealMathResult` and `ScreeningResultRow` |
+| `lib/screening/strategy-profiles.ts` | Added `FinancingConfig` type, financing section in `DENVER_FLIP_V1`, removed `financingEnabled` from `TransactionConfig` |
+| `lib/screening/deal-math.ts` | Added `financingTotal` to inputs and `totalCosts` |
+| `lib/screening/bulk-runner.ts` | Calls financing engine, stores results, updated all result construction paths |
+| `app/.../analyses/[analysisId]/page.tsx` | Computes financing with overrides, passes to workstation |
+| `app/.../analyses/[analysisId]/analysis-workstation.tsx` | Financing in waterfall, detail modal, override fields, rich map tooltips |
+| `app/.../analysis/properties/actions.ts` | `nullablePctToDecimal()` helper, saves financing overrides |
+| `app/.../screening/[batchId]/page.tsx` | Financing column in batch results table |
+| `app/.../screening/[batchId]/[resultId]/page.tsx` | Financing in waterfall + full breakdown section |
+| `components/properties/comp-map.tsx` | Rich tooltips, smart positioning, gap-coded borders |
+| `components/properties/comparable-workspace-panel.tsx` | Layout adjustments for map integration |
+| `app/globals.css` | Comp map tooltip styles |
+| `supabase/migrations/20260405140000_...` | `target_profit_manual` column |
+| `supabase/migrations/20260405160000_...` | Financing columns on `screening_results` and `manual_analysis` |
+| `reports/methodology-report.html` | Full methodology report source |
+| `reports/DataWiseRE_Methodology_Report.pdf` | Generated PDF |
+
+---
+
 ## 2026-04-05 — Comp Map, Interactive Selection, and Queue Improvements
 
 ### Summary

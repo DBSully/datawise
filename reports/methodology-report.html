@@ -1,0 +1,1114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DataWiseRE Methodology Report</title>
+<style>
+  @page { size: letter; margin: 0.75in; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: #1e293b;
+    line-height: 1.55;
+    font-size: 11pt;
+    max-width: 8.5in;
+    margin: 0 auto;
+    padding: 0.75in;
+  }
+  h1 { font-size: 22pt; color: #0f172a; border-bottom: 3px solid #3b82f6; padding-bottom: 8px; margin-top: 0; }
+  h2 { font-size: 16pt; color: #1e40af; border-bottom: 2px solid #93c5fd; padding-bottom: 4px; margin-top: 32px; page-break-after: avoid; }
+  h3 { font-size: 13pt; color: #1e3a5f; margin-top: 20px; page-break-after: avoid; }
+  h4 { font-size: 11pt; color: #475569; margin-top: 14px; page-break-after: avoid; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 16px 0; font-size: 10pt; page-break-inside: avoid; }
+  th, td { border: 1px solid #cbd5e1; padding: 5px 8px; text-align: left; }
+  th { background: #f1f5f9; font-weight: 600; color: #334155; }
+  tr:nth-child(even) { background: #f8fafc; }
+  code { background: #f1f5f9; padding: 1px 4px; border-radius: 3px; font-size: 10pt; font-family: 'Cascadia Code', 'Consolas', monospace; }
+  .formula-box {
+    background: #eff6ff; border: 1px solid #93c5fd; border-left: 4px solid #3b82f6;
+    padding: 10px 14px; margin: 10px 0; font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-size: 10.5pt; border-radius: 4px; page-break-inside: avoid;
+  }
+  .note-box {
+    background: #fefce8; border: 1px solid #fde68a; border-left: 4px solid #f59e0b;
+    padding: 10px 14px; margin: 10px 0; font-size: 10pt; border-radius: 4px;
+  }
+  .strength-box {
+    background: #f0fdf4; border: 1px solid #86efac; border-left: 4px solid #22c55e;
+    padding: 10px 14px; margin: 10px 0; font-size: 10pt; border-radius: 4px;
+  }
+  .weakness-box {
+    background: #fff1f2; border: 1px solid #fecdd3; border-left: 4px solid #ef4444;
+    padding: 10px 14px; margin: 10px 0; font-size: 10pt; border-radius: 4px;
+  }
+  .toc { margin: 16px 0 24px 0; }
+  .toc a { text-decoration: none; color: #1e40af; }
+  .toc a:hover { text-decoration: underline; }
+  .toc ul { list-style: none; padding-left: 0; }
+  .toc ul ul { padding-left: 20px; }
+  .toc li { margin: 4px 0; }
+  .toc li::before { content: none; }
+  .subtitle { font-size: 12pt; color: #64748b; margin-top: -4px; }
+  .meta { color: #94a3b8; font-size: 9pt; margin-top: 4px; }
+  .flow-diagram {
+    background: #f8fafc; border: 1px solid #e2e8f0; padding: 14px 18px;
+    font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 10pt;
+    border-radius: 6px; margin: 12px 0; white-space: pre; overflow-x: auto;
+    line-height: 1.6; page-break-inside: avoid;
+  }
+  .page-break { page-break-before: always; }
+  hr { border: none; border-top: 1px solid #e2e8f0; margin: 24px 0; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .param-card {
+    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
+    padding: 10px 14px; margin: 6px 0;
+  }
+  .param-card .label { font-weight: 600; color: #334155; font-size: 10pt; }
+  .param-card .value { font-family: 'Cascadia Code', monospace; color: #1e40af; font-size: 11pt; }
+  .param-card .desc { color: #64748b; font-size: 9pt; }
+</style>
+</head>
+<body>
+
+<!-- ================================================================ -->
+<!-- COVER / TITLE -->
+<!-- ================================================================ -->
+<h1>DataWiseRE Methodology Report</h1>
+<p class="subtitle">Fix-and-Flip Screening Pipeline: Formulas, Calculations, and Data Architecture</p>
+<p class="meta">Generated: April 5, 2026 | Strategy Profile: DENVER_FLIP_V1 | Platform: Next.js + Supabase</p>
+
+<hr>
+
+<!-- ================================================================ -->
+<!-- TABLE OF CONTENTS -->
+<!-- ================================================================ -->
+<h2>Table of Contents</h2>
+<div class="toc">
+<ul>
+  <li><strong>1.</strong> <a href="#overview">Executive Overview</a></li>
+  <li><strong>2.</strong> <a href="#architecture">System Architecture Map</a>
+    <ul>
+      <li>2.1 <a href="#data-flow">End-to-End Data Flow</a></li>
+      <li>2.2 <a href="#db-schema">Database Schema Summary</a></li>
+      <li>2.3 <a href="#page-map">Page &amp; Component Map</a></li>
+    </ul>
+  </li>
+  <li><strong>3.</strong> <a href="#comp-scoring">Comparable Selection &amp; Scoring</a>
+    <ul>
+      <li>3.1 <a href="#comp-filters">Hard Filters</a></li>
+      <li>3.2 <a href="#comp-weights">Weighted Scoring System</a></li>
+      <li>3.3 <a href="#haversine">Haversine Distance</a></li>
+      <li>3.4 Assessment</li>
+    </ul>
+  </li>
+  <li><strong>4.</strong> <a href="#arv">ARV Calculations (After Repair Value)</a>
+    <ul>
+      <li>4.1 <a href="#arv-percomp">Per-Comp Adjusted ARV</a></li>
+      <li>4.2 <a href="#arv-aggregate">Aggregate ARV (Exponential Decay)</a></li>
+      <li>4.3 <a href="#arv-config">Configuration Parameters</a></li>
+      <li>4.4 Assessment</li>
+    </ul>
+  </li>
+  <li><strong>5.</strong> <a href="#rehab">Rehab Budget Calculations</a>
+    <ul>
+      <li>5.1 <a href="#rehab-multipliers">Composite Multiplier System</a></li>
+      <li>5.2 <a href="#rehab-lineitems">Line Item Formulas</a></li>
+      <li>5.3 <a href="#rehab-rates">Rate Tables by Property Type</a></li>
+      <li>5.4 Assessment</li>
+    </ul>
+  </li>
+  <li><strong>6.</strong> <a href="#holding">Holding Cost Calculations</a>
+    <ul>
+      <li>6.1 <a href="#hold-days">Days Held Formula</a></li>
+      <li>6.2 <a href="#hold-daily">Daily Cost Calculations</a></li>
+      <li>6.3 Assessment</li>
+    </ul>
+  </li>
+  <li><strong>7.</strong> <a href="#transaction">Transaction Cost Calculations</a>
+    <ul>
+      <li>7.1 <a href="#trans-formulas">Cost Formulas</a></li>
+      <li>7.2 Assessment</li>
+    </ul>
+  </li>
+  <li><strong>7.5.</strong> <a href="#financing">Financing Cost Calculations</a>
+    <ul>
+      <li>7.5.1 <a href="#fin-formulas">Loan &amp; Cost Formulas</a></li>
+      <li>7.5.2 <a href="#fin-config">Configuration &amp; Overrides</a></li>
+      <li>7.5.3 Assessment</li>
+    </ul>
+  </li>
+  <li><strong>8.</strong> <a href="#dealmatch">Deal Math &amp; Max Offer</a>
+    <ul>
+      <li>8.1 <a href="#deal-formulas">Core Formulas</a></li>
+      <li>8.2 <a href="#deal-waterfall">Deal Waterfall</a></li>
+      <li>8.3 Assessment</li>
+    </ul>
+  </li>
+  <li><strong>9.</strong> <a href="#qualification">Prime Candidate Qualification</a>
+    <ul>
+      <li>9.1 <a href="#qual-rules">Qualification Rules</a></li>
+      <li>9.2 Assessment</li>
+    </ul>
+  </li>
+  <li><strong>10.</strong> <a href="#override">Manual Override System</a></li>
+  <li><strong>11.</strong> <a href="#strategy-profile">Complete Strategy Profile Reference</a></li>
+  <li><strong>12.</strong> <a href="#recommendations">Cross-Cutting Recommendations</a></li>
+</ul>
+</div>
+
+<hr>
+
+<!-- ================================================================ -->
+<!-- 1. EXECUTIVE OVERVIEW -->
+<!-- ================================================================ -->
+<h2 id="overview">1. Executive Overview</h2>
+
+<p>DataWiseRE's fix-and-flip screening pipeline automates the initial deal qualification workflow that was previously performed manually in MS Access and Excel. The system processes properties through a six-stage calculation pipeline:</p>
+
+<div class="flow-diagram">
+MLS Data Import
+    |
+Comparable Search &amp; Scoring  -- find similar closed sales
+    |
+ARV Calculation              -- estimate after-repair value
+    |
+Rehab Budget Estimation      -- estimate renovation costs
+    |
+Holding &amp; Transaction Costs  -- estimate carry and closing costs
+    |
+Financing Costs              -- hard money interest + origination
+    |
+Deal Math &amp; Qualification    -- compute max offer, flag Prime Candidates
+</div>
+
+<p><strong>Design philosophy:</strong> The system is designed as an <em>opportunity identification engine</em>, not a precision appraisal tool. Its purpose is to rapidly surface properties with favorable deal characteristics so a human analyst can focus their time on the most promising opportunities. Every automated value can be overridden by the analyst.</p>
+
+<p><strong>Engine architecture:</strong> All calculation engines are pure functions with no database dependencies. They receive inputs and a strategy profile, and return structured results. The strategy profile (<code>DENVER_FLIP_V1</code>) centralizes every configurable parameter, ensuring engines contain zero hardcoded constants.</p>
+
+<p><strong>Source files:</strong></p>
+<table>
+  <tr><th>Module</th><th>File</th><th>Purpose</th></tr>
+  <tr><td>Comp Scoring</td><td><code>lib/comparables/scoring.ts</code></td><td>Weighted multi-factor comparable ranking</td></tr>
+  <tr><td>ARV Engine</td><td><code>lib/screening/arv-engine.ts</code></td><td>Per-comp adjusted ARV with exponential decay aggregation</td></tr>
+  <tr><td>Rehab Engine</td><td><code>lib/screening/rehab-engine.ts</code></td><td>Multiplier-based rehab budget estimation</td></tr>
+  <tr><td>Holding Engine</td><td><code>lib/screening/holding-engine.ts</code></td><td>Time-based carrying costs</td></tr>
+  <tr><td>Transaction Engine</td><td><code>lib/screening/transaction-engine.ts</code></td><td>Title, closing, and commission costs</td></tr>
+  <tr><td>Financing Engine</td><td><code>lib/screening/financing-engine.ts</code></td><td>Hard money loan interest and origination</td></tr>
+  <tr><td>Deal Math</td><td><code>lib/screening/deal-math.ts</code></td><td>Max offer and spread calculations</td></tr>
+  <tr><td>Qualification</td><td><code>lib/screening/qualification-engine.ts</code></td><td>Prime Candidate identification</td></tr>
+  <tr><td>Strategy Profile</td><td><code>lib/screening/strategy-profiles.ts</code></td><td>All configurable parameters</td></tr>
+  <tr><td>Bulk Runner</td><td><code>lib/screening/bulk-runner.ts</code></td><td>Batch orchestrator</td></tr>
+</table>
+
+<!-- ================================================================ -->
+<!-- 2. SYSTEM ARCHITECTURE MAP -->
+<!-- ================================================================ -->
+<div class="page-break"></div>
+<h2 id="architecture">2. System Architecture Map</h2>
+
+<h3 id="data-flow">2.1 End-to-End Data Flow</h3>
+
+<div class="flow-diagram">
+CSV Import (REcolorado MLS)
+    |
+    v
+import_batches / import_batch_rows / import_batch_files
+    |  (staging + validation + processing)
+    v
++------------------+     +-------------------+     +----------------------+
+| real_properties  |&lt;---&gt;| property_physical |     | property_financials  |
+| (identity/loc)   |     | (structure/size)  |     | (tax, HOA)           |
++------------------+     +-------------------+     +----------------------+
+    |                         |
+    v                         v
++------------------+
+| mls_listings     |     Canonical property + listing data
+| (events/prices)  |
++------------------+
+    |
+    |--- SCREENING PATH -------------------------+
+    |                                            |
+    v                                            v
++--------------------+    +-------------------------------+
+| screening_batches  |    | comparable_search_runs        |
+| (batch metadata)   |    | comparable_search_candidates  |
++--------------------+    +-------------------------------+
+    |                         |
+    v                         v
++-------------------------------------------------------------------+
+| screening_results                                                 |
+| (denormalized: subject snapshot + ARV + rehab + hold + tx +       |
+|  deal math + qualification + promotion link)                      |
++-------------------------------------------------------------------+
+    |
+    |--- PROMOTION TO ANALYSIS ------+
+    |                                |
+    v                                v
++------------------+     +-------------------+
+| analyses         |     | manual_analysis   |
+| (scenario shell) |     | (analyst overrides)|
++------------------+     +-------------------+
+    |
+    v
+analysis_pipeline / analysis_notes / analysis_reports
+</div>
+
+<h3 id="db-schema">2.2 Database Schema Summary</h3>
+
+<table>
+  <tr><th>Table</th><th>Purpose</th><th>Key Columns</th></tr>
+  <tr><td><code>real_properties</code></td><td>Canonical property identity</td><td>address, lat/lon, parcel_id, lot_size</td></tr>
+  <tr><td><code>property_physical</code></td><td>Physical characteristics</td><td>sqft (building, above/below grade), beds, baths, year_built, property_type, level_class</td></tr>
+  <tr><td><code>property_financials</code></td><td>Financial facts</td><td>annual_property_tax, annual_hoa_dues</td></tr>
+  <tr><td><code>mls_listings</code></td><td>MLS listing events</td><td>list_price, close_price, close_date, mls_status, property_condition_source</td></tr>
+  <tr><td><code>import_batches</code></td><td>Import session tracking</td><td>source_system, status, row_count, summary_json</td></tr>
+  <tr><td><code>import_batch_rows</code></td><td>Staged raw CSV rows</td><td>raw_row (jsonb), processing_status, validation_errors</td></tr>
+  <tr><td><code>comparable_profiles</code></td><td>Search parameter templates</td><td>purpose, rules_json (tolerances, max distance, etc.)</td></tr>
+  <tr><td><code>comparable_search_runs</code></td><td>Search execution records</td><td>subject IDs, parameters_json, summary_json</td></tr>
+  <tr><td><code>comparable_search_candidates</code></td><td>Scored comp candidates</td><td>distance_miles, raw_score, score_breakdown_json, selected_yn</td></tr>
+  <tr><td><code>comparable_sets</code></td><td>Curated comp sets</td><td>analysis_id, purpose, status</td></tr>
+  <tr><td><code>screening_batches</code></td><td>Screening run metadata</td><td>strategy_profile_slug, total_subjects, prime_candidate_count</td></tr>
+  <tr><td><code>screening_results</code></td><td>Full screening outputs</td><td>All engine outputs denormalized (see Section 8)</td></tr>
+  <tr><td><code>analyses</code></td><td>Analysis scenario shell</td><td>strategy_type, scenario_name, status</td></tr>
+  <tr><td><code>manual_analysis</code></td><td>Analyst overrides</td><td>arv_manual, rehab_manual, target_profit_manual, days_held_manual</td></tr>
+  <tr><td><code>analysis_pipeline</code></td><td>Workflow tracking</td><td>interest_level, showing_status, offer_status</td></tr>
+</table>
+
+<h3 id="page-map">2.3 Page &amp; Component Map</h3>
+
+<table>
+  <tr><th>Route / Component</th><th>Purpose</th><th>Data Sources</th></tr>
+  <tr><td><code>/analysis/properties</code></td><td>Property browser with filters</td><td><code>property_browser_v</code> (view)</td></tr>
+  <tr><td><code>/analysis/properties/[id]</code></td><td>Property hub</td><td><code>real_properties</code> + <code>property_physical</code> + <code>mls_listings</code></td></tr>
+  <tr><td><code>/analysis/properties/[id]/analyses/[analysisId]</code></td><td>Analysis workstation (single-page)</td><td>All tables + engine calculations on load</td></tr>
+  <tr><td><code>/analysis/screening</code></td><td>Screening dashboard</td><td><code>screening_batches</code></td></tr>
+  <tr><td><code>/analysis/screening/[batchId]</code></td><td>Ranked deal table</td><td><code>screening_results</code></td></tr>
+  <tr><td><code>/analysis/screening/[batchId]/[resultId]</code></td><td>Full deal detail</td><td><code>screening_results</code> + <code>comparable_search_candidates</code></td></tr>
+  <tr><td><code>analysis-workstation.tsx</code></td><td>Core analysis UI component</td><td>Receives pre-computed engine results as props</td></tr>
+  <tr><td><code>comp-map.tsx</code></td><td>Leaflet map with subject/comp pins</td><td>Lat/lon from <code>real_properties</code> + comp metrics</td></tr>
+  <tr><td><code>comparable-workspace-panel.tsx</code></td><td>Comp search &amp; selection panel</td><td><code>comparable_search_candidates</code></td></tr>
+</table>
+
+<!-- ================================================================ -->
+<!-- 3. COMPARABLE SELECTION & SCORING -->
+<!-- ================================================================ -->
+<div class="page-break"></div>
+<h2 id="comp-scoring">3. Comparable Selection &amp; Scoring</h2>
+
+<p><strong>Goal:</strong> Find the most similar recently-closed sales to a subject property, rank them by overall similarity, and present them for analyst selection. The comp engine is intentionally separated from the valuation engine &mdash; its output is a <em>selected comp set</em>, not a value.</p>
+
+<h3 id="comp-filters">3.1 Hard Filters (Screening Mode)</h3>
+
+<p>Before scoring, candidates must pass all hard filters. Any failure eliminates the candidate.</p>
+
+<table>
+  <tr><th>Filter</th><th>Threshold</th><th>Source</th></tr>
+  <tr><td>Max distance</td><td>0.75 miles</td><td>Haversine from lat/lon</td></tr>
+  <tr><td>Max days since close</td><td>365 days</td><td><code>mls_listings.close_date</code></td></tr>
+  <tr><td>Sqft tolerance</td><td>&plusmn;30%</td><td><code>property_physical.building_area_total_sqft</code></td></tr>
+  <tr><td>Lot size tolerance</td><td>&plusmn;30%</td><td><code>real_properties.lot_size_sqft</code></td></tr>
+  <tr><td>Year built tolerance</td><td>&plusmn;25 years</td><td><code>property_physical.year_built</code></td></tr>
+  <tr><td>Bed tolerance</td><td>&plusmn;2</td><td><code>property_physical.bedrooms_total</code></td></tr>
+  <tr><td>Bath tolerance</td><td>&plusmn;2</td><td><code>property_physical.bathrooms_total</code></td></tr>
+  <tr><td>Same property type</td><td>Required</td><td><code>property_physical.property_type</code></td></tr>
+  <tr><td>Same level class</td><td>Required (score &ge; 0.85)</td><td><code>property_physical.level_class_standardized</code></td></tr>
+  <tr><td>Same building form</td><td>Required (exact match)</td><td><code>property_physical.building_form_standardized</code></td></tr>
+  <tr><td>Max candidates returned</td><td>25</td><td>Top scores after filtering</td></tr>
+</table>
+
+<h3 id="comp-weights">3.2 Weighted Scoring System</h3>
+
+<p>Candidates passing hard filters receive a weighted composite score (0&ndash;100). Each component produces a 0&ndash;1 score, then all components are combined using purpose-specific weights.</p>
+
+<h4>Component Score Formula</h4>
+<div class="formula-box">
+componentScore = clamp(0, 1, 1 - delta / tolerance)
+</div>
+<p>Where <code>delta</code> is the absolute or percentage difference, and <code>tolerance</code> is the maximum acceptable difference for that metric.</p>
+
+<h4>Special Match Scores</h4>
+<table>
+  <tr><th>Match Type</th><th>Exact Match</th><th>Class Match</th><th>Partial/Missing</th><th>No Match</th></tr>
+  <tr><td>Building Form</td><td>1.0</td><td>&mdash;</td><td>0.45</td><td>0.0</td></tr>
+  <tr><td>Level Class</td><td>1.0</td><td>0.85</td><td>0.45&ndash;0.65</td><td>0.0</td></tr>
+  <tr><td>Condition</td><td>1.0</td><td>&mdash;</td><td>0.45</td><td>0.3</td></tr>
+</table>
+
+<h4>Flip-Mode Scoring Weights</h4>
+<table>
+  <tr><th>Component</th><th>Weight</th><th>Input Source</th></tr>
+  <tr><td>Distance</td><td>0.24</td><td>Haversine miles</td></tr>
+  <tr><td>Size (sqft)</td><td>0.24</td><td><code>building_area_total_sqft</code> % delta</td></tr>
+  <tr><td>Recency</td><td>0.18</td><td>Days since <code>close_date</code></td></tr>
+  <tr><td>Building Form</td><td>0.12</td><td><code>building_form_standardized</code></td></tr>
+  <tr><td>Level Class</td><td>0.12</td><td><code>level_class_standardized</code></td></tr>
+  <tr><td>Year Built</td><td>0.10</td><td><code>year_built</code> delta</td></tr>
+  <tr><td>Lot Size</td><td>0.08</td><td><code>lot_size_sqft</code> % delta</td></tr>
+  <tr><td>Bedrooms</td><td>0.06</td><td><code>bedrooms_total</code> delta</td></tr>
+  <tr><td>Bathrooms</td><td>0.06</td><td><code>bathrooms_total</code> delta</td></tr>
+  <tr><td>Condition</td><td>0.06</td><td><code>property_condition_source</code></td></tr>
+</table>
+
+<h4>Final Score</h4>
+<div class="formula-box">
+rawScore = clamp(0, 1, weightedScoreTotal / totalWeight) &times; 100
+</div>
+
+<h3 id="haversine">3.3 Haversine Distance Formula</h3>
+<div class="formula-box">
+a = sin&sup2;(&Delta;lat/2) + cos(lat1) &times; cos(lat2) &times; sin&sup2;(&Delta;lon/2)
+c = 2 &times; atan2(&radic;a, &radic;(1-a))
+distance = 3,958.8 &times; c  [miles]
+</div>
+<p><strong>Inputs:</strong> <code>real_properties.latitude</code>, <code>real_properties.longitude</code> for both subject and comp.</p>
+
+<h3>3.4 Assessment</h3>
+
+<div class="strength-box">
+<strong>Strengths:</strong>
+<ul>
+  <li>Purpose-driven weight profiles (flip vs. rental vs. scrape) tailor comp selection to the analysis strategy.</li>
+  <li>Hard filters prevent irrelevant candidates from entering the scoring stage, keeping the comp pool focused.</li>
+  <li>Building form and level class matching go beyond basic bed/bath comparison, reflecting real property structure differences.</li>
+  <li>Full score breakdown is stored as JSON for transparency and analyst review.</li>
+</ul>
+</div>
+
+<div class="weakness-box">
+<strong>Weaknesses &amp; Suggestions:</strong>
+<ul>
+  <li><strong>No neighborhood/subdivision awareness.</strong> Two properties 0.3 mi apart can be in very different neighborhoods. Consider adding subdivision match as a scoring component or allowing analysts to define neighborhood boundaries.</li>
+  <li><strong>Condition scoring is coarse.</strong> Only exact match (1.0) vs. mismatch (0.3). The MLS condition field is often unreliable or missing. Consider supplementing with DOM (days on market) or price-change history as a proxy for condition.</li>
+  <li><strong>No garage/feature adjustment.</strong> Garage count differences can materially affect value. Consider adding garage_spaces as a scoring component.</li>
+  <li><strong>Binary lot size tolerance.</strong> A property at 29% delta passes; 31% is eliminated. Consider a gradual penalty ramp instead of a hard cutoff for fringe candidates.</li>
+</ul>
+</div>
+
+<!-- ================================================================ -->
+<!-- 4. ARV CALCULATIONS -->
+<!-- ================================================================ -->
+<div class="page-break"></div>
+<h2 id="arv">4. ARV Calculations (After Repair Value)</h2>
+
+<p><strong>Goal:</strong> Estimate the post-renovation market value of a subject property based on comparable closed sales, adjusting for size differences and time elapsed since each comp closed.</p>
+
+<p><strong>Source:</strong> <code>lib/screening/arv-engine.ts</code></p>
+
+<h3 id="arv-percomp">4.1 Per-Comp Adjusted ARV</h3>
+
+<p>Each comparable produces its own adjusted ARV estimate for the subject, computed in two layers (building-total and above-grade) then blended.</p>
+
+<h4>Step 1: Price Per Square Foot</h4>
+<div class="formula-box">
+psfBuilding = closePrice / compBuildingSqft
+psfAboveGrade = closePrice / compAboveGradeSqft
+</div>
+<p><strong>Inputs:</strong> <code>mls_listings.close_price</code>, <code>property_physical.building_area_total_sqft</code>, <code>property_physical.above_grade_finished_area_sqft</code></p>
+
+<h4>Step 2: Size-Adjusted ARV (Two Layers)</h4>
+<div class="formula-box">
+arvBuilding = closePrice + (subjectBldgSqft - compBldgSqft) &times; psfBuilding &times; buildingDampening
+
+arvAboveGrade = closePrice + (subjectAboveSqft - compAboveSqft) &times; psfAboveGrade &times; aboveGradeDampening
+</div>
+<p><strong>Dampening factors</strong> (0&ndash;1) reduce the impact of size differences, recognizing that value does not scale linearly with square footage. For detached properties: building dampening = 0.3, above-grade dampening = 0.4.</p>
+
+<h4>Step 3: Blended ARV</h4>
+<div class="formula-box">
+arvBlended = arvBuilding &times; buildingTotalWeight + arvAboveGrade &times; aboveGradeWeight
+</div>
+
+<table>
+  <tr><th>Property Type</th><th>Building Weight</th><th>Above-Grade Weight</th><th>Building Dampening</th><th>Above-Grade Dampening</th></tr>
+  <tr><td>Detached</td><td>0.40</td><td>0.60</td><td>0.30</td><td>0.40</td></tr>
+  <tr><td>Condo</td><td>0.15</td><td>0.85</td><td>0.20</td><td>0.45</td></tr>
+  <tr><td>Townhome</td><td>0.35</td><td>0.65</td><td>0.30</td><td>0.40</td></tr>
+</table>
+
+<h4>Step 4: Time Adjustment</h4>
+<div class="formula-box">
+daysSinceClose = floor((referenceDate - closeDate) / 86,400,000)
+timeMultiplier = 1 + timeAdjustmentAnnualRate &times; (daysSinceClose / 365)
+arvTimeAdjusted = arvBlended &times; timeMultiplier
+</div>
+<p><strong>Current rate:</strong> -5% per year. A comp that closed 6 months ago receives a multiplier of 0.975 (2.5% downward adjustment).</p>
+
+<h4>Step 5: Confidence Score (Reference Only)</h4>
+<table>
+  <tr><th>Distance</th><th>Confidence</th></tr>
+  <tr><td>0 &ndash; 0.3 mi</td><td>1.0 (100%)</td></tr>
+  <tr><td>0.3 &ndash; 0.5 mi</td><td>0.8 (80%)</td></tr>
+  <tr><td>0.5 &ndash; 0.6 mi</td><td>0.6 (60%)</td></tr>
+  <tr><td>0.6 &ndash; 0.75 mi</td><td>0.4 (40%)</td></tr>
+  <tr><td>&gt; 0.75 mi</td><td>0.2 (20%)</td></tr>
+</table>
+<p class="note-box"><strong>Note:</strong> Confidence scores are currently stored for analyst reference but are <strong>not used</strong> in the weighted ARV aggregation. The exponential decay weighting uses time, not distance.</p>
+
+<h3 id="arv-aggregate">4.2 Aggregate ARV (Exponential Decay Weighted Average)</h3>
+
+<h4>Step 6: Decay Weight</h4>
+<div class="formula-box">
+decayWeight = e<sup>-(daysSinceClose / 365)</sup>
+</div>
+
+<p>This naturally weights recent comps much more heavily:</p>
+<table>
+  <tr><th>Comp Age</th><th>Decay Weight</th><th>Relative Influence</th></tr>
+  <tr><td>1 month</td><td>0.920</td><td>Very high</td></tr>
+  <tr><td>3 months</td><td>0.779</td><td>High</td></tr>
+  <tr><td>6 months</td><td>0.607</td><td>Moderate</td></tr>
+  <tr><td>9 months</td><td>0.472</td><td>Low-moderate</td></tr>
+  <tr><td>12 months</td><td>0.368</td><td>Low</td></tr>
+</table>
+
+<h4>Step 7: Weighted Average</h4>
+<div class="formula-box">
+arvAggregate = &Sigma;(arvTimeAdjusted<sub>i</sub> &times; decayWeight<sub>i</sub>) / &Sigma;(decayWeight<sub>i</sub>)
+arvPerSqft = arvAggregate / subjectBuildingSqft
+</div>
+
+<p><strong>Output stored in:</strong> <code>screening_results.arv_aggregate</code>, <code>screening_results.arv_per_sqft</code>, <code>screening_results.arv_comp_count</code>, <code>screening_results.arv_detail_json</code></p>
+<p><strong>Downstream consumers:</strong> Deal Math engine (max offer calculation), Qualification engine (Prime Candidate check), Analysis workstation UI (3-tier ARV display)</p>
+
+<h3 id="arv-config">4.3 Configuration Parameters</h3>
+<table>
+  <tr><th>Parameter</th><th>Value</th><th>Location</th></tr>
+  <tr><td><code>timeAdjustmentAnnualRate</code></td><td>-0.05 (-5%/year)</td><td>Strategy profile</td></tr>
+  <tr><td><code>confidenceTiers</code></td><td>5 distance bands</td><td>Strategy profile</td></tr>
+  <tr><td><code>blendByPropertyType</code></td><td>Per-type weights/dampening</td><td>Strategy profile</td></tr>
+</table>
+
+<h3>4.4 Assessment</h3>
+
+<div class="strength-box">
+<strong>Strengths:</strong>
+<ul>
+  <li><strong>Dual-layer valuation</strong> separates building-total from above-grade, properly handling basements and multi-level structures.</li>
+  <li><strong>Dampening factors</strong> prevent extreme size adjustments from distorting value estimates.</li>
+  <li><strong>Exponential decay</strong> is mathematically superior to linear time adjustments &mdash; older comps fade smoothly rather than falling off a cliff.</li>
+  <li><strong>Property-type-aware blending</strong> correctly gives condos heavier above-grade weight (no exterior) while detached homes use more balanced weights.</li>
+</ul>
+</div>
+
+<div class="weakness-box">
+<strong>Weaknesses &amp; Suggestions:</strong>
+<ul>
+  <li><strong>Fixed -5% annual time adjustment.</strong> This assumes a declining market. In an appreciating market, it understates ARV. Consider deriving this rate from actual market data (e.g., rolling 6-month median price change in the target area).</li>
+  <li><strong>Confidence tiers are computed but unused.</strong> Distance-based confidence could be incorporated as a second weighting dimension (multiply decay weight &times; confidence) to favor closer comps more strongly.</li>
+  <li><strong>No condition adjustment.</strong> A renovated comp and a dated comp at the same distance receive the same treatment. Consider adding a condition adjustment factor per comp.</li>
+  <li><strong>No feature adjustments beyond size.</strong> Garage, lot size, bed/bath differences are captured in scoring but not in ARV adjustment. These are secondary but could be added as optional refinements.</li>
+  <li><strong>No outlier detection.</strong> A single comp with an extreme price could skew the aggregate. Consider flagging comps whose per-comp ARV deviates &gt;20% from the median.</li>
+</ul>
+</div>
+
+<!-- ================================================================ -->
+<!-- 5. REHAB BUDGET CALCULATIONS -->
+<!-- ================================================================ -->
+<div class="page-break"></div>
+<h2 id="rehab">5. Rehab Budget Calculations</h2>
+
+<p><strong>Goal:</strong> Estimate the total renovation cost for a fix-and-flip based on property characteristics, using a composite multiplier system that adjusts base per-sqft rates for property type, condition, price tier, and age.</p>
+
+<p><strong>Source:</strong> <code>lib/screening/rehab-engine.ts</code></p>
+
+<h3 id="rehab-multipliers">5.1 Composite Multiplier System</h3>
+
+<p>Four independent multipliers are resolved and combined into one composite:</p>
+
+<div class="formula-box">
+compositeMultiplier = typeMultiplier &times; conditionMultiplier &times; priceMultiplier &times; ageMultiplier
+</div>
+
+<h4>Type Multiplier</h4>
+<table>
+  <tr><th>Property Type</th><th>Multiplier</th><th>Rationale</th></tr>
+  <tr><td>Detached</td><td>1.00</td><td>Baseline &mdash; full scope of exterior, systems, interior</td></tr>
+  <tr><td>Townhome</td><td>0.95</td><td>Reduced exterior/landscaping scope</td></tr>
+  <tr><td>Condo</td><td>0.85</td><td>No exterior/landscaping, limited systems</td></tr>
+</table>
+<p><strong>Input:</strong> <code>property_physical.property_type</code> resolved via <code>resolvePropertyTypeKey()</code></p>
+
+<h4>Condition Multiplier</h4>
+<table>
+  <tr><th>MLS Condition</th><th>Multiplier</th></tr>
+  <tr><td>"fixer"</td><td>1.15</td></tr>
+  <tr><td>"fixer, incomplete"</td><td>1.15</td></tr>
+  <tr><td>"new construction" / "new_construction"</td><td>0.00 (zero rehab)</td></tr>
+  <tr><td>All other / null</td><td>1.00 (default)</td></tr>
+</table>
+<p><strong>Input:</strong> <code>mls_listings.property_condition_source</code></p>
+
+<h4>Price Tier Multiplier (evaluated top-to-bottom, first match wins)</h4>
+<table>
+  <tr><th>Rule</th><th>Multiplier</th><th>Rationale</th></tr>
+  <tr><td>&le; $300,000</td><td>0.85</td><td>Lower-priced homes get less expensive finishes</td></tr>
+  <tr><td>&le; $400,000</td><td>0.90</td><td></td></tr>
+  <tr><td>&le; $500,000</td><td>0.95</td><td></td></tr>
+  <tr><td>&ge; $900,000</td><td>1.20</td><td>High-end homes require premium finishes</td></tr>
+  <tr><td>&ge; $700,000</td><td>1.10</td><td></td></tr>
+  <tr><td>$500k&ndash;$700k</td><td>1.00 (default)</td><td>Baseline range</td></tr>
+</table>
+<p><strong>Input:</strong> <code>mls_listings.list_price</code></p>
+
+<h4>Age Tier Multiplier (evaluated top-to-bottom, first match wins)</h4>
+<table>
+  <tr><th>Rule</th><th>Multiplier</th><th>Rationale</th></tr>
+  <tr><td>Built before 1930</td><td>1.25</td><td>Older homes: knob-and-tube, lead paint, structural issues</td></tr>
+  <tr><td>Built before 1950</td><td>1.15</td><td>Aging systems, possible asbestos</td></tr>
+  <tr><td>Built after 2019</td><td>0.20</td><td>Nearly new &mdash; minimal rehab needed</td></tr>
+  <tr><td>Built after 2010</td><td>0.40</td><td>Modern construction, light cosmetic only</td></tr>
+  <tr><td>Built after 2005</td><td>0.75</td><td>Newer but may need cosmetic updates</td></tr>
+  <tr><td>1950&ndash;2005</td><td>1.00 (default)</td><td>Standard rehab scope</td></tr>
+</table>
+<p><strong>Input:</strong> <code>property_physical.year_built</code></p>
+
+<h3 id="rehab-lineitems">5.2 Line Item Formulas</h3>
+
+<div class="formula-box">
+aboveGradeInterior = aboveGradeSqft &times; rate &times; compositeMultiplier
+belowGradeFinished = belowGradeFinishedSqft &times; rate &times; compositeMultiplier
+belowGradeUnfinished = belowGradeUnfinishedSqft &times; rate &times; compositeMultiplier
+belowGradeTotal = belowGradeFinished + belowGradeUnfinished
+interior = aboveGradeInterior + belowGradeTotal
+exterior = aboveGradeSqft &times; exteriorRate &times; compositeMultiplier
+landscaping = aboveGradeSqft &times; landscapingRate &times; compositeMultiplier
+systems = (flatAmount OR buildingSqft &times; systemsRate) &times; compositeMultiplier
+
+totalRehab = interior + exterior + landscaping + systems
+perSqftBuilding = totalRehab / buildingSqft
+perSqftAboveGrade = totalRehab / aboveGradeSqft
+</div>
+
+<h3 id="rehab-rates">5.3 Rate Tables by Property Type</h3>
+
+<table>
+  <tr><th>Rate</th><th>Detached</th><th>Condo</th><th>Townhome</th></tr>
+  <tr><td>Above-grade interior</td><td>$35/sqft</td><td>$35/sqft</td><td>$35/sqft</td></tr>
+  <tr><td>Below-grade finished</td><td>$39/sqft</td><td>$39/sqft</td><td>$39/sqft</td></tr>
+  <tr><td>Below-grade unfinished</td><td>$49/sqft</td><td>$49/sqft</td><td>$49/sqft</td></tr>
+  <tr><td>Exterior</td><td>$4.40/sqft</td><td>$0 (N/A)</td><td>$3.30/sqft</td></tr>
+  <tr><td>Landscaping</td><td>$2.70/sqft</td><td>$0 (N/A)</td><td>$1.50/sqft</td></tr>
+  <tr><td>Systems</td><td>$1.70/sqft bldg</td><td>$1,500 flat</td><td>$3,000 flat</td></tr>
+</table>
+
+<p><strong>Output stored in:</strong> <code>screening_results.rehab_total</code>, individual line item columns, <code>rehab_composite_multiplier</code>, <code>rehab_detail_json</code></p>
+<p><strong>Downstream consumer:</strong> Deal Math engine (<code>rehabTotal</code> input)</p>
+
+<h3>5.4 Assessment</h3>
+
+<div class="strength-box">
+<strong>Strengths:</strong>
+<ul>
+  <li><strong>Multiplicative system is elegant and tunable.</strong> Each dimension (type, condition, price, age) acts independently, making it easy to adjust one factor without cascading effects.</li>
+  <li><strong>New construction handling</strong> (multiplier = 0) correctly zero-outs rehab for brand-new homes.</li>
+  <li><strong>Property-type differentiation</strong> in both rates and multipliers reflects real market behavior (condos don't need exterior/landscaping).</li>
+  <li><strong>Separate below-grade finished/unfinished rates</strong> properly account for different renovation scopes.</li>
+</ul>
+</div>
+
+<div class="weakness-box">
+<strong>Weaknesses &amp; Suggestions:</strong>
+<ul>
+  <li><strong>Static base rates.</strong> $35/sqft is a Denver-specific number from a point in time. Consider adding a rate inflation adjustment or tying rates to a construction cost index.</li>
+  <li><strong>MLS condition field is unreliable.</strong> Only "fixer" triggers a non-default multiplier. Consider supplementing with photo analysis, DOM, or price-to-comp-ratio as condition proxies.</li>
+  <li><strong>No renovation scope differentiation.</strong> A light cosmetic flip and a full gut-job both start from the same base rate. Consider adding scope tiers (cosmetic / moderate / heavy / gut) that the analyst can select, each with different base rate adjustments.</li>
+  <li><strong>Below-grade unfinished rate ($49/sqft) is higher than finished ($39/sqft).</strong> This reflects the cost of <em>finishing</em> unfinished space (not just cosmetic updates). This is correct for a flip that finishes the basement, but could overstate costs if the flip plan leaves the basement as-is. Consider making basement finishing optional.</li>
+  <li><strong>No contingency/overhead factor.</strong> Professional estimators typically add 10&ndash;15% for unknowns. Consider adding an optional contingency multiplier.</li>
+</ul>
+</div>
+
+<!-- ================================================================ -->
+<!-- 6. HOLDING COST CALCULATIONS -->
+<!-- ================================================================ -->
+<div class="page-break"></div>
+<h2 id="holding">6. Holding Cost Calculations</h2>
+
+<p><strong>Goal:</strong> Estimate the carrying costs during the renovation and sale period, including property tax, insurance, HOA, and utilities.</p>
+
+<p><strong>Source:</strong> <code>lib/screening/holding-engine.ts</code></p>
+
+<h3 id="hold-days">6.1 Days Held Formula</h3>
+
+<div class="formula-box">
+rawDays = baseDays + (buildingSqft - sqftBaseline) &times; sqftAdjustmentRate
+daysHeld = max(minimumDays, round(rawDays))
+</div>
+
+<table>
+  <tr><th>Parameter</th><th>Value</th><th>Effect</th></tr>
+  <tr><td><code>baseDays</code></td><td>190</td><td>Starting point for a 2,500 sqft home</td></tr>
+  <tr><td><code>sqftBaseline</code></td><td>2,500 sqft</td><td>Zero-adjustment reference point</td></tr>
+  <tr><td><code>sqftAdjustmentRate</code></td><td>0.085 days/sqft</td><td>Larger homes take longer to renovate and sell</td></tr>
+  <tr><td><code>minimumDays</code></td><td>67</td><td>Floor &mdash; even small flips need ~2 months</td></tr>
+</table>
+
+<p><strong>Example calculations:</strong></p>
+<table>
+  <tr><th>Building Sqft</th><th>Raw Days</th><th>Days Held</th></tr>
+  <tr><td>1,000</td><td>190 + (1000-2500) &times; 0.085 = 62.5</td><td>67 (minimum)</td></tr>
+  <tr><td>1,500</td><td>190 + (1500-2500) &times; 0.085 = 105</td><td>105</td></tr>
+  <tr><td>2,500</td><td>190 + 0 = 190</td><td>190</td></tr>
+  <tr><td>3,500</td><td>190 + (3500-2500) &times; 0.085 = 275</td><td>275</td></tr>
+</table>
+
+<h3 id="hold-daily">6.2 Daily Cost Calculations</h3>
+
+<div class="formula-box">
+dailyTax       = annualPropertyTax / 365
+dailyInsurance = (listPrice &times; insuranceAnnualRate) / 365
+dailyHoa       = annualHoaDues / 365
+dailyUtilities = (buildingSqft &times; utilityPerSqftMonthly) / 30
+
+totalHoldingCost = (dailyTax + dailyInsurance + dailyHoa + dailyUtilities) &times; daysHeld
+</div>
+
+<table>
+  <tr><th>Cost Component</th><th>Source</th><th>Parameter</th></tr>
+  <tr><td>Property Tax</td><td><code>property_financials.annual_property_tax</code></td><td>Actual from MLS data</td></tr>
+  <tr><td>Insurance</td><td><code>mls_listings.list_price</code></td><td>0.55% annually</td></tr>
+  <tr><td>HOA</td><td><code>property_financials.annual_hoa_dues</code></td><td>Actual from MLS data</td></tr>
+  <tr><td>Utilities</td><td><code>property_physical.building_area_total_sqft</code></td><td>$0.08/sqft/month</td></tr>
+</table>
+
+<p><strong>Output stored in:</strong> <code>screening_results.hold_total</code>, <code>screening_results.hold_days</code></p>
+<p><strong>Downstream consumer:</strong> Deal Math engine (<code>holdTotal</code> input)</p>
+
+<h3>6.3 Assessment</h3>
+
+<div class="strength-box">
+<strong>Strengths:</strong>
+<ul>
+  <li><strong>Size-scaled holding period</strong> is a practical innovation &mdash; larger homes genuinely take longer to renovate and sell.</li>
+  <li><strong>Real data where available</strong> (actual tax and HOA from MLS) is better than estimates.</li>
+  <li><strong>Minimum floor</strong> prevents unrealistically short hold periods for small properties.</li>
+</ul>
+</div>
+
+<div class="weakness-box">
+<strong>Weaknesses &amp; Suggestions:</strong>
+<ul>
+  <li><strong>No financing costs.</strong> Most flippers use hard money loans (10&ndash;14% annual interest). This is the single largest missing cost component. The <code>financingEnabled</code> flag exists in the profile but is not yet implemented. Prioritize this.</li>
+  <li><strong>Insurance based on list price, not ARV.</strong> Insurance during renovation is typically based on the intended completed value or purchase price. Using list price is reasonable for screening but could understate costs for properties listed below market.</li>
+  <li><strong>No seasonal adjustment.</strong> Properties listed in winter may take longer to sell. Consider adding a seasonal factor or simply flagging this as an analyst consideration.</li>
+  <li><strong>Tax/HOA default to zero when null.</strong> If financial data is missing from the MLS, the holding cost is understated. Consider using a market-average fallback for missing tax data.</li>
+  <li><strong>Utility rate is flat.</strong> $0.08/sqft/month is a rough average. Vacant properties during renovation use less but may have minimum service charges.</li>
+</ul>
+</div>
+
+<!-- ================================================================ -->
+<!-- 7. TRANSACTION COST CALCULATIONS -->
+<!-- ================================================================ -->
+<h2 id="transaction">7. Transaction Cost Calculations</h2>
+
+<p><strong>Goal:</strong> Estimate title/closing costs on both the buy and sell side, plus agent commissions on disposition.</p>
+
+<p><strong>Source:</strong> <code>lib/screening/transaction-engine.ts</code></p>
+
+<h3 id="trans-formulas">7.1 Cost Formulas</h3>
+
+<div class="formula-box">
+acquisitionTitle     = listPrice &times; acquisitionTitleRate     (0.3%)
+dispositionTitle     = listPrice &times; dispositionTitleRate     (0.47%)
+dispositionCommission = ARV &times; dispositionCommissionRate    (4.0%)
+
+totalTransactionCost = acquisitionTitle + dispositionTitle + dispositionCommission
+</div>
+
+<table>
+  <tr><th>Cost</th><th>Rate</th><th>Basis</th><th>Input Source</th></tr>
+  <tr><td>Acquisition title/closing</td><td>0.30%</td><td>List price (purchase proxy)</td><td><code>mls_listings.list_price</code></td></tr>
+  <tr><td>Disposition title/closing</td><td>0.47%</td><td>List price (purchase proxy)</td><td><code>mls_listings.list_price</code></td></tr>
+  <tr><td>Disposition commissions</td><td>4.00%</td><td>ARV (expected sale price)</td><td>ARV engine output</td></tr>
+</table>
+
+<p><strong>Output stored in:</strong> <code>screening_results.transaction_total</code></p>
+
+<h3>7.2 Assessment</h3>
+
+<div class="strength-box">
+<strong>Strengths:</strong>
+<ul>
+  <li>Clean separation of acquisition vs. disposition costs.</li>
+  <li>Commission based on ARV (the expected sale price) rather than list price is correct.</li>
+  <li>Rates are configurable in the strategy profile.</li>
+</ul>
+</div>
+
+<div class="weakness-box">
+<strong>Weaknesses &amp; Suggestions:</strong>
+<ul>
+  <li><strong>Disposition title should be based on ARV, not list price.</strong> Title and closing costs on the sell side are a function of the sale price (ARV), not the original purchase price. This currently understates disposition closing costs.</li>
+  <li><strong>No transfer tax / recording fees.</strong> Colorado has relatively low transfer taxes, but some jurisdictions charge additional fees. Consider adding a per-transaction flat fee component.</li>
+  <li><strong>Commission rate may be high post-NAR settlement.</strong> The 4% disposition commission assumes the seller pays the buyer's agent. Post-2024 NAR settlement, this structure is changing. Consider separating listing agent commission (2&ndash;3%) from buyer agent commission (negotiable).</li>
+  <li><strong>No acquisition commission.</strong> If buying through an agent, there may be buyer-side commission or fees. Consider adding an optional acquisition commission rate.</li>
+</ul>
+</div>
+
+<!-- ================================================================ -->
+<!-- 7.5. FINANCING COST CALCULATIONS -->
+<!-- ================================================================ -->
+<h2 id="financing">7.5 Financing Cost Calculations</h2>
+
+<p><strong>Goal:</strong> Estimate hard money loan costs for the flip, including interest carry during the hold period and upfront origination fees. The loan is sized against ARV (not purchase price), which is standard for hard money lending and breaks the circular dependency between financing costs and offer price.</p>
+
+<p><strong>Source:</strong> <code>lib/screening/financing-engine.ts</code></p>
+
+<h3 id="fin-formulas">7.5.1 Loan &amp; Cost Formulas</h3>
+
+<div class="formula-box">
+loanAmount      = ARV &times; ltvPct
+interestCost    = round(loanAmount &times; annualRate &times; daysHeld / 365)
+originationCost = round(loanAmount &times; pointsRate)
+totalFinancing  = interestCost + originationCost
+
+-- Reference values --
+monthlyPayment  = loanAmount &times; annualRate / 12   (interest-only)
+dailyInterest   = loanAmount &times; annualRate / 365
+</div>
+
+<table>
+  <tr><th>Input</th><th>Source</th><th>Default</th></tr>
+  <tr><td>ARV</td><td>ARV engine output (effective ARV)</td><td>Computed</td></tr>
+  <tr><td>Days Held</td><td>Holding engine output</td><td>Computed from sqft formula</td></tr>
+  <tr><td>Annual Rate</td><td>Strategy profile or analyst override</td><td>11%</td></tr>
+  <tr><td>Origination Points</td><td>Strategy profile or analyst override</td><td>1%</td></tr>
+  <tr><td>LTV %</td><td>Strategy profile or analyst override</td><td>80%</td></tr>
+</table>
+
+<h4>Example Calculation</h4>
+<div class="flow-diagram">
+  ARV                    = $450,000
+  LTV                    = 80%
+  Loan Amount            = $450,000 &times; 0.80 = $360,000
+
+  Annual Rate            = 11%
+  Hold Period            = 190 days
+  Interest Cost          = $360,000 &times; 0.11 &times; (190/365) = $20,614
+
+  Points Rate            = 1%
+  Origination Cost       = $360,000 &times; 0.01 = $3,600
+
+  Total Financing Cost   = $20,614 + $3,600 = $24,214
+
+  Monthly Payment (I/O)  = $360,000 &times; 0.11 / 12 = $3,300
+  Daily Interest         = $360,000 &times; 0.11 / 365 = $108.49
+</div>
+
+<h3 id="fin-config">7.5.2 Configuration &amp; Overrides</h3>
+
+<table>
+  <tr><th>Parameter</th><th>Profile Default</th><th>Override Field</th><th>Stored In</th></tr>
+  <tr><td>Annual Rate</td><td>0.11 (11%)</td><td><code>financing_rate_manual</code></td><td><code>manual_analysis</code></td></tr>
+  <tr><td>Origination Points</td><td>0.01 (1%)</td><td><code>financing_points_manual</code></td><td><code>manual_analysis</code></td></tr>
+  <tr><td>LTV %</td><td>0.80 (80%)</td><td><code>financing_ltv_manual</code></td><td><code>manual_analysis</code></td></tr>
+  <tr><td>Enabled</td><td><code>true</code></td><td>&mdash;</td><td>Strategy profile</td></tr>
+</table>
+
+<p><strong>Override priority:</strong> analyst override &rarr; strategy profile default. Users enter values as percentages (e.g. "11" for 11%), stored as decimals (0.11).</p>
+
+<p><strong>Output stored in:</strong> <code>screening_results.financing_total</code>, <code>financing_interest</code>, <code>financing_origination</code>, <code>financing_loan_amount</code>, <code>financing_detail_json</code></p>
+<p><strong>Downstream consumer:</strong> Deal Math engine (<code>financingTotal</code> input)</p>
+
+<h3>7.5.3 Assessment</h3>
+
+<div class="strength-box">
+<strong>Strengths:</strong>
+<ul>
+  <li><strong>ARV-based loan sizing</strong> is the correct approach for hard money &mdash; it breaks the circular dependency and matches how lenders actually underwrite.</li>
+  <li><strong>All three key parameters are overridable</strong> per deal, allowing analysts to model different financing scenarios.</li>
+  <li><strong>Interest-only model</strong> is appropriate for short-term hard money (flippers don't make principal payments).</li>
+  <li><strong>Origination included as a one-time upfront cost</strong> correctly reflects how points work in practice.</li>
+</ul>
+</div>
+
+<div class="weakness-box">
+<strong>Weaknesses &amp; Future Considerations:</strong>
+<ul>
+  <li><strong>No draw schedule / rehab holdback modeling.</strong> Many hard money lenders fund rehab in draws, meaning not all loan proceeds are disbursed day one. Interest on rehab draws could be modeled separately for more accuracy.</li>
+  <li><strong>No prepayment penalty modeling.</strong> Some hard money loans have minimum interest periods (e.g., 3 months guaranteed interest). Consider adding a minimum interest floor.</li>
+  <li><strong>Cash-to-close not yet computed.</strong> Consider adding: <code>cashToClose = purchasePrice - loanAmount + originationCost + acquisitionTitle</code> to show the equity requirement.</li>
+  <li><strong>No comparison with cash purchase.</strong> Consider showing financing vs. all-cash deal economics side-by-side to help analysts evaluate leverage decisions.</li>
+</ul>
+</div>
+
+<!-- ================================================================ -->
+<!-- 8. DEAL MATH & MAX OFFER -->
+<!-- ================================================================ -->
+<div class="page-break"></div>
+<h2 id="dealmatch">8. Deal Math &amp; Max Offer</h2>
+
+<p><strong>Goal:</strong> Compute the maximum acceptable purchase price that achieves the target profit, and measure the opportunity gap between ARV and list price.</p>
+
+<p><strong>Source:</strong> <code>lib/screening/deal-math.ts</code></p>
+
+<h3 id="deal-formulas">8.1 Core Formulas</h3>
+
+<div class="formula-box">
+totalCosts = rehabTotal + holdTotal + transactionTotal + financingTotal
+maxOffer   = ARV - totalCosts - targetProfit
+spread     = ARV - listPrice
+offerPct   = maxOffer / listPrice
+estGapPerSqft = spread / buildingSqft
+</div>
+
+<table>
+  <tr><th>Output</th><th>Formula</th><th>Stored In</th><th>Meaning</th></tr>
+  <tr><td><code>totalCosts</code></td><td>rehab + hold + transaction + financing</td><td>Derived</td><td>All-in cost to renovate and sell</td></tr>
+  <tr><td><code>maxOffer</code></td><td>ARV - costs - profit</td><td><code>screening_results.max_offer</code></td><td>Highest price to pay and still hit profit target</td></tr>
+  <tr><td><code>spread</code></td><td>ARV - list price</td><td><code>screening_results.spread</code></td><td>Raw gap between value and asking price</td></tr>
+  <tr><td><code>offerPct</code></td><td>maxOffer / listPrice</td><td><code>screening_results.offer_pct</code></td><td>Offer as % of asking (e.g., 0.72 = 72%)</td></tr>
+  <tr><td><code>estGapPerSqft</code></td><td>spread / buildingSqft</td><td><code>screening_results.est_gap_per_sqft</code></td><td>Normalized opportunity measure ($/sqft)</td></tr>
+</table>
+
+<p><strong>Default target profit:</strong> $40,000 (configurable, overridable per analysis via <code>manual_analysis.target_profit_manual</code>)</p>
+
+<h3 id="deal-waterfall">8.2 Deal Waterfall (as displayed in UI)</h3>
+
+<div class="flow-diagram">
+  Effective ARV           $450,000
+- Rehab                  - $62,000
+- Holding                -  $8,500
+- Transaction            - $19,800
+- Financing              - $24,214   (11% on $360k loan, 190 days + 1 pt)
+- Target Profit          - $40,000
+  ────────────────────────────────
+= Max Offer              $295,486
+
+  Spread (ARV - List)    = $450,000 - $385,000 = $65,000
+  Offer %                = $295,486 / $385,000 = 76.7%
+  Gap/sqft               = $65,000 / 1,800 sqft = $36.11/sqft
+</div>
+
+<h3>8.3 Assessment</h3>
+
+<div class="strength-box">
+<strong>Strengths:</strong>
+<ul>
+  <li><strong>Clean, transparent waterfall</strong> makes it easy for analysts to see exactly how the max offer is derived.</li>
+  <li><strong>Target profit is overridable</strong> per deal, allowing flexibility for different risk profiles.</li>
+  <li><strong>Gap/sqft normalization</strong> enables apples-to-apples comparison across different-sized properties.</li>
+</ul>
+</div>
+
+<div class="weakness-box">
+<strong>Weaknesses &amp; Suggestions:</strong>
+<ul>
+  <li><strong>Target profit is a flat dollar amount.</strong> Consider offering a percentage-of-ARV option (e.g., 10% of ARV) as an alternative, since larger deals typically require larger absolute returns.</li>
+  <li><strong>No ROI or annualized return calculation.</strong> $40,000 profit on a $320,000 investment over 190 days is very different from $40,000 on a $150,000 investment over 90 days. Consider adding: <code>ROI = profit / totalInvestment</code> and <code>annualizedROI = ROI &times; (365 / daysHeld)</code>.</li>
+</ul>
+</div>
+
+<!-- ================================================================ -->
+<!-- 9. PRIME CANDIDATE QUALIFICATION -->
+<!-- ================================================================ -->
+<h2 id="qualification">9. Prime Candidate Qualification</h2>
+
+<p><strong>Goal:</strong> Identify properties with the strongest deal characteristics &mdash; those where multiple nearby, recent comps independently support a significant value gap.</p>
+
+<p><strong>Source:</strong> <code>lib/screening/qualification-engine.ts</code></p>
+
+<h3 id="qual-rules">9.1 Qualification Rules</h3>
+
+<p>A property earns Prime Candidate status when enough individual comparables independently indicate a strong deal. Each comp must pass all three filters:</p>
+
+<div class="formula-box">
+For each comp:
+  compGap = (comp.arvTimeAdjusted - listPrice) / buildingSqft
+
+  passesDistance = comp.distanceMiles &le; 0.4
+  passesRecency = comp.daysSinceClose &le; 213  (~7 months)
+  passesGap     = compGap &ge; $60/sqft
+
+  isQualifying = passesDistance AND passesRecency AND passesGap
+
+isPrimeCandidate = (count of qualifying comps) &ge; 2
+</div>
+
+<table>
+  <tr><th>Threshold</th><th>Value</th><th>Rationale</th></tr>
+  <tr><td>Max comp distance</td><td>0.4 miles</td><td>Tighter than screening (0.75 mi) &mdash; requires very local evidence</td></tr>
+  <tr><td>Max comp age</td><td>213 days (~7 months)</td><td>Only recent market data</td></tr>
+  <tr><td>Min gap per sqft</td><td>$60/sqft</td><td>Meaningful profit potential</td></tr>
+  <tr><td>Min qualifying comps</td><td>2</td><td>Requires independent confirmation from multiple comps</td></tr>
+</table>
+
+<p><strong>Output:</strong> <code>screening_results.is_prime_candidate</code> (boolean), <code>screening_results.qualification_json</code> (detailed reasons and disqualifiers)</p>
+
+<h3>9.2 Assessment</h3>
+
+<div class="strength-box">
+<strong>Strengths:</strong>
+<ul>
+  <li><strong>Multi-comp confirmation</strong> is the key innovation &mdash; requiring 2+ independent qualifying comps dramatically reduces false positives.</li>
+  <li><strong>Per-comp gap analysis</strong> (not just aggregate) prevents a single outlier comp from triggering Prime status.</li>
+  <li><strong>Tighter distance/recency requirements</strong> than general screening ensure Prime Candidates have strong local evidence.</li>
+  <li><strong>Stored reasons and disqualifiers</strong> give the analyst full transparency.</li>
+</ul>
+</div>
+
+<div class="weakness-box">
+<strong>Weaknesses &amp; Suggestions:</strong>
+<ul>
+  <li><strong>$60/sqft gap threshold is market-specific.</strong> In a lower-cost market, $60/sqft may be unrealistic. Consider making this a percentage of comp ARV (e.g., 10%) as an alternative or supplementary threshold.</li>
+  <li><strong>No consideration of deal feasibility.</strong> A property with a $60/sqft gap but an ARV of $200,000 may not be worth flipping due to thin absolute margins. Consider adding a minimum absolute spread check.</li>
+  <li><strong>Time since listing not considered.</strong> A property listed yesterday vs. 90 days ago has different negotiation dynamics. Stale listings may offer better negotiation opportunities.</li>
+</ul>
+</div>
+
+<!-- ================================================================ -->
+<!-- 10. MANUAL OVERRIDE SYSTEM -->
+<!-- ================================================================ -->
+<div class="page-break"></div>
+<h2 id="override">10. Manual Override System</h2>
+
+<p>The analysis workstation implements a 3-tier priority system for key values, allowing analysts to override automated calculations at any point.</p>
+
+<h3>Effective Value Waterfall</h3>
+
+<div class="formula-box">
+effectiveARV = manualARV ?? selectedCompARV ?? autoScreeningARV ?? 0
+effectiveRehab = manualRehab ?? computedRehab ?? autoScreeningRehab ?? 0
+effectiveTargetProfit = manualTargetProfit ?? profileDefault ($40,000)
+</div>
+
+<h3>Override Fields</h3>
+
+<table>
+  <tr><th>Override Field</th><th>Stored In</th><th>What It Overrides</th></tr>
+  <tr><td>Final ARV</td><td><code>manual_analysis.arv_manual</code></td><td>Computed ARV from comps</td></tr>
+  <tr><td>Rehab Budget</td><td><code>manual_analysis.rehab_manual</code></td><td>Computed rehab estimate</td></tr>
+  <tr><td>Days Held</td><td><code>manual_analysis.days_held_manual</code></td><td>Computed days held</td></tr>
+  <tr><td>Target Profit</td><td><code>manual_analysis.target_profit_manual</code></td><td>Profile default ($40k)</td></tr>
+  <tr><td>Monthly Rent</td><td><code>manual_analysis.rent_estimate_monthly</code></td><td>N/A (manual only currently)</td></tr>
+  <tr><td>Analyst Condition</td><td><code>manual_analysis.analyst_condition</code></td><td>MLS condition field</td></tr>
+  <tr><td>Design Rating</td><td><code>manual_analysis.design_rating</code></td><td>N/A (qualitative)</td></tr>
+  <tr><td>Location Rating</td><td><code>manual_analysis.location_rating</code></td><td>N/A (qualitative)</td></tr>
+</table>
+
+<p>When any override is saved, the page recalculates all downstream values (rehab, holding, transaction, deal math) on the next server-side load, incorporating the override into the calculation chain.</p>
+
+<!-- ================================================================ -->
+<!-- 11. COMPLETE STRATEGY PROFILE REFERENCE -->
+<!-- ================================================================ -->
+<h2 id="strategy-profile">11. Complete Strategy Profile Reference: DENVER_FLIP_V1</h2>
+
+<table>
+  <tr><th colspan="3" style="background:#dbeafe; text-align:center;">General</th></tr>
+  <tr><td>Slug</td><td colspan="2"><code>denver_flip_v1</code></td></tr>
+  <tr><td>Strategy Type</td><td colspan="2">Flip</td></tr>
+  <tr><td>Target Profit Default</td><td colspan="2">$40,000</td></tr>
+
+  <tr><th colspan="3" style="background:#dbeafe; text-align:center;">ARV</th></tr>
+  <tr><td>Time Adjustment Rate</td><td colspan="2">-5% per year</td></tr>
+  <tr><td>Confidence: 0&ndash;0.3 mi</td><td colspan="2">1.0</td></tr>
+  <tr><td>Confidence: 0.3&ndash;0.5 mi</td><td colspan="2">0.8</td></tr>
+  <tr><td>Confidence: 0.5&ndash;0.6 mi</td><td colspan="2">0.6</td></tr>
+  <tr><td>Confidence: 0.6&ndash;0.75 mi</td><td colspan="2">0.4</td></tr>
+  <tr><td>Confidence: &gt;0.75 mi</td><td colspan="2">0.2</td></tr>
+
+  <tr><th colspan="3" style="background:#dbeafe; text-align:center;">ARV Blending (Detached / Condo / Townhome)</th></tr>
+  <tr><td>Building Weight</td><td colspan="2">0.40 / 0.15 / 0.35</td></tr>
+  <tr><td>Above-Grade Weight</td><td colspan="2">0.60 / 0.85 / 0.65</td></tr>
+  <tr><td>Building Dampening</td><td colspan="2">0.30 / 0.20 / 0.30</td></tr>
+  <tr><td>Above-Grade Dampening</td><td colspan="2">0.40 / 0.45 / 0.40</td></tr>
+
+  <tr><th colspan="3" style="background:#dbeafe; text-align:center;">Rehab Base Rates ($/sqft)</th></tr>
+  <tr><td>Above-Grade Interior</td><td colspan="2">$35 / $35 / $35</td></tr>
+  <tr><td>Below-Grade Finished</td><td colspan="2">$39 / $39 / $39</td></tr>
+  <tr><td>Below-Grade Unfinished</td><td colspan="2">$49 / $49 / $49</td></tr>
+  <tr><td>Exterior</td><td colspan="2">$4.40 / $0 / $3.30</td></tr>
+  <tr><td>Landscaping</td><td colspan="2">$2.70 / $0 / $1.50</td></tr>
+  <tr><td>Systems</td><td colspan="2">$1.70/sqft / $1,500 flat / $3,000 flat</td></tr>
+
+  <tr><th colspan="3" style="background:#dbeafe; text-align:center;">Rehab Multipliers</th></tr>
+  <tr><td>Type (D/C/T)</td><td colspan="2">1.00 / 0.85 / 0.95</td></tr>
+  <tr><td>Condition: fixer</td><td colspan="2">1.15</td></tr>
+  <tr><td>Condition: new construction</td><td colspan="2">0.00</td></tr>
+  <tr><td>Price: &le;$300k / &le;$400k / &le;$500k</td><td colspan="2">0.85 / 0.90 / 0.95</td></tr>
+  <tr><td>Price: &ge;$900k / &ge;$700k</td><td colspan="2">1.20 / 1.10</td></tr>
+  <tr><td>Age: &lt;1930 / &lt;1950</td><td colspan="2">1.25 / 1.15</td></tr>
+  <tr><td>Age: &gt;2019 / &gt;2010 / &gt;2005</td><td colspan="2">0.20 / 0.40 / 0.75</td></tr>
+
+  <tr><th colspan="3" style="background:#dbeafe; text-align:center;">Holding</th></tr>
+  <tr><td>Base Days</td><td colspan="2">190</td></tr>
+  <tr><td>Sqft Baseline</td><td colspan="2">2,500 sqft</td></tr>
+  <tr><td>Sqft Adjustment Rate</td><td colspan="2">0.085 days/sqft</td></tr>
+  <tr><td>Minimum Days</td><td colspan="2">67</td></tr>
+  <tr><td>Insurance Annual Rate</td><td colspan="2">0.55% of list price</td></tr>
+  <tr><td>Utility Rate</td><td colspan="2">$0.08/sqft/month</td></tr>
+
+  <tr><th colspan="3" style="background:#dbeafe; text-align:center;">Transaction</th></tr>
+  <tr><td>Acquisition Title</td><td colspan="2">0.30% of list price</td></tr>
+  <tr><td>Disposition Title</td><td colspan="2">0.47% of list price</td></tr>
+  <tr><td>Disposition Commission</td><td colspan="2">4.0% of ARV</td></tr>
+
+  <tr><th colspan="3" style="background:#dbeafe; text-align:center;">Financing (Hard Money)</th></tr>
+  <tr><td>Enabled</td><td colspan="2">Yes</td></tr>
+  <tr><td>Annual Rate</td><td colspan="2">11%</td></tr>
+  <tr><td>Origination Points</td><td colspan="2">1%</td></tr>
+  <tr><td>LTV (of ARV)</td><td colspan="2">80%</td></tr>
+
+  <tr><th colspan="3" style="background:#dbeafe; text-align:center;">Qualification (Prime Candidates)</th></tr>
+  <tr><td>Max Comp Distance</td><td colspan="2">0.4 miles</td></tr>
+  <tr><td>Min Gap/sqft</td><td colspan="2">$60/sqft</td></tr>
+  <tr><td>Max Comp Age</td><td colspan="2">213 days (~7 months)</td></tr>
+  <tr><td>Min Qualifying Comps</td><td colspan="2">2</td></tr>
+</table>
+
+<!-- ================================================================ -->
+<!-- 12. CROSS-CUTTING RECOMMENDATIONS -->
+<!-- ================================================================ -->
+<div class="page-break"></div>
+<h2 id="recommendations">12. Cross-Cutting Recommendations</h2>
+
+<h3>12.1 High Priority</h3>
+
+<table>
+  <tr><th>#</th><th>Recommendation</th><th>Impact</th><th>Affected Engines</th></tr>
+  <tr><td>1</td><td><strong style="color:#16a34a">&#10003; Financing costs implemented.</strong> Hard money at 11% with 1 point origination, 80% LTV of ARV. All three parameters overridable per deal. Adds $15k&ndash;$25k+ to cost basis, correcting the prior max offer overstatement.</td><td>Resolved</td><td>Financing, Deal Math</td></tr>
+  <tr><td>2</td><td><strong>Incorporate confidence tiers into ARV weighting.</strong> Multiply <code>decayWeight &times; confidence</code> so that both proximity and recency influence the aggregate. Currently distance-based confidence is computed but unused.</td><td>More accurate ARV, especially with distant comps</td><td>ARV</td></tr>
+  <tr><td>3</td><td><strong>Dynamic market time adjustment.</strong> Replace fixed -5% with a rolling market trend rate derived from actual comp data in the area (e.g., median price change over trailing 6 months).</td><td>Prevents systematic ARV bias in appreciating or rapidly declining markets</td><td>ARV</td></tr>
+</table>
+
+<h3>12.2 Medium Priority</h3>
+
+<table>
+  <tr><th>#</th><th>Recommendation</th><th>Impact</th><th>Affected Engines</th></tr>
+  <tr><td>4</td><td><strong>Add ROI and annualized return metrics.</strong> <code>ROI = targetProfit / (maxOffer + rehabTotal)</code> and <code>annualizedROI = ROI &times; 365 / daysHeld</code>. These are essential for comparing deals of different sizes and durations.</td><td>Better deal comparison for portfolio decisions</td><td>Deal Math</td></tr>
+  <tr><td>5</td><td><strong>Add rehab scope tiers.</strong> Allow analyst to select cosmetic / moderate / heavy / gut renovation scope, each with a multiplier on base rates (e.g., 0.6 / 1.0 / 1.4 / 2.0).</td><td>Significant improvement in rehab accuracy</td><td>Rehab</td></tr>
+  <tr><td>6</td><td><strong>Fix disposition title cost basis.</strong> Should be based on ARV (sale price), not list price (purchase price). Small dollar impact but conceptually incorrect.</td><td>Marginal cost accuracy improvement</td><td>Transaction</td></tr>
+  <tr><td>7</td><td><strong>Add market-average fallback for missing tax data.</strong> When <code>annual_property_tax</code> is null, use a configurable area default (e.g., 0.6% of list price for Denver) rather than $0.</td><td>Prevents understated holding costs</td><td>Holding</td></tr>
+</table>
+
+<h3>12.3 Future Enhancements</h3>
+
+<table>
+  <tr><th>#</th><th>Recommendation</th><th>Impact</th></tr>
+  <tr><td>8</td><td><strong>Neighborhood/subdivision scoring.</strong> Add subdivision match and school district as comp scoring components.</td><td>Better comp relevance</td></tr>
+  <tr><td>9</td><td><strong>Garage/feature adjustment in ARV.</strong> Add garage_spaces delta as an ARV adjustment factor (e.g., $15k&ndash;$25k per garage space difference).</td><td>Reduced ARV noise from feature mismatches</td></tr>
+  <tr><td>10</td><td><strong>Outlier detection in ARV.</strong> Flag comps whose per-comp ARV deviates &gt;20% from the median. Alert the analyst but don't auto-exclude.</td><td>Analyst awareness of potentially skewed data</td></tr>
+  <tr><td>11</td><td><strong>Construction cost index tie-in.</strong> Link base rehab rates to a published construction cost index (e.g., RSMeans) with periodic updates.</td><td>Rate accuracy over time</td></tr>
+  <tr><td>12</td><td><strong>Percentage-based target profit option.</strong> Offer 10&ndash;15% of ARV as an alternative to flat $40k, better suited for higher-value deals.</td><td>Appropriate profit targets across price ranges</td></tr>
+</table>
+
+<h3>12.4 Architecture Strengths Worth Preserving</h3>
+
+<div class="strength-box">
+<ul>
+  <li><strong>Pure function engines</strong> with no DB dependencies make testing, iteration, and strategy profile experimentation trivial.</li>
+  <li><strong>Single strategy profile as source of truth</strong> for all parameters prevents scattered magic numbers.</li>
+  <li><strong>Screening separate from analysis</strong> keeps the funnel clean &mdash; automated results don't pollute analyst-reviewed work.</li>
+  <li><strong>3-tier override system</strong> (auto &rarr; computed &rarr; manual) gives analysts full control while preserving automation as a starting point.</li>
+  <li><strong>Denormalized screening results</strong> enable fast dashboard queries and sorting without re-running calculations.</li>
+  <li><strong>Comparables engine separate from valuation engine</strong> is architecturally correct and will scale well as more strategy types are added.</li>
+</ul>
+</div>
+
+<hr>
+<p class="meta" style="text-align: center; margin-top: 24px;">
+  DataWiseRE Methodology Report | Generated April 5, 2026<br>
+  Strategy Profile: DENVER_FLIP_V1 v1 | Engine Source: lib/screening/*.ts + lib/comparables/scoring.ts
+</p>
+
+</body>
+</html>

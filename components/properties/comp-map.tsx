@@ -8,12 +8,25 @@ import "leaflet/dist/leaflet.css";
 // Types
 // ---------------------------------------------------------------------------
 
+export type MapPinTooltipData = {
+  closePrice?: number | null;
+  closeDate?: string | null;
+  sqft?: number | null;
+  sqftDelta?: number | null;       // comp sqft − subject sqft
+  sqftDeltaPct?: number | null;    // as decimal e.g. 0.05 = 5%
+  ppsf?: number | null;
+  distance?: number | null;
+  gapPerSqft?: number | null;     // deal-level (ARV − list) / sqft
+  listPrice?: number | null;      // subject list price (for subject pin)
+};
+
 export type MapPin = {
   id: string;
   lat: number;
   lng: number;
   label: string;
   detail?: string;
+  tooltipData?: MapPinTooltipData;
   type: "subject" | "selected" | "candidate";
 };
 
@@ -57,6 +70,14 @@ function compIcon(color: string, border: string, size: number) {
   );
 }
 
+/** Gap/sqft → border color for candidate pins */
+function gapBorderColor(gapPerSqft: number | null | undefined): string {
+  if (gapPerSqft == null) return "#1e293b"; // default dark ring
+  if (gapPerSqft >= 60) return "#16a34a";   // green
+  if (gapPerSqft >= 30) return "#ca8a04";   // yellow/amber
+  return "#dc2626";                          // red
+}
+
 const ICONS = {
   subject: makeDivIcon(
     `<div style="
@@ -67,7 +88,6 @@ const ICONS = {
     20,
   ),
   selected: compIcon("#16a34a", "#fff", 14),
-  candidate: compIcon("#94a3b8", "#1e293b", 13),
 };
 
 // ---------------------------------------------------------------------------
@@ -120,35 +140,112 @@ export function CompMap({
     const candidatePins = pins.filter((p) => p.type === "candidate");
     const selectedPins = pins.filter((p) => p.type === "selected");
 
-    // Helper to build popup HTML
-    function popupHtml(pin: MapPin, interactive: boolean) {
-      const colorStyle =
-        pin.type === "selected"
-          ? ' style="color:#16a34a"'
-          : pin.type === "subject"
-            ? ' style="color:#dc2626"'
-            : "";
-      const prefix = pin.type === "subject" ? "<strong style=\"color:#dc2626\">SUBJECT</strong><br/>" : "";
-      const star = pin.type === "selected" ? "&#9733; " : "";
-      const action = interactive
-        ? `<br/><span style="color:#6366f1;font-size:11px;cursor:pointer">${pin.type === "selected" ? "Click to deselect" : "Click to select"}</span>`
+    // Helper — format currency (compact)
+    function $f(v: number | null | undefined) {
+      if (v == null) return "—";
+      return "$" + v.toLocaleString("en-US", { maximumFractionDigits: 0 });
+    }
+
+    // Helper to build rich tooltip HTML
+    function tooltipHtml(pin: MapPin) {
+      const t = pin.tooltipData;
+      const isSubject = pin.type === "subject";
+      const accentColor = isSubject ? "#dc2626" : pin.type === "selected" ? "#16a34a" : "#475569";
+      const star = pin.type === "selected" ? "★ " : "";
+      const tag = isSubject
+        ? `<div style="background:#dc2626;color:#fff;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;padding:1px 5px;border-radius:3px;margin-bottom:3px;display:inline-block">SUBJECT</div><br/>`
         : "";
-      return `<div style="font-size:12px;line-height:1.4">
-        ${prefix}<strong${colorStyle}>${star}${pin.label}</strong>
-        ${pin.detail ? `<br/>${pin.detail}` : ""}${action}
+
+      let rows = "";
+      if (t && !isSubject) {
+        // Sale price row
+        if (t.closePrice != null) rows += `<tr><td style="color:#94a3b8;padding-right:8px">Sale</td><td style="font-weight:600">${$f(t.closePrice)}</td></tr>`;
+        // Close date
+        if (t.closeDate) rows += `<tr><td style="color:#94a3b8;padding-right:8px">Closed</td><td>${t.closeDate}</td></tr>`;
+        // PSF
+        if (t.ppsf != null) rows += `<tr><td style="color:#94a3b8;padding-right:8px">PSF</td><td>$${t.ppsf.toFixed(0)}</td></tr>`;
+        // Sqft with delta
+        if (t.sqft != null) {
+          let deltaHtml = "";
+          if (t.sqftDelta != null) {
+            const sign = t.sqftDelta > 0 ? "+" : "";
+            const pctStr = t.sqftDeltaPct != null ? ` (${sign}${(t.sqftDeltaPct * 100).toFixed(1)}%)` : "";
+            const deltaColor = t.sqftDelta > 0 ? "#16a34a" : t.sqftDelta < 0 ? "#dc2626" : "#94a3b8";
+            deltaHtml = ` <span style="color:${deltaColor};font-weight:600">${sign}${t.sqftDelta.toLocaleString()}${pctStr}</span>`;
+          }
+          rows += `<tr><td style="color:#94a3b8;padding-right:8px">Sqft</td><td>${t.sqft.toLocaleString()}${deltaHtml}</td></tr>`;
+        }
+        // Distance
+        if (t.distance != null) rows += `<tr><td style="color:#94a3b8;padding-right:8px">Dist</td><td>${t.distance.toFixed(2)} mi</td></tr>`;
+        // Gap/sqft
+        if (t.gapPerSqft != null) {
+          const gapColor = t.gapPerSqft >= 60 ? "#16a34a" : t.gapPerSqft >= 30 ? "#ca8a04" : "#94a3b8";
+          rows += `<tr><td style="color:#94a3b8;padding-right:8px">Gap/sf</td><td style="color:${gapColor};font-weight:600">$${t.gapPerSqft.toFixed(0)}</td></tr>`;
+        }
+      } else if (t && isSubject) {
+        if (t.listPrice != null) rows += `<tr><td style="color:#94a3b8;padding-right:8px">List</td><td style="font-weight:600">${$f(t.listPrice)}</td></tr>`;
+        if (t.sqft != null) rows += `<tr><td style="color:#94a3b8;padding-right:8px">Sqft</td><td>${t.sqft.toLocaleString()}</td></tr>`;
+        if (t.gapPerSqft != null) {
+          const gapColor = t.gapPerSqft >= 60 ? "#16a34a" : t.gapPerSqft >= 30 ? "#ca8a04" : "#94a3b8";
+          rows += `<tr><td style="color:#94a3b8;padding-right:8px">Gap/sf</td><td style="color:${gapColor};font-weight:600">$${t.gapPerSqft.toFixed(0)}</td></tr>`;
+        }
+      }
+
+      const metricsTable = rows ? `<table style="font-size:11px;line-height:1.5;margin-top:2px;border-collapse:collapse">${rows}</table>` : "";
+      const clickHint = onPinClickRef.current && !isSubject
+        ? `<div style="color:#6366f1;font-size:10px;margin-top:3px;border-top:1px solid #e2e8f0;padding-top:3px">${pin.type === "selected" ? "Click to deselect" : "Click to select"}</div>`
+        : "";
+
+      return `<div style="font-size:12px;line-height:1.3">
+        ${tag}<strong style="color:${accentColor}">${star}${pin.label}</strong>
+        ${metricsTable}${clickHint}
       </div>`;
     }
 
-    // Candidates (bottom layer)
+    // Dynamically reposition tooltip toward map center on each hover,
+    // so it stays visible even after pan/zoom
+    function addSmartTooltip(marker: L.Marker, pin: MapPin, iconSize: number) {
+      const html = tooltipHtml(pin);
+      const pad = iconSize / 2 + 4;
+
+      function bestDir(): { direction: L.Direction; offset: L.PointExpression } {
+        const pinPt = map.latLngToContainerPoint(marker.getLatLng());
+        const size = map.getSize();
+        const dx = size.x / 2 - pinPt.x;
+        const dy = size.y / 2 - pinPt.y;
+
+        if (Math.abs(dy) > Math.abs(dx)) {
+          return dy > 0
+            ? { direction: "bottom", offset: [0, pad] }
+            : { direction: "top", offset: [0, -pad] };
+        }
+        return dx > 0
+          ? { direction: "right", offset: [pad, 0] }
+          : { direction: "left", offset: [-pad, 0] };
+      }
+
+      // Rebind with correct direction on every hover (before Leaflet opens it)
+      marker.on("mouseover", () => {
+        if (marker.getTooltip()) marker.unbindTooltip();
+        const d = bestDir();
+        marker.bindTooltip(html, {
+          direction: d.direction,
+          offset: d.offset,
+          opacity: 0.97,
+          className: "comp-map-tooltip",
+        });
+        marker.openTooltip();
+      });
+    }
+
+    // Candidates (bottom layer) — border color reflects gap/sqft
     for (const pin of candidatePins) {
+      const border = gapBorderColor(pin.tooltipData?.gapPerSqft);
       const marker = L.marker([pin.lat, pin.lng], {
-        icon: ICONS.candidate,
+        icon: compIcon("#94a3b8", border, 13),
         zIndexOffset: 100,
       }).addTo(map);
-      marker.bindPopup(popupHtml(pin, !!onPinClickRef.current), {
-        closeButton: false,
-        maxWidth: 240,
-      });
+      addSmartTooltip(marker, pin, 13);
       if (onPinClickRef.current) {
         marker.on("click", () => onPinClickRef.current?.(pin.id, "candidate"));
       }
@@ -161,10 +258,7 @@ export function CompMap({
         icon: ICONS.selected,
         zIndexOffset: 200,
       }).addTo(map);
-      marker.bindPopup(popupHtml(pin, !!onPinClickRef.current), {
-        closeButton: false,
-        maxWidth: 240,
-      });
+      addSmartTooltip(marker, pin, 14);
       if (onPinClickRef.current) {
         marker.on("click", () => onPinClickRef.current?.(pin.id, "selected"));
       }
@@ -177,10 +271,7 @@ export function CompMap({
         icon: ICONS.subject,
         zIndexOffset: 1000,
       }).addTo(map);
-      marker.bindPopup(popupHtml(pin, false), {
-        closeButton: false,
-        maxWidth: 240,
-      });
+      addSmartTooltip(marker, pin, 20);
       bounds.extend([pin.lat, pin.lng]);
     }
 

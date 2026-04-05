@@ -117,8 +117,21 @@ export type TransactionConfig = {
   dispositionTitleRate: number;
   /** Disposition agent commissions as fraction of ARV. */
   dispositionCommissionRate: number;
-  /** Future: financing configuration. */
-  financingEnabled: boolean;
+};
+
+// ---------------------------------------------------------------------------
+// Financing configuration
+// ---------------------------------------------------------------------------
+
+export type FinancingConfig = {
+  /** Whether financing costs are included in the deal model. */
+  enabled: boolean;
+  /** Annual interest rate as a decimal (e.g. 0.11 = 11%). */
+  annualRate: number;
+  /** Origination/points fee as a fraction of loan amount (e.g. 0.01 = 1 point). */
+  originationPointsRate: number;
+  /** Loan-to-value ratio based on ARV (e.g. 0.80 = 80% LTV). */
+  ltvPct: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -153,6 +166,7 @@ export type FlipStrategyProfile = {
   rehab: RehabConfig;
   holding: HoldingConfig;
   transaction: TransactionConfig;
+  financing: FinancingConfig;
   qualification: QualificationConfig;
 };
 
@@ -278,7 +292,14 @@ export const DENVER_FLIP_V1: FlipStrategyProfile = {
     acquisitionTitleRate: 0.003,
     dispositionTitleRate: 0.0047,
     dispositionCommissionRate: 0.04,
-    financingEnabled: false,
+  },
+
+  // -- Financing ------------------------------------------------------------
+  financing: {
+    enabled: true,
+    annualRate: 0.11,           // 11% hard money rate
+    originationPointsRate: 0.01, // 1 point origination fee
+    ltvPct: 0.80,               // 80% of ARV
   },
 
   // -- Qualification (Prime Candidates) -------------------------------------

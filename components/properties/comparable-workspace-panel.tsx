@@ -928,28 +928,132 @@ export function ComparableWorkspacePanel({
 
   return (
     <div className="dw-card-compact space-y-3">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="dw-card-title-compact">Comparable Workspace</h2>
-          <p className="dw-card-copy-compact">
-            Search, review, and compare nearby sold comps.
-          </p>
+      {/* ── MLS# Quick Copy ── */}
+      <div className="dw-card-tight space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+            MLS# Quick Copy (Subject + All Candidates)
+          </div>
+          <div className="text-[11px] text-slate-500">
+            {copiedAll ? "Copied" : "Click box to copy"}
+          </div>
         </div>
 
         <button
-          type="submit"
-          form="comp-search-form"
-          className="dw-button-primary"
-          disabled={!subjectListingRowId}
-          title={
-            subjectListingRowId
-              ? "Run comparable search"
-              : "A linked subject listing is required"
-          }
+          type="button"
+          onClick={handleCopyAllMlsIds}
+          className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-left font-mono text-[11px] leading-5 text-slate-700 hover:bg-slate-50"
         >
-          Run Comp Search
+          {allMlsClipboardText || "No MLS numbers available yet."}
         </button>
       </div>
+
+      {/* ── Selected Comp Summary ── */}
+      <div className="dw-card-tight space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Selected Comp Summary
+            </div>
+            <div className="mt-1 text-xs text-slate-600">
+              Analyst-picked comparable set for detailed review.
+            </div>
+          </div>
+
+          <div className="text-[11px] text-slate-500">
+            {copiedSelected ? "Copied selected MLS#" : "Selected MLS# copy"}
+          </div>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-4">
+          <DetailMini label="Selected Count" value={String(selectedCount)} />
+          <DetailMini
+            label="Avg Distance"
+            value={formatNumber(avgSelectedDistance, 2)}
+          />
+          <DetailMini
+            label="Avg Close Price"
+            value={formatCurrency(avgSelectedClosePrice)}
+          />
+          <DetailMini
+            label="Avg PPSF"
+            value={formatCurrency(avgSelectedPpsf)}
+          />
+        </div>
+
+        <button
+          type="button"
+          onClick={handleCopySelectedMlsIds}
+          className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-left font-mono text-[11px] leading-5 text-slate-700 hover:bg-slate-50"
+        >
+          {selectedMlsClipboardText || "No selected MLS numbers yet."}
+        </button>
+
+        {selectedCandidates.length > 0 ? (
+          <div className="dw-table-wrap">
+            <table className="dw-table-compact">
+              <thead>
+                <tr>
+                  <th>MLS#</th>
+                  <th>Address</th>
+                  <th>Dist</th>
+                  <th>Close</th>
+                  <th>Price</th>
+                  <th>PSF</th>
+                </tr>
+              </thead>
+              <tbody>
+                {selectedCandidates.map((candidate) => (
+                  <tr key={candidate.id}>
+                    <td>{candidate.listingId ?? "—"}</td>
+                    <td>{candidate.address}</td>
+                    <td>{formatNumber(candidate.distance_miles, 2)}</td>
+                    <td>{formatDate(candidate.closeDate)}</td>
+                    <td>{formatCurrency(candidate.closePrice)}</td>
+                    <td>{formatCurrency(candidate.ppsf)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            No comps are selected yet. Use the{" "}
+            <span className="font-semibold">Pick</span> buttons below to build
+            the preferred comp set.
+          </div>
+        )}
+      </div>
+
+      {/* ── Candidate List ── */}
+      <ComparableCandidateTable
+        propertyId={propertyId}
+        analysisId={analysisId}
+        candidateViewRows={candidateViewRows}
+        subjectSummary={subjectSummary}
+      />
+
+      {/* ── Search Controls ── */}
+      <details className="group">
+        <summary className="flex cursor-pointer items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 hover:text-slate-700">
+          <span className="transition-transform group-open:rotate-90">&#9654;</span>
+          Search Parameters &amp; Property Details
+          <button
+            type="submit"
+            form="comp-search-form"
+            className="dw-button-primary ml-auto text-[11px]"
+            disabled={!subjectListingRowId}
+            title={
+              subjectListingRowId
+                ? "Run comparable search"
+                : "A linked subject listing is required"
+            }
+          >
+            Run Comp Search
+          </button>
+        </summary>
+
+        <div className="mt-3 space-y-3">
 
       {compRunMessage ? (
         <div className="dw-card-tight border-emerald-200 bg-emerald-50 text-sm text-emerald-800">
@@ -1467,107 +1571,8 @@ export function ComparableWorkspacePanel({
         <DetailMini label="Selected" value={String(selectedCount)} />
       </div>
 
-      <div className="dw-card-tight space-y-2">
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-            MLS# Quick Copy (Subject + All Candidates)
-          </div>
-          <div className="text-[11px] text-slate-500">
-            {copiedAll ? "Copied" : "Click box to copy"}
-          </div>
         </div>
-
-        <button
-          type="button"
-          onClick={handleCopyAllMlsIds}
-          className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-left font-mono text-[11px] leading-5 text-slate-700 hover:bg-slate-50"
-        >
-          {allMlsClipboardText || "No MLS numbers available yet."}
-        </button>
-      </div>
-
-      <div className="dw-card-tight space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-              Selected Comp Summary
-            </div>
-            <div className="mt-1 text-xs text-slate-600">
-              Analyst-picked comparable set for detailed review.
-            </div>
-          </div>
-
-          <div className="text-[11px] text-slate-500">
-            {copiedSelected ? "Copied selected MLS#" : "Selected MLS# copy"}
-          </div>
-        </div>
-
-        <div className="grid gap-2 sm:grid-cols-4">
-          <DetailMini label="Selected Count" value={String(selectedCount)} />
-          <DetailMini
-            label="Avg Distance"
-            value={formatNumber(avgSelectedDistance, 2)}
-          />
-          <DetailMini
-            label="Avg Close Price"
-            value={formatCurrency(avgSelectedClosePrice)}
-          />
-          <DetailMini
-            label="Avg PPSF"
-            value={formatCurrency(avgSelectedPpsf)}
-          />
-        </div>
-
-        <button
-          type="button"
-          onClick={handleCopySelectedMlsIds}
-          className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-left font-mono text-[11px] leading-5 text-slate-700 hover:bg-slate-50"
-        >
-          {selectedMlsClipboardText || "No selected MLS numbers yet."}
-        </button>
-
-        {selectedCandidates.length > 0 ? (
-          <div className="dw-table-wrap">
-            <table className="dw-table-compact">
-              <thead>
-                <tr>
-                  <th>MLS#</th>
-                  <th>Address</th>
-                  <th>Dist</th>
-                  <th>Close</th>
-                  <th>Price</th>
-                  <th>PSF</th>
-                </tr>
-              </thead>
-              <tbody>
-                {selectedCandidates.map((candidate) => (
-                  <tr key={candidate.id}>
-                    <td>{candidate.listingId ?? "—"}</td>
-                    <td>{candidate.address}</td>
-                    <td>{formatNumber(candidate.distance_miles, 2)}</td>
-                    <td>{formatDate(candidate.closeDate)}</td>
-                    <td>{formatCurrency(candidate.closePrice)}</td>
-                    <td>{formatCurrency(candidate.ppsf)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-            No comps are selected yet. Use the{" "}
-            <span className="font-semibold">Pick</span> buttons below to build
-            the preferred comp set.
-          </div>
-        )}
-      </div>
-
-      <ComparableCandidateTable
-        propertyId={propertyId}
-        analysisId={analysisId}
-        candidateViewRows={candidateViewRows}
-        subjectSummary={subjectSummary}
-      />
+      </details>
     </div>
   );
 }

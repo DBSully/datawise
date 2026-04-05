@@ -11,6 +11,7 @@ type CalculateDealMathInput = {
   rehabTotal: number;
   holdTotal: number;
   transactionTotal: number;
+  financingTotal: number;
   targetProfit: number;
 };
 
@@ -22,10 +23,11 @@ export function calculateDealMath(input: CalculateDealMathInput): DealMathResult
     rehabTotal,
     holdTotal,
     transactionTotal,
+    financingTotal,
     targetProfit,
   } = input;
 
-  const totalCosts = rehabTotal + holdTotal + transactionTotal;
+  const totalCosts = rehabTotal + holdTotal + transactionTotal + financingTotal;
   const maxOffer = Math.round(arv - totalCosts - targetProfit);
   const spread = Math.round(arv - listPrice);
   const offerPct = listPrice > 0 ? roundTo(maxOffer / listPrice, 4) : 0;
@@ -38,6 +40,7 @@ export function calculateDealMath(input: CalculateDealMathInput): DealMathResult
     rehabTotal,
     holdTotal,
     transactionTotal,
+    financingTotal,
     targetProfit,
     totalCosts,
     maxOffer,

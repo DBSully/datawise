@@ -7,6 +7,7 @@ import { calculateArv } from "@/lib/screening/arv-engine";
 import { calculateRehab } from "@/lib/screening/rehab-engine";
 import { calculateHolding } from "@/lib/screening/holding-engine";
 import { calculateTransaction } from "@/lib/screening/transaction-engine";
+import { calculateFinancing } from "@/lib/screening/financing-engine";
 import { calculateDealMath } from "@/lib/screening/deal-math";
 import {
   DENVER_FLIP_V1,
@@ -280,6 +281,25 @@ export default async function AnalysisPage({ params }: AnalysisPageProps) {
     config: profile.transaction,
   }) : null;
 
+  // Financing
+  const financingOverrides = {
+    annualRate: manualAnalysis?.financing_rate_manual ? toNum(manualAnalysis.financing_rate_manual) : null,
+    pointsRate: manualAnalysis?.financing_points_manual ? toNum(manualAnalysis.financing_points_manual) : null,
+    ltvPct: manualAnalysis?.financing_ltv_manual ? toNum(manualAnalysis.financing_ltv_manual) : null,
+  };
+  const finResult = effectiveArv > 0 && holdResult && profile.financing.enabled
+    ? calculateFinancing({
+        arv: effectiveArv,
+        daysHeld: holdResult.daysHeld,
+        config: profile.financing,
+        overrides: financingOverrides,
+      })
+    : null;
+
+  // Target profit (manual override or profile default)
+  const manualTargetProfit = manualAnalysis?.target_profit_manual ? toNum(manualAnalysis.target_profit_manual) : null;
+  const effectiveTargetProfit = manualTargetProfit ?? profile.targetProfitDefault;
+
   // Deal math
   const dealMath = effectiveArv > 0 ? calculateDealMath({
     arv: effectiveArv,
@@ -288,7 +308,8 @@ export default async function AnalysisPage({ params }: AnalysisPageProps) {
     rehabTotal: effectiveRehab,
     holdTotal: holdResult?.total ?? 0,
     transactionTotal: transResult?.total ?? 0,
-    targetProfit: profile.targetProfitDefault,
+    financingTotal: finResult?.total ?? 0,
+    targetProfit: effectiveTargetProfit,
   }) : null;
 
   // Comp summary stats
@@ -365,6 +386,7 @@ export default async function AnalysisPage({ params }: AnalysisPageProps) {
       daysHeld: holdResult.daysHeld,
     } : null,
     transaction: transResult ? { total: transResult.total } : null,
+    financing: finResult,
     dealMath,
     compSummary: {
       totalComps,

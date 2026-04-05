@@ -4,7 +4,7 @@ import { useState, useMemo, useCallback, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { MapPin } from "@/components/properties/comp-map";
+import type { MapPin, MapPinTooltipData } from "@/components/properties/comp-map";
 
 const CompMap = dynamic(
   () => import("@/components/properties/comp-map").then((m) => m.CompMap),
@@ -42,9 +42,14 @@ type WorkstationData = {
   rehab: { auto: number | null; computed: number | null; manual: number | null; effective: number };
   holding: { total: number; daysHeld: number } | null;
   transaction: { total: number } | null;
+  financing: {
+    loanAmount: number; ltvPct: number; annualRate: number; pointsRate: number;
+    daysHeld: number; interestCost: number; originationCost: number;
+    monthlyPayment: number; dailyInterest: number; total: number;
+  } | null;
   dealMath: {
     arv: number; listPrice: number; rehabTotal: number; holdTotal: number;
-    transactionTotal: number; targetProfit: number; totalCosts: number;
+    transactionTotal: number; financingTotal: number; targetProfit: number; totalCosts: number;
     maxOffer: number; offerPct: number; spread: number; estGapPerSqft: number;
   } | null;
   compSummary: { totalComps: number; selectedCount: number; avgSelectedPrice: number | null; avgSelectedPsf: number | null; avgSelectedDist: number | null };
@@ -143,6 +148,7 @@ const PIPELINE_OFFER = ["No Offer", "Drafting", "Submitted", "Accepted", "Expire
 export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
   const router = useRouter();
   const [showCompModal, setShowCompModal] = useState(false);
+  const [showFinancingModal, setShowFinancingModal] = useState(false);
   const [showNoteForm, setShowNoteForm] = useState(false);
   const [noteCategory, setNoteCategory] = useState("location");
   const [noteBody, setNoteBody] = useState("");
@@ -187,17 +193,24 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
   }, [d]);
 
   // Build map pins from comp candidates
+  const subjectSqft = p?.buildingSqft ?? 0;
+  const subjectListPrice = d.listing?.listPrice ?? 0;
+
   const mapPins = useMemo<MapPin[]>(() => {
     const pins: MapPin[] = [];
 
-    // Subject pin
+    // Subject pin — show deal-level gap/sqft
     if (d.property.latitude && d.property.longitude) {
       pins.push({
         id: "subject",
         lat: d.property.latitude,
         lng: d.property.longitude,
         label: d.property.address,
-        detail: d.listing ? `List: ${fmt(d.listing.listPrice)}` : undefined,
+        tooltipData: {
+          listPrice: subjectListPrice || null,
+          sqft: subjectSqft || null,
+          gapPerSqft: d.dealMath?.estGapPerSqft ?? null,
+        },
         type: "subject",
       });
     }
@@ -209,19 +222,40 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
       const lng = Number(m.longitude);
       if (!lat || !lng || !Number.isFinite(lat) || !Number.isFinite(lng)) continue;
 
+      const compSqft = Number(m.building_area_total_sqft) || null;
+      // Positive = subject is larger (good for buyer), negative = subject is smaller
+      const sqftDelta = compSqft && subjectSqft ? subjectSqft - compSqft : null;
+      const sqftDeltaPct = compSqft && subjectSqft ? (subjectSqft - compSqft) / subjectSqft : null;
+
+      // Per-comp gap/sqft: (comp close price − subject list price) / subject sqft
+      const compClosePrice = Number(m.close_price) || 0;
+      const perCompGapPerSqft =
+        subjectSqft > 0 && compClosePrice > 0 && subjectListPrice > 0
+          ? Math.round((compClosePrice - subjectListPrice) / subjectSqft)
+          : null;
+
       const isSelected = Boolean(c.selected_yn);
       pins.push({
         id: String(c.id),
         lat,
         lng,
         label: String(m.address ?? "—"),
-        detail: `${fmt(m.close_price as number)} · ${fmtNum(m.building_area_total_sqft as number)} sqft · ${fmtNum(c.distance_miles as number, 2)}mi`,
+        tooltipData: {
+          closePrice: (m.close_price as number) ?? null,
+          closeDate: m.close_date ? String(m.close_date).slice(0, 10) : null,
+          sqft: compSqft,
+          sqftDelta,
+          sqftDeltaPct,
+          ppsf: (m.ppsf as number) ?? null,
+          distance: (c.distance_miles as number) ?? null,
+          gapPerSqft: perCompGapPerSqft,
+        },
         type: isSelected ? "selected" : "candidate",
       });
     }
 
     return pins;
-  }, [d]);
+  }, [d, subjectSqft, subjectListPrice]);
 
   return (
     <section className="dw-section-stack-compact">
@@ -312,6 +346,18 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
               <DealLine label="− Rehab" value={fmt(d.rehab.effective)} negative />
               <DealLine label="− Holding" value={fmt(d.holding?.total)} negative />
               <DealLine label="− Transaction" value={fmt(d.transaction?.total)} negative />
+              {d.financing && (
+                <div className="flex items-center justify-between py-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowFinancingModal(true)}
+                    className="text-slate-500 underline decoration-dotted underline-offset-2 hover:text-blue-600"
+                  >
+                    − Financing
+                  </button>
+                  <span className="font-mono text-sm text-red-600">{fmt(d.financing.total)}</span>
+                </div>
+              )}
               <DealLine label="− Target Profit" value={fmt(d.dealMath?.targetProfit)} negative />
               <div className="border-t border-slate-300 pt-1">
                 <DealLine label="= Max Offer" value={fmt(d.dealMath?.maxOffer)} bold />
@@ -330,8 +376,8 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
               </div>
             </div>
 
-            {/* Rehab summary */}
-            <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+            {/* Cost breakdown summary */}
+            <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-0.5">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-500">Rehab</span>
                 <span>
@@ -345,6 +391,18 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                 <span className="text-slate-500">Hold ({d.holding?.daysHeld ?? "—"} days)</span>
                 <span>{fmt(d.holding?.total)}</span>
               </div>
+              {d.financing && (
+                <div className="flex items-center justify-between text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setShowFinancingModal(true)}
+                    className="text-slate-500 underline decoration-dotted underline-offset-2 hover:text-blue-600"
+                  >
+                    Financing ({fmtPct(d.financing.annualRate)} @ {fmtPct(d.financing.ltvPct)} LTV)
+                  </button>
+                  <span>{fmt(d.financing.total)}</span>
+                </div>
+              )}
             </div>
           </div>
         </SectionCard>
@@ -377,6 +435,10 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
               <input type="number" name="days_held_manual" className="dw-input" defaultValue={d.manualAnalysis?.days_held_manual as number ?? ""} placeholder="Auto" />
             </div>
             <div>
+              <label className="dw-label">Target Profit</label>
+              <input type="number" name="target_profit_manual" className="dw-input" defaultValue={d.manualAnalysis?.target_profit_manual as number ?? ""} placeholder="$40,000" />
+            </div>
+            <div>
               <label className="dw-label">Condition</label>
               <select name="analyst_condition" className="dw-select" defaultValue={d.manualAnalysis?.analyst_condition as string ?? ""}>
                 <option value="">—</option>
@@ -395,6 +457,18 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
             <div>
               <label className="dw-label">Est. Rent/mo</label>
               <input type="number" name="rent_estimate_monthly" className="dw-input" defaultValue={d.manualAnalysis?.rent_estimate_monthly as number ?? ""} />
+            </div>
+            <div>
+              <label className="dw-label">Loan Rate %</label>
+              <input type="number" step="0.1" name="financing_rate_manual" className="dw-input" defaultValue={d.manualAnalysis?.financing_rate_manual ? String(Number(d.manualAnalysis.financing_rate_manual) * 100) : ""} placeholder="11" />
+            </div>
+            <div>
+              <label className="dw-label">Points %</label>
+              <input type="number" step="0.1" name="financing_points_manual" className="dw-input" defaultValue={d.manualAnalysis?.financing_points_manual ? String(Number(d.manualAnalysis.financing_points_manual) * 100) : ""} placeholder="1" />
+            </div>
+            <div>
+              <label className="dw-label">LTV %</label>
+              <input type="number" step="1" name="financing_ltv_manual" className="dw-input" defaultValue={d.manualAnalysis?.financing_ltv_manual ? String(Number(d.manualAnalysis.financing_ltv_manual) * 100) : ""} placeholder="80" />
             </div>
           </div>
           <button type="submit" className="dw-button-secondary text-xs" disabled={isSaving}>
@@ -601,52 +675,130 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
         </form>
       </SectionCard>
 
+      {/* ── Financing Detail Modal ── */}
+      {showFinancingModal && d.financing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="relative w-full max-w-md rounded-xl border border-slate-300 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+              <h2 className="text-sm font-semibold text-slate-800">Financing Detail</h2>
+              <button
+                type="button"
+                onClick={() => setShowFinancingModal(false)}
+                className="rounded px-2 py-1 text-sm font-medium text-slate-600 hover:bg-slate-100"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="space-y-3 p-4">
+              {/* Loan parameters */}
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Loan Parameters</div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                  <span className="text-slate-500">Loan Basis (ARV)</span>
+                  <span className="text-right font-mono">{fmt(d.arv.effective)}</span>
+                  <span className="text-slate-500">LTV</span>
+                  <span className="text-right font-mono">{fmtPct(d.financing.ltvPct)}</span>
+                  <span className="text-slate-500">Loan Amount</span>
+                  <span className="text-right font-mono font-semibold">{fmt(d.financing.loanAmount)}</span>
+                  <span className="text-slate-500">Annual Rate</span>
+                  <span className="text-right font-mono">{fmtPct(d.financing.annualRate)}</span>
+                  <span className="text-slate-500">Origination Points</span>
+                  <span className="text-right font-mono">{fmtPct(d.financing.pointsRate)}</span>
+                  <span className="text-slate-500">Hold Period</span>
+                  <span className="text-right font-mono">{d.financing.daysHeld} days</span>
+                </div>
+              </div>
+
+              {/* Cost breakdown */}
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Cost Breakdown</div>
+                <div className="space-y-1 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Interest ({d.financing.daysHeld} days)</span>
+                    <span className="font-mono text-red-600">{fmt(d.financing.interestCost)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Origination Fee</span>
+                    <span className="font-mono text-red-600">{fmt(d.financing.originationCost)}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-slate-300 pt-1">
+                    <span className="font-semibold">Total Financing</span>
+                    <span className="font-mono font-bold text-red-700">{fmt(d.financing.total)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Reference rates */}
+              <div className="rounded-lg border border-slate-200 bg-white p-3">
+                <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Reference</div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                  <span className="text-slate-500">Monthly Payment (I/O)</span>
+                  <span className="text-right font-mono">{fmt(d.financing.monthlyPayment)}</span>
+                  <span className="text-slate-500">Daily Interest</span>
+                  <span className="text-right font-mono">${fmtNum(d.financing.dailyInterest, 2)}</span>
+                </div>
+              </div>
+
+              <p className="text-[10px] text-slate-400">
+                Loan based on ARV &times; LTV (hard money). Override rate, points, and LTV in Analyst Overrides.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Comp Selection Modal ── */}
       {showCompModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="relative flex h-[90vh] w-[85vw] flex-col overflow-hidden rounded-xl border border-slate-300 bg-white shadow-2xl">
+          <div className="relative flex h-[90vh] w-[92vw] flex-col overflow-hidden rounded-xl border border-slate-300 bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
               <h2 className="text-sm font-semibold text-slate-800">Comparable Selection — {d.property.address}</h2>
-              <button
-                type="button"
-                onClick={() => { setShowCompModal(false); router.refresh(); }}
-                className="rounded px-3 py-1 text-sm font-medium text-slate-600 hover:bg-slate-100"
-              >
-                ✕ Close
-              </button>
+              <div className="flex items-center gap-3">
+                <p className="text-[10px] text-slate-400">
+                  Hover for details &middot; Click to select/deselect &middot;
+                  <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 mx-0.5 align-middle" /> Selected
+                  <span className="inline-block h-2 w-2 rounded-full bg-slate-400 mx-0.5 align-middle" /> Candidate
+                  <span className="inline-block h-2 w-2 rounded-full bg-red-600 mx-0.5 align-middle" /> Subject
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { setShowCompModal(false); router.refresh(); }}
+                  className="rounded px-3 py-1 text-sm font-medium text-slate-600 hover:bg-slate-100"
+                >
+                  ✕ Close
+                </button>
+              </div>
             </div>
-            <div className="flex-1 overflow-auto p-4">
+            <div className="flex flex-1 overflow-hidden">
+              {/* Left: Map */}
               {mapPins.length > 1 && (
-                <div className="mb-4 mx-auto" style={{ maxWidth: 500 }}>
+                <div className="shrink-0 border-r border-slate-200 p-3" style={{ width: 480 }}>
                   <CompMap
                     pins={mapPins}
-                    height={500}
+                    height={480}
                     subjectLat={d.property.latitude}
                     subjectLng={d.property.longitude}
                     onPinClick={handleMapPinToggle}
                   />
-                  <p className="mt-1 text-center text-[10px] text-slate-400">
-                    Click a pin to select/deselect &middot;
-                    <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 mx-1 align-middle" /> Selected
-                    <span className="inline-block h-2 w-2 rounded-full bg-slate-400 mx-1 align-middle" /> Candidate
-                    <span className="inline-block h-2 w-2 rounded-full bg-red-600 mx-1 align-middle" /> Subject
-                  </p>
                 </div>
               )}
-              <ComparableWorkspacePanel
-                propertyId={d.propertyId}
-                analysisId={d.analysisId}
-                subjectListingRowId={d.compModalData.subjectListingRowId}
-                subjectListingMlsNumber={d.compModalData.subjectListingMlsNumber}
-                analysisStrategyType={d.analysis.strategyType}
-                defaultProfileSlug={d.compModalData.defaultProfileSlug}
-                latestRun={d.compModalData.latestRun}
-                latestCandidates={d.compModalData.compCandidates as any}
-                defaultProfileRules={profileRules}
-                compRunMessage={null}
-                compErrorMessage={null}
-                subjectContext={d.subjectContext as any}
-              />
+              {/* Right: Candidate list & search controls */}
+              <div className="flex-1 overflow-auto p-3">
+                <ComparableWorkspacePanel
+                  propertyId={d.propertyId}
+                  analysisId={d.analysisId}
+                  subjectListingRowId={d.compModalData.subjectListingRowId}
+                  subjectListingMlsNumber={d.compModalData.subjectListingMlsNumber}
+                  analysisStrategyType={d.analysis.strategyType}
+                  defaultProfileSlug={d.compModalData.defaultProfileSlug}
+                  latestRun={d.compModalData.latestRun}
+                  latestCandidates={d.compModalData.compCandidates as any}
+                  defaultProfileRules={profileRules}
+                  compRunMessage={null}
+                  compErrorMessage={null}
+                  subjectContext={d.subjectContext as any}
+                />
+              </div>
             </div>
           </div>
         </div>

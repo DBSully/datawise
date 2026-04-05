@@ -203,7 +203,7 @@ export default async function BatchResultsPage({
 
       {/* Results table */}
       <div className="dw-table-wrap">
-        <table className="dw-table-compact min-w-[1400px]">
+        <table className="dw-table-compact min-w-[1500px]">
           <thead>
             <tr>
               <th style={{ width: 28 }}></th>
@@ -218,6 +218,7 @@ export default async function BatchResultsPage({
               <th className="text-right">Rehab</th>
               <th className="text-right">Hold</th>
               <th className="text-right">Trans.</th>
+              <th className="text-right">Fin.</th>
               <th className="text-right">Max Offer</th>
               <th className="text-right">Offer%</th>
               <th></th>
@@ -226,7 +227,7 @@ export default async function BatchResultsPage({
           <tbody>
             {(!results || results.length === 0) ? (
               <tr>
-                <td colSpan={15} className="py-8 text-center text-sm text-slate-400">
+                <td colSpan={16} className="py-8 text-center text-sm text-slate-400">
                   No results found.
                 </td>
               </tr>
@@ -247,6 +248,7 @@ export default async function BatchResultsPage({
                   rehab_total: number | null;
                   hold_total: number | null;
                   transaction_total: number | null;
+                  financing_total: number | null;
                   max_offer: number | null;
                   offer_pct: number | null;
                   screening_status: string;
@@ -313,6 +315,9 @@ export default async function BatchResultsPage({
                     </td>
                     <td className="text-right">
                       {formatCurrency(r.transaction_total)}
+                    </td>
+                    <td className="text-right">
+                      {formatCurrency(r.financing_total)}
                     </td>
                     <td className="text-right font-medium">
                       {formatCurrency(r.max_offer)}

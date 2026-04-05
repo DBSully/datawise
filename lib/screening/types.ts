@@ -112,6 +112,23 @@ export type TransactionResult = {
 };
 
 // ---------------------------------------------------------------------------
+// Financing
+// ---------------------------------------------------------------------------
+
+export type FinancingResult = {
+  loanAmount: number;
+  ltvPct: number;
+  annualRate: number;
+  pointsRate: number;
+  daysHeld: number;
+  interestCost: number;
+  originationCost: number;
+  monthlyPayment: number;
+  dailyInterest: number;
+  total: number;
+};
+
+// ---------------------------------------------------------------------------
 // Deal math
 // ---------------------------------------------------------------------------
 
@@ -121,6 +138,7 @@ export type DealMathResult = {
   rehabTotal: number;
   holdTotal: number;
   transactionTotal: number;
+  financingTotal: number;
   targetProfit: number;
   totalCosts: number;
   maxOffer: number;
@@ -162,6 +180,7 @@ export type ScreeningResultRow = {
   rehab: RehabResult | null;
   holding: HoldingResult | null;
   transaction: TransactionResult | null;
+  financing: FinancingResult | null;
   dealMath: DealMathResult | null;
   qualification: QualificationResult;
 

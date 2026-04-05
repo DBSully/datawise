@@ -19,6 +19,7 @@ import { calculateArv } from "./arv-engine";
 import { calculateRehab } from "./rehab-engine";
 import { calculateHolding } from "./holding-engine";
 import { calculateTransaction } from "./transaction-engine";
+import { calculateFinancing } from "./financing-engine";
 import { calculateDealMath } from "./deal-math";
 import { evaluateQualification } from "./qualification-engine";
 import type {
@@ -551,7 +552,7 @@ function screenSubject(
 
   const base: Omit<
     ScreeningResultRow,
-    "arv" | "rehab" | "holding" | "transaction" | "dealMath" | "qualification" | "screeningStatus" | "errorMessage"
+    "arv" | "rehab" | "holding" | "transaction" | "financing" | "dealMath" | "qualification" | "screeningStatus" | "errorMessage"
   > = {
     realPropertyId: subject.property.id,
     listingRowId: subject.listing?.id ?? null,
@@ -567,7 +568,7 @@ function screenSubject(
   const skipResult = (msg: string): ScreeningSubjectResult => ({
     result: {
       ...base,
-      arv: null, rehab: null, holding: null, transaction: null, dealMath: null,
+      arv: null, rehab: null, holding: null, transaction: null, financing: null, dealMath: null,
       qualification: { isPrimeCandidate: false, qualifyingCompCount: 0, reasons: [], disqualifiers: [msg] },
       screeningStatus: "skipped", errorMessage: msg,
     },
@@ -595,7 +596,7 @@ function screenSubject(
   if (!arv || arv.arvAggregate <= 0) {
     return {
       result: {
-        ...base, arv: null, rehab: null, holding: null, transaction: null, dealMath: null,
+        ...base, arv: null, rehab: null, holding: null, transaction: null, financing: null, dealMath: null,
         qualification: { isPrimeCandidate: false, qualifyingCompCount: 0, reasons: [], disqualifiers: ["No usable comparable sales found"] },
         screeningStatus: "screened", errorMessage: null,
       },
@@ -626,10 +627,19 @@ function screenSubject(
     config: profile.transaction,
   });
 
+  const financing = profile.financing.enabled
+    ? calculateFinancing({
+        arv: arv.arvAggregate,
+        daysHeld: holding.daysHeld,
+        config: profile.financing,
+      })
+    : null;
+
   const dealMath = calculateDealMath({
     arv: arv.arvAggregate, listPrice, buildingSqft,
     rehabTotal: rehab.total, holdTotal: holding.total,
     transactionTotal: transaction.total,
+    financingTotal: financing?.total ?? 0,
     targetProfit: profile.targetProfitDefault,
   });
 
@@ -640,7 +650,7 @@ function screenSubject(
 
   return {
     result: {
-      ...base, arv, rehab, holding, transaction, dealMath, qualification,
+      ...base, arv, rehab, holding, transaction, financing, dealMath, qualification,
       screeningStatus: "screened", errorMessage: null,
     },
     candidateRows,
@@ -768,6 +778,14 @@ async function writeScreeningResults(
       hold_days: r.holding?.daysHeld ?? null,
       transaction_total: r.transaction?.total ?? null,
 
+      financing_total: r.financing?.total ?? null,
+      financing_interest: r.financing?.interestCost ?? null,
+      financing_origination: r.financing?.originationCost ?? null,
+      financing_loan_amount: r.financing?.loanAmount ?? null,
+      financing_detail_json: r.financing
+        ? { ltvPct: r.financing.ltvPct, annualRate: r.financing.annualRate, pointsRate: r.financing.pointsRate, daysHeld: r.financing.daysHeld, monthlyPayment: r.financing.monthlyPayment, dailyInterest: r.financing.dailyInterest }
+        : null,
+
       target_profit: profile.targetProfitDefault,
       max_offer: r.dealMath?.maxOffer ?? null,
       est_gap_per_sqft: r.dealMath?.estGapPerSqft ?? null,
@@ -864,7 +882,7 @@ export async function runScreeningBatch(
           subjectBuildingSqft: pickBuildingSqft(subject.physical),
           subjectAboveGradeSqft: pickAboveGradeSqft(subject.physical),
           subjectYearBuilt: subject.physical.year_built,
-          arv: null, rehab: null, holding: null, transaction: null, dealMath: null,
+          arv: null, rehab: null, holding: null, transaction: null, financing: null, dealMath: null,
           qualification: { isPrimeCandidate: false, qualifyingCompCount: 0, reasons: [], disqualifiers: ["Processing error"] },
           screeningStatus: "error",
           errorMessage: err instanceof Error ? err.message : "Unknown processing error",

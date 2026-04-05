@@ -133,6 +133,15 @@ export default async function DealDetailPage({ params }: DealDetailPageProps) {
     ageMultiplier: number;
   } | null;
 
+  const financingDetail = result.financing_detail_json as {
+    ltvPct: number;
+    annualRate: number;
+    pointsRate: number;
+    daysHeld: number;
+    monthlyPayment: number;
+    dailyInterest: number;
+  } | null;
+
   const isPrime = result.is_prime_candidate;
   const qualJson = result.qualification_json as {
     qualifyingCompCount: number;
@@ -239,6 +248,13 @@ export default async function DealDetailPage({ params }: DealDetailPageProps) {
               value={formatCurrency(result.transaction_total)}
               negative
             />
+            {result.financing_total != null && (
+              <DealLine
+                label="− Financing"
+                value={formatCurrency(result.financing_total)}
+                negative
+              />
+            )}
             <DealLine
               label="− Target Profit"
               value={formatCurrency(result.target_profit)}
@@ -334,6 +350,61 @@ export default async function DealDetailPage({ params }: DealDetailPageProps) {
           />
         </div>
       </SectionCard>
+
+      {/* Financing costs */}
+      {(result.financing_total != null || financingDetail) && (
+        <SectionCard title="Financing Costs">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="dw-detail-grid">
+              <DetailItem
+                label="Loan Amount"
+                value={formatCurrency(result.financing_loan_amount)}
+              />
+              <DetailItem
+                label="Interest Cost"
+                value={formatCurrency(result.financing_interest)}
+              />
+              <DetailItem
+                label="Origination Fee"
+                value={formatCurrency(result.financing_origination)}
+              />
+              <DetailItem
+                label="Total Financing"
+                value={formatCurrency(result.financing_total)}
+                highlight
+              />
+            </div>
+            {financingDetail && (
+              <div className="dw-detail-grid">
+                <DetailItem
+                  label="LTV"
+                  value={formatPercent(financingDetail.ltvPct)}
+                />
+                <DetailItem
+                  label="Annual Rate"
+                  value={formatPercent(financingDetail.annualRate)}
+                />
+                <DetailItem
+                  label="Origination Points"
+                  value={formatPercent(financingDetail.pointsRate)}
+                />
+                <DetailItem
+                  label="Hold Period"
+                  value={`${financingDetail.daysHeld} days`}
+                />
+                <DetailItem
+                  label="Monthly Payment (I/O)"
+                  value={formatCurrency(financingDetail.monthlyPayment)}
+                />
+                <DetailItem
+                  label="Daily Interest"
+                  value={`$${formatNumber(financingDetail.dailyInterest, 2)}`}
+                />
+              </div>
+            )}
+          </div>
+        </SectionCard>
+      )}
 
       {/* Comparable Sales */}
       <SectionCard title={`Comparable Sales (${compCandidates.length > 0 ? compCandidates.length : arvDetail.length} comps)`}>
