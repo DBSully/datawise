@@ -1,3 +1,214 @@
+## 2026-04-04 — Fix-and-Flip Screening Pipeline
+
+### Summary
+
+This is a major feature milestone. DataWise now has a fully automated deal-screening pipeline that can screen any subset of properties through the complete fix-and-flip underwriting workflow: comparable search → ARV calculation → rehab budget estimation → holding cost estimation → transaction cost estimation → offer price calculation → Prime Candidate qualification.
+
+The pipeline was designed to be configurable via strategy profiles so that all business assumptions (rates, weights, thresholds) live in one place rather than scattered across code. Property type intelligence ensures that detached homes, condos, and townhomes are each evaluated with appropriate parameters.
+
+---
+
+### Architecture
+
+#### Screening as a funnel, not an analysis
+
+A critical design decision was made to keep screening separate from the existing analysis/scenario system. Screening produces lightweight `screening_results` rows — not full `analyses` records. This prevents the analyses table from being polluted with thousands of automated records that may never be reviewed. When a user identifies a deal worth pursuing, they can "promote" it to a full analysis with one click.
+
+#### Strategy profiles
+
+All configurable assumptions for the fix-and-flip strategy are bundled into a single `FlipStrategyProfile` type. The default profile (`DENVER_FLIP_V1`) encodes all legacy Access system values with improvements. Parameters include:
+
+- ARV blending weights and dampening factors per property type
+- Rehab base rates and multiplier tiers per property type
+- Holding cost formula parameters
+- Transaction cost percentages
+- Prime Candidate qualification thresholds
+- Comparable profile mapping per property type
+
+This means adjusting any assumption requires editing one configuration object — not hunting through engine code.
+
+#### Bulk runner with pre-loaded comp pool
+
+The batch screening runner loads the entire comparable sales pool (all properties, physicals, and closed listings) into memory once, then processes each subject property without additional database queries. This makes screening thousands of properties feasible without hitting Supabase with tens of thousands of individual queries.
+
+#### Property type intelligence
+
+Different property types receive different treatment throughout the pipeline:
+
+- **Detached SFR**: 40/60 building/above-grade ARV blend, full exterior/landscaping rehab, systems at $1.70/sqft
+- **Condo**: 15/85 blend (above-grade dominates), no exterior/landscaping rehab, flat $1,500 systems
+- **Townhome**: 35/65 blend, partial exterior ($3.30/sqft) and landscaping ($1.50/sqft), flat $3,000 systems
+
+This intelligence is driven by keyed lookups in the strategy profile — not if/else chains in engine code.
+
+---
+
+### Engine modules built
+
+All engine modules are pure functions with no database dependencies, making them independently testable.
+
+#### ARV Engine (`lib/screening/arv-engine.ts`)
+
+Ported and improved the legacy Access ARV calculation:
+
+- **Per-comp size adjustment**: Two layers (building total and above-grade) with dampening factors that prevent marginal square footage from contributing linearly to value
+- **Blended ARV**: Weighted combination of building-based and above-grade-based estimates, with weights varying by property type
+- **Time adjustment**: Configurable annual rate applied per-comp (default -5%/year, conservative)
+- **Exponential decay weighted aggregation**: Replaces the legacy linear time adjustment for the aggregate ARV. Recent comps are naturally weighted more heavily: `Sum(ARV × e^(-days/365)) / Sum(e^(-days/365))`
+- **Confidence tiers**: Distance-based confidence levels (≤0.3mi = 1.0, ≤0.5 = 0.8, ≤0.6 = 0.6, ≤0.75 = 0.4)
+
+The exponential decay aggregation is a significant improvement over the legacy system's -5%/year flat rate. It produces the same effect (recent comps matter more) without requiring a market-direction assumption.
+
+#### Rehab Engine (`lib/screening/rehab-engine.ts`)
+
+Ported the legacy Access rehab budget estimation with a bug fix:
+
+- **Composite multiplier**: type × condition × price tier × age tier
+- **Line items**: above-grade interior ($35/sqft), below-grade finished ($39/sqft), below-grade unfinished ($49/sqft), exterior, landscaping, systems
+- **Property-type-aware rates**: Condos have no exterior/landscaping costs; townhomes have reduced rates; systems use flat amounts for condos/townhomes and per-sqft for detached
+- **Bug fix**: The legacy Access SQL had the ≥$900k price multiplier (1.20) nested inside the ≥$700k check, making it unreachable. Fixed by evaluating ≥$900k before ≥$700k.
+
+#### Holding Engine (`lib/screening/holding-engine.ts`)
+
+- **Auto days held**: `max(67, 190 + (building_sqft - 2500) × 0.085)` — larger properties take longer
+- **Daily costs**: property tax, insurance (0.55% of list price annualized), HOA, utilities ($0.08/sqft/month)
+- **Total**: daily costs × days held
+
+#### Transaction Engine (`lib/screening/transaction-engine.ts`)
+
+- Acquisition title: 0.3% of acquisition price
+- Disposition title: 0.47% of acquisition price
+- Disposition commissions: 4% of ARV
+- Financing: placeholder for future implementation
+
+#### Deal Math (`lib/screening/deal-math.ts`)
+
+- **Max offer**: ARV − rehab − hold − transaction − target profit ($40k default)
+- **Spread**: ARV − list price
+- **Est gap/sqft**: spread ÷ building sqft (the primary opportunity signal)
+- **Offer %**: max offer ÷ list price
+
+#### Qualification Engine (`lib/screening/qualification-engine.ts`)
+
+Ported the legacy "Bangers" logic, renamed to **Prime Candidates**:
+
+- Each comp is individually evaluated: distance ≤ 0.4mi, closed within 213 days (~7 months), per-comp gap ≥ $60/sqft
+- A property earns Prime Candidate status when ≥ 2 comps pass all three criteria
+- Returns human-readable reasons and disqualifiers for UI transparency
+
+---
+
+### Database schema
+
+Added migration `20260404180000_create_screening_tables.sql`:
+
+#### `screening_batches`
+
+Tracks batch screening runs with:
+
+- name, trigger type (manual/import_auto), status
+- strategy profile slug
+- subject filter criteria (JSON)
+- counts: total subjects, screened, qualified, prime candidates
+- timestamps and user linkage
+
+#### `screening_results`
+
+One row per screened property per batch:
+
+- Denormalized subject snapshot for fast dashboard reads
+- ARV outputs: aggregate, per-sqft, comp count, per-comp detail JSON
+- Rehab outputs: total and line-item breakdown with composite multiplier
+- Holding and transaction totals
+- Deal math: max offer, spread, gap/sqft, offer %
+- Prime Candidate flag with qualification JSON
+- Promotion linkage to `analyses` table
+
+Both tables have RLS policies, updated_at triggers, and indexes optimized for dashboard queries (batch + prime filter, gap descending, offer descending).
+
+---
+
+### UI pages
+
+#### Screening Dashboard (`/analysis/screening`)
+
+- Quick-action buttons: Screen Active Listings, Screen Coming Soon, Screen Both
+- Recent batches table with status badges, subject/screened/prime counts, timestamps
+- All-time summary stats
+
+#### Batch Results (`/analysis/screening/[batchId]`)
+
+The ranked deal dashboard:
+
+- Batch metadata header
+- Prime Candidates toggle (show all vs. prime only)
+- Sort controls: by gap/sqft, spread, ARV, max offer, rehab
+- Results table with: address, city, type, list price, ARV, spread, gap/sqft, comps, rehab, hold, transaction, max offer, offer %
+- Color-coded Prime Candidate rows
+- Click-through to deal detail
+
+#### Deal Detail (`/analysis/screening/[batchId]/[resultId]`)
+
+Full breakdown of one screening result:
+
+- Subject property snapshot
+- Deal math waterfall: ARV − Rehab − Hold − Transaction − Profit = Max Offer
+- Rehab breakdown with multiplier detail
+- Holding cost summary
+- Per-comp ARV table showing: close price, distance, days, PSF, blended ARV, time adjustment, adjusted ARV, confidence, decay weight
+- Qualification reasons/disqualifiers
+- "Promote to Analysis" button that creates an analysis record and redirects to the analysis workspace
+
+#### Navigation
+
+Added "Screening" tab to the Analysis section in the app chrome navigation.
+
+---
+
+### Bug fix
+
+Fixed a PostgREST URL length limit error that occurred when screening large batches (Active listings). The `.in()` filter was receiving thousands of property IDs at once, exceeding Supabase's URL length limit. Fixed by chunking ID arrays into groups of 200 for the financials and listings queries in `loadSubjects`.
+
+---
+
+### Current state
+
+DataWise now has:
+
+- Automated deal-screening pipeline
+- Configurable strategy profiles with property type intelligence
+- ARV calculation with exponential decay weighted aggregation
+- Rehab budget estimation with composite multiplier system
+- Holding and transaction cost estimation
+- Max offer and deal qualification logic
+- Prime Candidate identification
+- Screening dashboard, batch results, and deal detail pages
+- Promotion path from screening result to full analysis
+
+---
+
+### Why this matters
+
+This transforms DataWise from a property data viewer into a **deal-finding engine**. Instead of manually analyzing properties one at a time, the system can screen the entire active inventory and surface the best opportunities. A skilled analyst can review a Prime Candidate and prepare an investment proposal in approximately 5 minutes.
+
+The architecture supports future expansion to:
+
+- Auto-screening on import (new listings screened automatically)
+- Rental and listing strategy profiles
+- Financing calculations
+- Market trend-based time adjustments (replacing fixed rate)
+- Investment proposal generation
+
+---
+
+### Immediate next priorities
+
+- Test and validate screening results against legacy Access output for accuracy
+- Add auto-screening hook to the import pipeline
+- Add financing calculations (optional per deal)
+- Build re-screening capability with updated parameters
+- Begin building the investment proposal output
+
 ## 2026-04-03 - Transition to Claude - See Handoff
 
 ## 2026-04-03 - Comparable table usability improvements

@@ -33,6 +33,7 @@ function getSectionConfig(pathname: string): SectionConfig {
           label: "Manual Entry",
           exact: true,
         },
+        { href: "/analysis/screening", label: "Screening" },
         { href: "/analysis/imports", label: "Imports", exact: true },
         { href: "/analysis/analyses", label: "Analyses", exact: true },
       ],

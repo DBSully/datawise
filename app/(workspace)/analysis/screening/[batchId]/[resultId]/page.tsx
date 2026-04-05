@@ -1,0 +1,481 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { unstable_noStore as noStore } from "next/cache";
+import { createClient } from "@/lib/supabase/server";
+import { promoteToAnalysisAction } from "../../actions";
+
+export const dynamic = "force-dynamic";
+
+type DealDetailPageProps = {
+  params: Promise<{ batchId: string; resultId: string }>;
+};
+
+function formatCurrency(value: number | null | undefined) {
+  if (value === null || value === undefined) return "—";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatNumber(value: number | null | undefined, decimals = 0) {
+  if (value === null || value === undefined) return "—";
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  }).format(value);
+}
+
+function formatPercent(value: number | null | undefined) {
+  if (value === null || value === undefined) return "—";
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function DetailItem({
+  label,
+  value,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div className="dw-detail-item">
+      <div className="dw-detail-label">{label}</div>
+      <div
+        className={`dw-detail-value ${highlight ? "font-semibold text-emerald-700" : ""}`}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function SectionCard({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="dw-card-compact space-y-2">
+      <h3 className="text-sm font-semibold text-slate-700">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+export default async function DealDetailPage({ params }: DealDetailPageProps) {
+  noStore();
+
+  const { batchId, resultId } = await params;
+  const supabase = await createClient();
+
+  const { data: result, error } = await supabase
+    .from("screening_results")
+    .select("*")
+    .eq("id", resultId)
+    .single();
+
+  if (error || !result) notFound();
+
+  const arvDetail = (result.arv_detail_json ?? []) as Array<{
+    listingId: string;
+    address: string;
+    closePrice: number;
+    closeDateIso: string;
+    daysSinceClose: number;
+    distanceMiles: number;
+    compBuildingSqft: number;
+    compAboveGradeSqft: number;
+    psfBuilding: number;
+    psfAboveGrade: number;
+    arvBlended: number;
+    timeAdjustment: number;
+    arvTimeAdjusted: number;
+    confidence: number;
+    decayWeight: number;
+  }>;
+
+  const rehabDetail = result.rehab_detail_json as {
+    typeMultiplier: number;
+    conditionMultiplier: number;
+    priceMultiplier: number;
+    ageMultiplier: number;
+  } | null;
+
+  const isPrime = result.is_prime_candidate;
+  const qualJson = result.qualification_json as {
+    qualifyingCompCount: number;
+    reasons: string[];
+    disqualifiers: string[];
+  } | null;
+
+  return (
+    <section className="dw-section-stack-compact">
+      {/* Header */}
+      <div>
+        <Link
+          href={`/analysis/screening/${batchId}`}
+          className="text-xs text-blue-600 hover:underline"
+        >
+          ← Batch Results
+        </Link>
+        <div className="mt-1 flex items-center gap-3">
+          <h1 className="dw-page-title">{result.subject_address}</h1>
+          {isPrime && (
+            <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-800">
+              ★ Prime Candidate
+            </span>
+          )}
+        </div>
+        <p className="dw-page-copy">
+          {result.subject_city} &middot;{" "}
+          {result.subject_property_type ?? "Unknown Type"} &middot; Built{" "}
+          {result.subject_year_built ?? "—"}
+        </p>
+      </div>
+
+      {/* Deal summary */}
+      <div className="grid gap-3 sm:grid-cols-5">
+        <StatCard label="List Price" value={formatCurrency(result.subject_list_price)} />
+        <StatCard
+          label="ARV"
+          value={formatCurrency(result.arv_aggregate)}
+          highlight
+        />
+        <StatCard label="Spread" value={formatCurrency(result.spread)} />
+        <StatCard
+          label="Gap/sqft"
+          value={
+            result.est_gap_per_sqft !== null
+              ? `$${formatNumber(result.est_gap_per_sqft)}`
+              : "—"
+          }
+        />
+        <StatCard
+          label="Max Offer"
+          value={formatCurrency(result.max_offer)}
+          highlight
+        />
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-2">
+        {/* Subject snapshot */}
+        <SectionCard title="Subject Property">
+          <div className="dw-detail-grid">
+            <DetailItem
+              label="List Price"
+              value={formatCurrency(result.subject_list_price)}
+            />
+            <DetailItem
+              label="Building Sqft"
+              value={formatNumber(result.subject_building_sqft)}
+            />
+            <DetailItem
+              label="Above Grade"
+              value={formatNumber(result.subject_above_grade_sqft)}
+            />
+            <DetailItem
+              label="Below Grade"
+              value={formatNumber(result.subject_below_grade_total_sqft)}
+            />
+            <DetailItem
+              label="Year Built"
+              value={result.subject_year_built?.toString() ?? "—"}
+            />
+            <DetailItem
+              label="Property Type"
+              value={result.subject_property_type ?? "—"}
+            />
+          </div>
+        </SectionCard>
+
+        {/* Deal math summary */}
+        <SectionCard title="Deal Math">
+          <div className="space-y-1 text-sm">
+            <DealLine label="ARV" value={formatCurrency(result.arv_aggregate)} />
+            <DealLine
+              label="− Rehab"
+              value={formatCurrency(result.rehab_total)}
+              negative
+            />
+            <DealLine
+              label="− Holding"
+              value={formatCurrency(result.hold_total)}
+              negative
+            />
+            <DealLine
+              label="− Transaction"
+              value={formatCurrency(result.transaction_total)}
+              negative
+            />
+            <DealLine
+              label="− Target Profit"
+              value={formatCurrency(result.target_profit)}
+              negative
+            />
+            <div className="border-t border-slate-300 pt-1">
+              <DealLine
+                label="= Max Offer"
+                value={formatCurrency(result.max_offer)}
+                bold
+              />
+              <DealLine
+                label="Offer %"
+                value={formatPercent(result.offer_pct)}
+              />
+            </div>
+          </div>
+        </SectionCard>
+      </div>
+
+      {/* Rehab breakdown */}
+      <SectionCard title="Rehab Budget Estimate">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="dw-detail-grid">
+            <DetailItem
+              label="Above Grade Interior"
+              value={formatCurrency(result.rehab_above_grade)}
+            />
+            <DetailItem
+              label="Below Grade Finished"
+              value={formatCurrency(result.rehab_below_finished)}
+            />
+            <DetailItem
+              label="Below Grade Unfinished"
+              value={formatCurrency(result.rehab_below_unfinished)}
+            />
+            <DetailItem
+              label="Exterior"
+              value={formatCurrency(result.rehab_exterior)}
+            />
+            <DetailItem
+              label="Landscaping"
+              value={formatCurrency(result.rehab_landscaping)}
+            />
+            <DetailItem
+              label="Systems"
+              value={formatCurrency(result.rehab_systems)}
+            />
+            <DetailItem
+              label="Total Rehab"
+              value={formatCurrency(result.rehab_total)}
+              highlight
+            />
+          </div>
+          {rehabDetail && (
+            <div className="dw-detail-grid">
+              <DetailItem
+                label="Composite Multiplier"
+                value={formatNumber(result.rehab_composite_multiplier, 3)}
+              />
+              <DetailItem
+                label="Type Multiplier"
+                value={formatNumber(rehabDetail.typeMultiplier, 2)}
+              />
+              <DetailItem
+                label="Condition Multiplier"
+                value={formatNumber(rehabDetail.conditionMultiplier, 2)}
+              />
+              <DetailItem
+                label="Price Multiplier"
+                value={formatNumber(rehabDetail.priceMultiplier, 2)}
+              />
+              <DetailItem
+                label="Age Multiplier"
+                value={formatNumber(rehabDetail.ageMultiplier, 2)}
+              />
+            </div>
+          )}
+        </div>
+      </SectionCard>
+
+      {/* Holding costs */}
+      <SectionCard title="Holding Costs">
+        <div className="dw-detail-grid">
+          <DetailItem
+            label="Days Held"
+            value={result.hold_days?.toString() ?? "—"}
+          />
+          <DetailItem
+            label="Total Hold Cost"
+            value={formatCurrency(result.hold_total)}
+            highlight
+          />
+        </div>
+      </SectionCard>
+
+      {/* ARV Comps */}
+      <SectionCard title={`Comparable Sales (${arvDetail.length} comps)`}>
+        {arvDetail.length === 0 ? (
+          <p className="py-4 text-center text-sm text-slate-400">
+            No comparable sales data.
+          </p>
+        ) : (
+          <div className="dw-table-wrap">
+            <table className="dw-table-compact min-w-[1200px]">
+              <thead>
+                <tr>
+                  <th>MLS#</th>
+                  <th>Address</th>
+                  <th className="text-right">Close Price</th>
+                  <th>Close Date</th>
+                  <th className="text-right">Dist (mi)</th>
+                  <th className="text-right">Days</th>
+                  <th className="text-right">Bldg Sqft</th>
+                  <th className="text-right">PSF Bldg</th>
+                  <th className="text-right">PSF Above</th>
+                  <th className="text-right">ARV Blended</th>
+                  <th className="text-right">Time Adj</th>
+                  <th className="text-right">ARV Adjusted</th>
+                  <th className="text-right">Confidence</th>
+                  <th className="text-right">Weight</th>
+                </tr>
+              </thead>
+              <tbody>
+                {arvDetail.map(
+                  (comp, idx) => (
+                    <tr key={idx}>
+                      <td className="font-mono text-xs">{comp.listingId}</td>
+                      <td>{comp.address}</td>
+                      <td className="text-right">
+                        {formatCurrency(comp.closePrice)}
+                      </td>
+                      <td className="text-xs">
+                        {new Date(comp.closeDateIso).toLocaleDateString()}
+                      </td>
+                      <td className="text-right">
+                        {formatNumber(comp.distanceMiles, 2)}
+                      </td>
+                      <td className="text-right">{comp.daysSinceClose}</td>
+                      <td className="text-right">
+                        {formatNumber(comp.compBuildingSqft)}
+                      </td>
+                      <td className="text-right">
+                        {formatCurrency(comp.psfBuilding)}
+                      </td>
+                      <td className="text-right">
+                        {formatCurrency(comp.psfAboveGrade)}
+                      </td>
+                      <td className="text-right font-medium">
+                        {formatCurrency(comp.arvBlended)}
+                      </td>
+                      <td className="text-right text-slate-500">
+                        {formatCurrency(comp.timeAdjustment)}
+                      </td>
+                      <td className="text-right font-semibold">
+                        {formatCurrency(comp.arvTimeAdjusted)}
+                      </td>
+                      <td className="text-right">{comp.confidence}</td>
+                      <td className="text-right">
+                        {formatNumber(comp.decayWeight, 3)}
+                      </td>
+                    </tr>
+                  ),
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
+
+      {/* Qualification */}
+      <SectionCard title="Qualification">
+        <div className="space-y-1 text-sm">
+          {qualJson?.reasons?.map((r, i) => (
+            <div key={i} className="text-emerald-700">
+              ✓ {r}
+            </div>
+          ))}
+          {qualJson?.disqualifiers?.map((d, i) => (
+            <div key={i} className="text-red-600">
+              ✗ {d}
+            </div>
+          ))}
+          {!qualJson && (
+            <div className="text-slate-400">No qualification data.</div>
+          )}
+        </div>
+      </SectionCard>
+
+      {/* Promote action */}
+      {!result.promoted_analysis_id && (
+        <div className="dw-card-tight">
+          <form action={promoteToAnalysisAction}>
+            <input type="hidden" name="result_id" value={result.id} />
+            <button type="submit" className="dw-button-primary">
+              Promote to Full Analysis →
+            </button>
+          </form>
+        </div>
+      )}
+      {result.promoted_analysis_id && (
+        <div className="dw-card-tight">
+          <p className="text-sm text-slate-500">
+            Promoted to{" "}
+            <Link
+              href={`/analysis/properties/${result.real_property_id}/analyses/${result.promoted_analysis_id}`}
+              className="text-blue-600 hover:underline"
+            >
+              analysis →
+            </Link>
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+      <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500">
+        {label}
+      </div>
+      <div
+        className={`mt-1 text-lg font-semibold ${highlight ? "text-emerald-700" : "text-slate-900"}`}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function DealLine({
+  label,
+  value,
+  negative,
+  bold,
+}: {
+  label: string;
+  value: string;
+  negative?: boolean;
+  bold?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between">
+      <span
+        className={`${negative ? "text-slate-500" : ""} ${bold ? "font-semibold" : ""}`}
+      >
+        {label}
+      </span>
+      <span
+        className={`font-mono ${negative ? "text-red-600" : ""} ${bold ? "font-bold text-emerald-700" : ""}`}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
