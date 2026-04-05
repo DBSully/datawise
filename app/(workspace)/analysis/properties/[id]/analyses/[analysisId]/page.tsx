@@ -161,10 +161,33 @@ export default async function AnalysisPage({ params }: AnalysisPageProps) {
           .in("id", compListingIds.slice(0, 200));
         listingIdMap = new Map((compListings ?? []).map((r: any) => [r.id, r.listing_id]));
       }
-      compCandidates = rawCandidates.map((c: any) => ({
-        ...c,
-        listing_id: c.comp_listing_row_id ? listingIdMap.get(c.comp_listing_row_id) ?? null : null,
-      }));
+
+      // Resolve lat/lng from real_properties for map pins
+      const compPropertyIds = Array.from(
+        new Set(rawCandidates.map((c: any) => c.comp_real_property_id).filter(Boolean)),
+      );
+      let coordsMap = new Map<string, { latitude: number | null; longitude: number | null }>();
+      if (compPropertyIds.length > 0) {
+        const { data: compProps } = await supabase
+          .from("real_properties")
+          .select("id, latitude, longitude")
+          .in("id", compPropertyIds.slice(0, 200));
+        coordsMap = new Map((compProps ?? []).map((r: any) => [r.id, { latitude: r.latitude, longitude: r.longitude }]));
+      }
+
+      compCandidates = rawCandidates.map((c: any) => {
+        const coords = c.comp_real_property_id ? coordsMap.get(c.comp_real_property_id) : null;
+        const metrics = (c.metrics_json ?? {}) as Record<string, unknown>;
+        return {
+          ...c,
+          listing_id: c.comp_listing_row_id ? listingIdMap.get(c.comp_listing_row_id) ?? null : null,
+          metrics_json: {
+            ...metrics,
+            latitude: metrics.latitude ?? coords?.latitude ?? null,
+            longitude: metrics.longitude ?? coords?.longitude ?? null,
+          },
+        };
+      });
     }
   }
 

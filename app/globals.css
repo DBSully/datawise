@@ -260,15 +260,15 @@ body {
   text-align: left;
   font-weight: 600;
   border-bottom: 1px solid var(--dw-border);
-  padding: 5px 7px;
+  padding: 3px 5px;
   white-space: nowrap;
 }
 
 .dw-table-compact tbody td {
   color: #0f172a;
   border-bottom: 1px solid #e2e8f0;
-  padding: 5px 7px;
-  vertical-align: top;
+  padding: 3px 5px;
+  vertical-align: middle;
   white-space: nowrap;
 }
 
@@ -278,4 +278,16 @@ body {
 
 .dw-table-compact tbody tr:last-child td {
   border-bottom: none;
+}
+
+/* Leaflet distance circle labels */
+.leaflet-distance-label {
+  background: rgba(255, 255, 255, 0.85) !important;
+  border: 1px solid #c7d2fe !important;
+  border-radius: 4px !important;
+  padding: 1px 5px !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  color: #6366f1 !important;
+  box-shadow: none !important;
 }

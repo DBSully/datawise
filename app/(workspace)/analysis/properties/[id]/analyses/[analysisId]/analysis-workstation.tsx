@@ -1,13 +1,21 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, useMemo, useCallback, type ReactNode } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import type { MapPin } from "@/components/properties/comp-map";
+
+const CompMap = dynamic(
+  () => import("@/components/properties/comp-map").then((m) => m.CompMap),
+  { ssr: false, loading: () => <div className="flex h-[300px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-400">Loading map...</div> },
+);
 import {
   saveManualAnalysisAction,
   addAnalysisNoteAction,
   deleteAnalysisNoteAction,
   savePipelineAction,
+  toggleComparableCandidateSelectionAction,
 } from "@/app/(workspace)/analysis/properties/actions";
 import { initialManualAnalysisFormState } from "@/lib/analysis/manual-analysis-state";
 import { ComparableWorkspacePanel } from "@/components/properties/comparable-workspace-panel";
@@ -145,6 +153,75 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
 
   // Load default profile rules for comp panel (empty object as fallback)
   const profileRules = d.compModalData.latestRun?.parameters_json ?? {};
+
+  // Toggle comp selection from map click
+  const handleMapPinToggle = useCallback(
+    async (pinId: string, currentType: "selected" | "candidate") => {
+      const fd = new FormData();
+      fd.set("candidate_id", pinId);
+      fd.set("property_id", d.propertyId);
+      fd.set("analysis_id", d.analysisId);
+      fd.set("next_selected", currentType === "candidate" ? "true" : "false");
+      await toggleComparableCandidateSelectionAction(fd);
+      router.refresh();
+    },
+    [d.propertyId, d.analysisId, router],
+  );
+
+  // Build selected comps list for the table
+  const selectedComps = useMemo(() => {
+    return d.compModalData.compCandidates
+      .filter((c) => Boolean(c.selected_yn))
+      .map((c) => {
+        const m = (c.metrics_json ?? {}) as Record<string, unknown>;
+        return {
+          id: String(c.id),
+          address: String(m.address ?? "—"),
+          closePrice: m.close_price as number | null,
+          ppsf: m.ppsf as number | null,
+          sqft: m.building_area_total_sqft as number | null,
+          distance: c.distance_miles as number | null,
+          closeDate: m.close_date ? String(m.close_date).slice(0, 10) : null,
+        };
+      });
+  }, [d]);
+
+  // Build map pins from comp candidates
+  const mapPins = useMemo<MapPin[]>(() => {
+    const pins: MapPin[] = [];
+
+    // Subject pin
+    if (d.property.latitude && d.property.longitude) {
+      pins.push({
+        id: "subject",
+        lat: d.property.latitude,
+        lng: d.property.longitude,
+        label: d.property.address,
+        detail: d.listing ? `List: ${fmt(d.listing.listPrice)}` : undefined,
+        type: "subject",
+      });
+    }
+
+    // Comp pins from candidates (lat/lng stored in metrics_json)
+    for (const c of d.compModalData.compCandidates) {
+      const m = (c.metrics_json ?? {}) as Record<string, unknown>;
+      const lat = Number(m.latitude);
+      const lng = Number(m.longitude);
+      if (!lat || !lng || !Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+      const isSelected = Boolean(c.selected_yn);
+      pins.push({
+        id: String(c.id),
+        lat,
+        lng,
+        label: String(m.address ?? "—"),
+        detail: `${fmt(m.close_price as number)} · ${fmtNum(m.building_area_total_sqft as number)} sqft · ${fmtNum(c.distance_miles as number, 2)}mi`,
+        type: isSelected ? "selected" : "candidate",
+      });
+    }
+
+    return pins;
+  }, [d]);
 
   return (
     <section className="dw-section-stack-compact">
@@ -326,7 +403,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
         </form>
       </SectionCard>
 
-      {/* ── Comp Summary ── */}
+      {/* ── Comparable Sales ── */}
       <SectionCard
         title={`Comparable Sales (${d.compSummary.selectedCount} selected of ${d.compSummary.totalComps})`}
         action={
@@ -339,18 +416,70 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
           </button>
         }
       >
-        {d.compSummary.selectedCount > 0 ? (
-          <div className="grid gap-2 sm:grid-cols-4">
-            <StatChip label="Avg Close Price" value={fmt(d.compSummary.avgSelectedPrice)} />
-            <StatChip label="Avg PSF" value={d.compSummary.avgSelectedPsf ? `$${fmtNum(d.compSummary.avgSelectedPsf)}` : "—"} />
-            <StatChip label="Avg Distance" value={d.compSummary.avgSelectedDist ? `${fmtNum(d.compSummary.avgSelectedDist, 2)} mi` : "—"} />
-            <StatChip label="Selected ARV" value={fmt(d.arv.selected)} highlight />
+        <div className="grid gap-2 sm:grid-cols-4 mb-3">
+          <StatChip label="Avg Close Price" value={fmt(d.compSummary.avgSelectedPrice)} />
+          <StatChip label="Avg PSF" value={d.compSummary.avgSelectedPsf ? `$${fmtNum(d.compSummary.avgSelectedPsf)}` : "—"} />
+          <StatChip label="Avg Distance" value={d.compSummary.avgSelectedDist ? `${fmtNum(d.compSummary.avgSelectedDist, 2)} mi` : "—"} />
+          <StatChip label="Selected ARV" value={fmt(d.arv.selected)} highlight />
+        </div>
+
+        <div className="grid gap-3 xl:grid-cols-[400px_1fr]">
+          {/* Map — square (hidden when comp modal is open to avoid z-index overlap) */}
+          <div>
+            {showCompModal ? (
+              <div className="flex h-[400px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-400">
+                Map open in comp editor
+              </div>
+            ) : mapPins.length > 1 ? (
+              <CompMap
+                pins={mapPins}
+                height={400}
+                subjectLat={d.property.latitude}
+                subjectLng={d.property.longitude}
+              />
+            ) : (
+              <div className="flex h-[400px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-400">
+                No location data available
+              </div>
+            )}
           </div>
-        ) : (
-          <p className="py-4 text-center text-sm text-slate-400">
-            No comps selected yet. Click &quot;Edit Comps&quot; to review and select comparable sales.
-          </p>
-        )}
+
+          {/* Selected comps table */}
+          <div>
+            {selectedComps.length > 0 ? (
+              <div className="overflow-auto rounded-lg border border-slate-200">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50 text-left text-[10px] uppercase tracking-[0.12em] text-slate-500">
+                      <th className="px-2 py-1.5">Address</th>
+                      <th className="px-2 py-1.5 text-right">Close Price</th>
+                      <th className="px-2 py-1.5 text-right">PSF</th>
+                      <th className="px-2 py-1.5 text-right">Sqft</th>
+                      <th className="px-2 py-1.5 text-right">Dist</th>
+                      <th className="px-2 py-1.5 text-right">Close Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedComps.map((c) => (
+                      <tr key={c.id} className="border-b border-slate-100 hover:bg-slate-50">
+                        <td className="px-2 py-1.5 font-medium text-slate-700">{c.address}</td>
+                        <td className="px-2 py-1.5 text-right font-mono text-slate-700">{fmt(c.closePrice)}</td>
+                        <td className="px-2 py-1.5 text-right font-mono text-slate-600">${fmtNum(c.ppsf)}</td>
+                        <td className="px-2 py-1.5 text-right text-slate-600">{fmtNum(c.sqft)}</td>
+                        <td className="px-2 py-1.5 text-right text-slate-600">{fmtNum(c.distance, 2)} mi</td>
+                        <td className="px-2 py-1.5 text-right text-slate-500">{c.closeDate ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="flex h-full items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-400">
+                No comps selected yet. Click &quot;Edit Comps&quot; to review and select comparable sales.
+              </div>
+            )}
+          </div>
+        </div>
       </SectionCard>
 
       {/* ── Notes ── */}
@@ -487,6 +616,23 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
               </button>
             </div>
             <div className="flex-1 overflow-auto p-4">
+              {mapPins.length > 1 && (
+                <div className="mb-4 mx-auto" style={{ maxWidth: 500 }}>
+                  <CompMap
+                    pins={mapPins}
+                    height={500}
+                    subjectLat={d.property.latitude}
+                    subjectLng={d.property.longitude}
+                    onPinClick={handleMapPinToggle}
+                  />
+                  <p className="mt-1 text-center text-[10px] text-slate-400">
+                    Click a pin to select/deselect &middot;
+                    <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 mx-1 align-middle" /> Selected
+                    <span className="inline-block h-2 w-2 rounded-full bg-slate-400 mx-1 align-middle" /> Candidate
+                    <span className="inline-block h-2 w-2 rounded-full bg-red-600 mx-1 align-middle" /> Subject
+                  </p>
+                </div>
+              )}
               <ComparableWorkspacePanel
                 propertyId={d.propertyId}
                 analysisId={d.analysisId}

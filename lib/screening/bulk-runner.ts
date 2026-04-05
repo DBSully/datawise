@@ -459,6 +459,8 @@ function scoreCompsForSubject(
           city: compProperty.city,
           state: compProperty.state,
           postal_code: compProperty.postal_code,
+          latitude: compProperty.latitude,
+          longitude: compProperty.longitude,
           close_date: listing.close_date,
           close_price: listing.close_price,
           ppsf,

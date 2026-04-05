@@ -1419,6 +1419,8 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
             city: property.city,
             state: property.state,
             postal_code: property.postal_code,
+            latitude: property.latitude,
+            longitude: property.longitude,
             property_condition_source: candidateCondition,
             distance_miles: roundNumber(distanceMiles),
             days_since_close: toIntegerOrNull(daysSinceClose),

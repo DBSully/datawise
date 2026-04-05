@@ -1,3 +1,45 @@
+## 2026-04-05 — Comp Map, Interactive Selection, and Queue Improvements
+
+### Summary
+
+Added a Leaflet-based comparable map to the analysis workstation with distance circles, interactive pin-based comp selection in the modal, and a selected comps table visible on the main workspace. Also improved the analysis queue table with MLS status/contract date columns and tighter layout.
+
+---
+
+### Comp Map Component
+
+- New `components/properties/comp-map.tsx` — Leaflet map with three pin tiers: red (subject), green (selected), gray/dark-ringed (candidate)
+- 0.5mi and 1mi dashed distance circles anchored to the ring edges with inline labels
+- Dynamic `next/dynamic` import with SSR disabled (Leaflet requires browser APIs)
+- Added `leaflet`, `react-leaflet`, and `@types/leaflet` dependencies
+
+### Analysis Workstation — Map and Selected Comps Table
+
+- Comp summary section redesigned as two-column layout: 400px square map (left) + selected comps table (right)
+- Selected comps table shows address, close price, PSF, sqft, distance, and close date — visible on the main page so analysts can walk clients through selections without opening the modal
+- Background map replaced with placeholder when comp modal is open to prevent Leaflet z-index overlap
+- Comp candidates' lat/lng resolved from `real_properties` at page load (not dependent on metrics_json) so existing comps display without re-running searches
+
+### Interactive Comp Selection in Modal
+
+- Modal map is square (500px, centered) with `onPinClick` callback
+- Clicking a candidate pin (gray) selects it; clicking a selected pin (green) deselects it
+- Calls `toggleComparableCandidateSelectionAction` server action and refreshes the page
+- Pin legend displayed below the modal map
+
+### Analysis Queue Table Improvements
+
+- New migration `20260405120000_queue_view_add_listing_fields.sql` — updated `analysis_queue_v` view to join `mls_listings`, adding `mls_status` and `listing_contract_date` columns
+- Added **MLS Status** and **Contract** columns between Type and List Price
+- Renamed "Status" filter to **"Prime"** — "Status" reserved for MLS status
+- Tightened table padding (3px 5px) and changed cell vertical-align to middle
+
+### Data Pipeline Fixes
+
+- Added `latitude`/`longitude` to comp `metrics_json` in both `lib/comparables/engine.ts` and `lib/screening/bulk-runner.ts` for future comp searches
+
+---
+
 ## 2026-04-05 — Screening → Analysis Continuity and Single-Page Analysis Workstation
 
 ### Summary

@@ -187,7 +187,7 @@ export default async function AnalysisQueuePage({
         </div>
 
         <div>
-          <label className="dw-label" htmlFor="prime">Status</label>
+          <label className="dw-label" htmlFor="prime">Prime</label>
           <select id="prime" name="prime" className="dw-select" defaultValue={primeFilter}>
             <option value="all">All</option>
             <option value="true">Prime Only</option>
@@ -223,13 +223,15 @@ export default async function AnalysisQueuePage({
 
       {/* Results table */}
       <div className="dw-table-wrap">
-        <table className="dw-table-compact min-w-[1400px]">
+        <table className="dw-table-compact min-w-[1500px]">
           <thead>
             <tr>
-              <th style={{ width: 28 }}></th>
+              <th style={{ width: 20 }}></th>
               <th>Address</th>
               <th>City</th>
               <th>Type</th>
+              <th>MLS Status</th>
+              <th>Contract</th>
               <th className="text-right">List Price</th>
               <th className="text-right">ARV</th>
               <th className="text-right">Spread</th>
@@ -239,14 +241,14 @@ export default async function AnalysisQueuePage({
               <th className="text-right">Hold</th>
               <th className="text-right">Max Offer</th>
               <th className="text-right">Offer%</th>
-              <th>Status</th>
+              <th></th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {(!results || results.length === 0) ? (
               <tr>
-                <td colSpan={15} className="py-8 text-center text-sm text-slate-400">
+                <td colSpan={17} className="py-8 text-center text-sm text-slate-400">
                   No screened properties found. Run a screening batch first.
                 </td>
               </tr>
@@ -261,6 +263,8 @@ export default async function AnalysisQueuePage({
                   subject_city: string;
                   subject_property_type: string | null;
                   subject_list_price: number | null;
+                  mls_status: string | null;
+                  listing_contract_date: string | null;
                   arv_aggregate: number | null;
                   spread: number | null;
                   est_gap_per_sqft: number | null;
@@ -289,7 +293,9 @@ export default async function AnalysisQueuePage({
                       </Link>
                     </td>
                     <td className="text-slate-500">{r.subject_city}</td>
-                    <td className="text-xs text-slate-500">{r.subject_property_type ?? "—"}</td>
+                    <td className="text-slate-500">{r.subject_property_type ?? "—"}</td>
+                    <td className="text-slate-600">{r.mls_status ?? "—"}</td>
+                    <td className="text-slate-500">{r.listing_contract_date ? r.listing_contract_date.slice(0, 10) : "—"}</td>
                     <td className="text-right">{formatCurrency(r.subject_list_price)}</td>
                     <td className="text-right font-medium">{formatCurrency(r.arv_aggregate)}</td>
                     <td className={`text-right font-medium ${(r.spread ?? 0) > 0 ? "text-emerald-700" : (r.spread ?? 0) < 0 ? "text-red-600" : ""}`}>
