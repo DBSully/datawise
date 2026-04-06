@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { ImportUploadPanel } from "@/components/imports/import-upload-panel";
 import { createClient } from "@/lib/supabase/server";
+import { runImportScreeningAction } from "@/app/(workspace)/analysis/screening/actions";
 import { processImportBatchAction } from "./actions";
 
 const ROLLING_LIMIT_30_DAY = 75_000;
@@ -95,6 +97,25 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
   if (error) throw new Error(error.message);
   if (recentBatchesError) throw new Error(recentBatchesError.message);
 
+  // Load screening batches linked to imports for the Screening column
+  const { data: screeningBatches } = await supabase
+    .from("screening_batches")
+    .select("id, source_import_batch_id, status, prime_candidate_count, screened_count")
+    .not("source_import_batch_id", "is", null);
+
+  const screeningByImport = new Map<
+    string,
+    { id: string; status: string; primeCount: number; screenedCount: number }
+  >();
+  for (const sb of screeningBatches ?? []) {
+    screeningByImport.set(sb.source_import_batch_id, {
+      id: sb.id,
+      status: sb.status,
+      primeCount: sb.prime_candidate_count ?? 0,
+      screenedCount: sb.screened_count ?? 0,
+    });
+  }
+
   const batches = importBatches ?? [];
   const progressRows = recentBatches ?? [];
 
@@ -168,12 +189,26 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
       </div>
 
       {resolvedSearchParams?.processed === "1" ? (
-        <div className="dw-card-tight border-emerald-200 bg-emerald-50 text-sm text-emerald-800">
-          Batch processed successfully.
+        <div className="dw-card-tight border-emerald-200 bg-emerald-50 text-sm text-emerald-800 flex items-center justify-between">
+          <span>
+            Batch processed successfully.
+            {resolvedSearchParams?.batch ? (
+              <span className="ml-2 font-mono text-emerald-900">
+                {resolvedSearchParams.batch}
+              </span>
+            ) : null}
+          </span>
           {resolvedSearchParams?.batch ? (
-            <span className="ml-2 font-mono text-emerald-900">
-              {resolvedSearchParams.batch}
-            </span>
+            <form action={runImportScreeningAction}>
+              <input
+                type="hidden"
+                name="import_batch_id"
+                value={resolvedSearchParams.batch}
+              />
+              <button type="submit" className="dw-button-primary">
+                Screen Imported Listings
+              </button>
+            </form>
           ) : null}
         </div>
       ) : null}
@@ -350,6 +385,7 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
                 <th>Remaining</th>
                 <th>Errors</th>
                 <th>Notes</th>
+                <th>Screening</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -394,6 +430,43 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
                       </td>
                       <td>{batch.import_notes ?? "—"}</td>
                       <td>
+                        {(() => {
+                          const linked = screeningByImport.get(batch.id);
+                          if (linked) {
+                            return (
+                              <Link
+                                href={`/analysis/screening/${linked.id}`}
+                                className="text-xs text-blue-600 hover:underline"
+                              >
+                                {linked.status === "complete"
+                                  ? `${linked.screenedCount} screened · ${linked.primeCount} prime`
+                                  : linked.status}
+                              </Link>
+                            );
+                          }
+                          if (batch.status === "complete") {
+                            return (
+                              <form action={runImportScreeningAction}>
+                                <input
+                                  type="hidden"
+                                  name="import_batch_id"
+                                  value={batch.id}
+                                />
+                                <button
+                                  type="submit"
+                                  className="text-xs font-medium text-blue-700 hover:underline"
+                                >
+                                  Screen
+                                </button>
+                              </form>
+                            );
+                          }
+                          return (
+                            <span className="text-[11px] text-slate-400">—</span>
+                          );
+                        })()}
+                      </td>
+                      <td>
                         {canResume ? (
                           <form action={processImportBatchAction}>
                             <input
@@ -416,7 +489,7 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
                 })
               ) : (
                 <tr>
-                  <td colSpan={11} className="text-slate-500">
+                  <td colSpan={12} className="text-slate-500">
                     No batches yet.
                   </td>
                 </tr>

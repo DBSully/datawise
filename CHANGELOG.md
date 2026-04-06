@@ -1,3 +1,54 @@
+## 2026-04-06 — Screen Unscreened, Import-Linked Screening, Dashboard & Lifecycle
+
+### Summary
+
+Three-phase feature set that tightens the import → screen → act workflow. Users can now screen only new/unscreened properties instead of re-screening all ~6,500 listings, link screening batches directly to imports for 1-click post-import screening, and track the full opportunity lifecycle from a new Dashboard page.
+
+### Phase 1: Screen Unscreened + Dataset Metrics
+
+- **Dataset Overview** section added to the Screening page showing property counts by MLS status (Active, Coming Soon, Pending, Closed, etc.) plus an "Unscreened" count.
+- **"Screen Unscreened (N)"** primary action button screens only Active/Coming Soon properties with no existing screening results. Existing "Screen All" buttons demoted to secondary.
+- New `mls_status_counts_v` database view for status breakdown.
+- New `count_unscreened_properties()` and `get_unscreened_property_ids()` Postgres RPC functions using `NOT EXISTS` anti-join against `screening_results` — avoids the Supabase `.in()` limit on large ID sets.
+- `runScreeningAction` now accepts a `filter_mode` hidden field (`"all"` or `"unscreened"`).
+
+### Phase 2: Import-Linked Screening
+
+- **"Screen Imported Listings"** button on the imports page success banner after processing a batch.
+- **"Screening" column** added to the imports Recent Batches table — shows a "Screen" button for unscreened imports, or a link to screening results with screened/prime counts for already-screened imports.
+- New `runImportScreeningAction` server action that screens only properties from a specific import batch, sets `source_import_batch_id` and `trigger_type: "import"` on the screening batch.
+- **Import context banner** on screening batch results page when the batch was triggered from an import.
+- **"Import" badge** in the Trigger column of the screening batches table with link back to imports.
+- New `get_import_batch_property_ids()` Postgres RPC function.
+
+### Phase 3: Dashboard & Lifecycle Tracking
+
+- **New `/analysis/dashboard` page** with four sections:
+  - **Top-level stats:** Active, Coming Soon, Unscreened, Total Screened, Prime Candidates.
+  - **Deal Pipeline funnel:** Analysis → Showing → Offer → Under Contract → Closed → Project → Completed.
+  - **Daily Scorecard (7 days):** Per-day counts of imports, listings, screened, prime, promoted. Today's row highlighted.
+  - **Recent Import Outcomes:** For each import — listings imported, screened count, prime found, promoted count, link to results.
+- **Dashboard tab** added as first tab in Analysis navigation.
+- **Lifecycle stage tracking:** `lifecycle_stage` and `disposition` columns added to `analysis_pipeline`. Promotion now initializes pipeline with `lifecycle_stage: "analysis"`, `disposition: "active"`.
+- New `dashboard_pipeline_summary_v` view, `import_outcomes_v` view, and `get_daily_scorecard()` RPC function.
+
+### Database migrations
+
+- `20260406100000_unscreened_and_status_metrics.sql`
+- `20260406120000_import_screening_linkage.sql`
+- `20260406140000_dashboard_lifecycle.sql`
+
+### Files changed
+
+- `app/(workspace)/analysis/screening/actions.ts` — filter_mode support, import screening action, lifecycle on promotion
+- `app/(workspace)/analysis/screening/page.tsx` — dataset overview, unscreened button, import badge in batch table
+- `app/(workspace)/analysis/screening/[batchId]/page.tsx` — import context banner
+- `app/(workspace)/analysis/imports/page.tsx` — screen button on success banner, screening column in batches table
+- `app/(workspace)/analysis/dashboard/page.tsx` — new dashboard page
+- `components/layout/app-chrome.tsx` — Dashboard tab in nav
+
+---
+
 ## 2026-04-06 — Analysis Workstation Layout Redesign + MLS Copy Buttons
 
 ### Summary

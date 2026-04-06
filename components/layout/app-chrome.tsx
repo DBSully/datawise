@@ -27,6 +27,7 @@ function getSectionConfig(pathname: string): SectionConfig {
       subtitle:
         "Internal intake, underwriting, and report-generation workspace.",
       tabs: [
+        { href: "/analysis/dashboard", label: "Dashboard", exact: true },
         { href: "/analysis/properties", label: "Properties", exact: true },
         {
           href: "/analysis/properties/new",
@@ -65,6 +66,7 @@ function getSectionConfig(pathname: string): SectionConfig {
 }
 
 function getPageLabel(pathname: string): string {
+  if (pathname === "/analysis/dashboard") return "Dashboard";
   if (pathname === "/analysis/properties") return "Properties";
   if (pathname === "/analysis/properties/new") return "Manual Entry";
   if (pathname.startsWith("/analysis/properties/")) return "Property Detail";

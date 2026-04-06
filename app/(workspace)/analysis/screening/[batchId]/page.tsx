@@ -178,6 +178,20 @@ export default async function BatchResultsPage({
         </div>
       </div>
 
+      {/* Import context */}
+      {batch.source_import_batch_id && (
+        <div className="dw-card-tight border-blue-200 bg-blue-50 text-sm text-blue-800">
+          Screened from{" "}
+          <Link
+            href="/analysis/imports"
+            className="font-medium text-blue-700 hover:underline"
+          >
+            import batch
+          </Link>
+          {" · "}{formatNumber(batch.total_subjects)} listings from import
+        </div>
+      )}
+
       {/* Filters */}
       <div className="dw-card-tight flex flex-wrap items-center gap-3">
         <Link

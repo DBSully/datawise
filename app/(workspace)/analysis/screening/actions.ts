@@ -31,6 +31,7 @@ export async function runScreeningAction(formData: FormData): Promise<void> {
 
   const name = textValue(formData, "name") || "Screening Batch";
   const statusFilter = textValue(formData, "status_filter") || "Active";
+  const filterMode = textValue(formData, "filter_mode") || "all";
 
   // Parse status filter into array
   const statuses = statusFilter
@@ -38,36 +39,54 @@ export async function runScreeningAction(formData: FormData): Promise<void> {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  // Find subject properties: those with active/coming-soon listings
-  // Paginate to avoid the default PostgREST 1,000-row cap
-  const PAGE_SIZE = 1000;
-  const propertyIdSet = new Set<string>();
-  let offset = 0;
-  let hasMore = true;
+  let propertyIds: string[];
 
-  while (hasMore) {
-    const { data: page, error: pageError } = await supabase
-      .from("mls_listings")
-      .select("real_property_id")
-      .in("mls_status", statuses)
-      .range(offset, offset + PAGE_SIZE - 1);
+  if (filterMode === "unscreened") {
+    // Use RPC to get only properties with no existing screening results
+    const { data: unscreenedRows, error: rpcError } = await supabase.rpc(
+      "get_unscreened_property_ids",
+      { statuses },
+    );
 
-    if (pageError) {
-      throw new Error(pageError.message);
+    if (rpcError) {
+      throw new Error(rpcError.message);
     }
 
-    for (const row of page ?? []) {
-      propertyIdSet.add(row.real_property_id);
+    propertyIds = (unscreenedRows ?? []).map(
+      (r: { real_property_id: string }) => r.real_property_id,
+    );
+  } else {
+    // Find subject properties: those with active/coming-soon listings
+    // Paginate to avoid the default PostgREST 1,000-row cap
+    const PAGE_SIZE = 1000;
+    const propertyIdSet = new Set<string>();
+    let offset = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data: page, error: pageError } = await supabase
+        .from("mls_listings")
+        .select("real_property_id")
+        .in("mls_status", statuses)
+        .range(offset, offset + PAGE_SIZE - 1);
+
+      if (pageError) {
+        throw new Error(pageError.message);
+      }
+
+      for (const row of page ?? []) {
+        propertyIdSet.add(row.real_property_id);
+      }
+
+      if (!page || page.length < PAGE_SIZE) {
+        hasMore = false;
+      } else {
+        offset += PAGE_SIZE;
+      }
     }
 
-    if (!page || page.length < PAGE_SIZE) {
-      hasMore = false;
-    } else {
-      offset += PAGE_SIZE;
-    }
+    propertyIds = Array.from(propertyIdSet);
   }
-
-  const propertyIds = Array.from(propertyIdSet);
 
   if (propertyIds.length === 0) {
     // Nothing to screen — redirect back with a message
@@ -85,7 +104,81 @@ export async function runScreeningAction(formData: FormData): Promise<void> {
       trigger_type: "manual",
       strategy_profile_slug: profile.slug,
       status: "pending",
-      subject_filter_json: { statuses },
+      subject_filter_json: { statuses, filterMode },
+      total_subjects: propertyIds.length,
+      created_by_user_id: user.id,
+    })
+    .select("id")
+    .single();
+
+  if (batchError || !batch) {
+    throw new Error(batchError?.message ?? "Failed to create screening batch");
+  }
+
+  // Run the pipeline
+  await runScreeningBatch({
+    supabase,
+    batchId: batch.id,
+    subjectPropertyIds: propertyIds,
+    profile,
+  });
+
+  revalidatePath("/analysis/screening");
+  redirect(`/analysis/screening/${batch.id}`);
+}
+
+// ---------------------------------------------------------------------------
+// Run screening for a specific import batch
+// ---------------------------------------------------------------------------
+
+export async function runImportScreeningAction(
+  formData: FormData,
+): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/auth/sign-in");
+  }
+
+  const importBatchId = textValue(formData, "import_batch_id");
+  if (!importBatchId) {
+    throw new Error("Missing import_batch_id");
+  }
+
+  // Get property IDs from this import batch
+  const { data: importRows, error: rpcError } = await supabase.rpc(
+    "get_import_batch_property_ids",
+    { p_import_batch_id: importBatchId },
+  );
+
+  if (rpcError) {
+    throw new Error(rpcError.message);
+  }
+
+  const propertyIds = (importRows ?? []).map(
+    (r: { real_property_id: string }) => r.real_property_id,
+  );
+
+  if (propertyIds.length === 0) {
+    revalidatePath("/analysis/screening");
+    redirect("/analysis/screening");
+  }
+
+  const profile = DENVER_FLIP_V1;
+
+  // Create batch record linked to the import
+  const { data: batch, error: batchError } = await supabase
+    .from("screening_batches")
+    .insert({
+      name: `Import Screen — ${new Date().toLocaleDateString()}`,
+      trigger_type: "import",
+      source_import_batch_id: importBatchId,
+      strategy_profile_slug: profile.slug,
+      status: "pending",
+      subject_filter_json: { importBatchId },
       total_subjects: propertyIds.length,
       created_by_user_id: user.id,
     })
@@ -298,7 +391,16 @@ export async function promoteToAnalysisAction(formData: FormData): Promise<void>
     .update({ promoted_analysis_id: analysis.id })
     .eq("id", resultId);
 
+  // Initialize pipeline lifecycle tracking
+  await supabase.from("analysis_pipeline").upsert({
+    analysis_id: analysis.id,
+    lifecycle_stage: "analysis",
+    disposition: "active",
+    interest_level: "new",
+  });
+
   revalidatePath("/analysis/screening");
+  revalidatePath("/analysis/dashboard");
   redirect(
     `/analysis/properties/${result.real_property_id}/analyses/${analysis.id}`,
   );

@@ -40,7 +40,7 @@ export default async function ScreeningDashboardPage() {
   const { data: batches, error: batchesError } = await supabase
     .from("screening_batches")
     .select(
-      "id, name, status, trigger_type, strategy_profile_slug, total_subjects, screened_count, prime_candidate_count, created_at, completed_at",
+      "id, name, status, trigger_type, source_import_batch_id, strategy_profile_slug, total_subjects, screened_count, prime_candidate_count, created_at, completed_at",
     )
     .order("created_at", { ascending: false })
     .limit(25);
@@ -57,6 +57,33 @@ export default async function ScreeningDashboardPage() {
     statsRows?.filter((r: { is_prime_candidate: boolean }) => r.is_prime_candidate)
       .length ?? 0;
 
+  // Dataset metrics: property counts by MLS status
+  const { data: statusCounts } = await supabase
+    .from("mls_status_counts_v")
+    .select("mls_status, property_count");
+
+  // Unscreened count
+  const { data: unscreenedCount } = await supabase.rpc(
+    "count_unscreened_properties",
+    { statuses: ["Active", "Coming Soon"] },
+  );
+
+  const unscreenedTotal: number =
+    typeof unscreenedCount === "number" ? unscreenedCount : 0;
+
+  // Order statuses for display
+  const statusOrder = ["Active", "Coming Soon", "Pending", "Closed"];
+  const sortedStatusCounts = (statusCounts ?? []).sort(
+    (
+      a: { mls_status: string; property_count: number },
+      b: { mls_status: string; property_count: number },
+    ) => {
+      const ai = statusOrder.indexOf(a.mls_status);
+      const bi = statusOrder.indexOf(b.mls_status);
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    },
+  );
+
   return (
     <section className="dw-section-stack-compact">
       <div className="flex items-start justify-between gap-4">
@@ -69,13 +96,55 @@ export default async function ScreeningDashboardPage() {
         </div>
       </div>
 
+      {/* Dataset overview */}
+      <div className="dw-card-tight">
+        <h2 className="mb-2 text-sm font-semibold text-slate-800">
+          Dataset Overview
+        </h2>
+        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          {sortedStatusCounts.map(
+            (sc: { mls_status: string; property_count: number }) => (
+              <div key={sc.mls_status} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500">
+                  {sc.mls_status}
+                </div>
+                <div className="mt-1 text-lg font-semibold text-slate-900">
+                  {formatNumber(sc.property_count)}
+                </div>
+              </div>
+            ),
+          )}
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-[0.14em] text-amber-700">
+              Unscreened
+            </div>
+            <div className="mt-1 text-lg font-semibold text-amber-900">
+              {formatNumber(unscreenedTotal)}
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Quick actions */}
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-4">
+        <form action={runScreeningAction}>
+          <input type="hidden" name="name" value="Unscreened Listings Screen" />
+          <input type="hidden" name="status_filter" value="Active,Coming Soon" />
+          <input type="hidden" name="filter_mode" value="unscreened" />
+          <button
+            type="submit"
+            className="dw-button-primary w-full"
+            disabled={unscreenedTotal === 0}
+          >
+            Screen Unscreened ({formatNumber(unscreenedTotal)})
+          </button>
+        </form>
+
         <form action={runScreeningAction}>
           <input type="hidden" name="name" value="Active Listings Screen" />
           <input type="hidden" name="status_filter" value="Active" />
-          <button type="submit" className="dw-button-primary w-full">
-            Screen Active Listings
+          <button type="submit" className="dw-button-secondary w-full">
+            Screen All Active
           </button>
         </form>
 
@@ -86,8 +155,8 @@ export default async function ScreeningDashboardPage() {
             value="Coming Soon Screen"
           />
           <input type="hidden" name="status_filter" value="Coming Soon" />
-          <button type="submit" className="dw-button-primary w-full">
-            Screen Coming Soon
+          <button type="submit" className="dw-button-secondary w-full">
+            Screen All Coming Soon
           </button>
         </form>
 
@@ -103,7 +172,7 @@ export default async function ScreeningDashboardPage() {
             value="Active,Coming Soon"
           />
           <button type="submit" className="dw-button-secondary w-full">
-            Screen Both
+            Screen All Both
           </button>
         </form>
       </div>
@@ -149,6 +218,7 @@ export default async function ScreeningDashboardPage() {
                     name: string;
                     status: string;
                     trigger_type: string;
+                    source_import_batch_id: string | null;
                     total_subjects: number;
                     screened_count: number;
                     prime_candidate_count: number;
@@ -167,7 +237,19 @@ export default async function ScreeningDashboardPage() {
                       <td>
                         <StatusBadge status={batch.status} />
                       </td>
-                      <td className="text-slate-500">{batch.trigger_type}</td>
+                      <td className="text-slate-500">
+                        {batch.trigger_type === "import" &&
+                        batch.source_import_batch_id ? (
+                          <Link
+                            href="/analysis/imports"
+                            className="text-blue-600 hover:underline"
+                          >
+                            Import
+                          </Link>
+                        ) : (
+                          batch.trigger_type
+                        )}
+                      </td>
                       <td className="text-right">
                         {formatNumber(batch.total_subjects)}
                       </td>
