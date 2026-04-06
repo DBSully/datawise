@@ -93,11 +93,49 @@ type ArvPerCompDetail = {
   decayWeight: number;
 };
 
+type TrendTierSegment = { rate: number | null; compCount: number };
+
+type TrendTierStats = {
+  compCount: number;
+  radiusMiles: number;
+  salePriceLow: number | null;
+  salePriceHigh: number | null;
+  psfBuildingLow: number | null;
+  psfBuildingHigh: number | null;
+  psfAboveGradeLow: number | null;
+  psfAboveGradeHigh: number | null;
+  lowEnd: TrendTierSegment;
+  highEnd: TrendTierSegment;
+};
+
+type TrendDirection = "strong_appreciation" | "appreciating" | "flat" | "softening" | "declining" | "sharp_decline";
+
+type TrendData = {
+  blendedAnnualRate: number;
+  rawLocalRate: number | null;
+  rawMetroRate: number | null;
+  localCompCount: number;
+  metroCompCount: number;
+  localRadius: number;
+  metroRadius: number;
+  direction: TrendDirection;
+  isFallback: boolean;
+  confidence: "high" | "low" | "fallback";
+  lowEndRate: number | null;
+  highEndRate: number | null;
+  summary: string | null;
+  detailJson: {
+    localStats?: TrendTierStats;
+    metroStats?: TrendTierStats;
+  } | null;
+};
+
 type WorkstationData = {
   propertyId: string;
   analysisId: string;
   analysis: { scenarioName: string | null; strategyType: string | null; status: string | null };
   property: { address: string; city: string; county: string | null; state: string; postalCode: string | null; latitude: number | null; longitude: number | null };
+  trend: TrendData | null;
   physical: {
     propertyType: string | null; propertySubType: string | null; structureType: string | null;
     levelClass: string | null; buildingSqft: number; aboveGradeSqft: number;
@@ -180,6 +218,81 @@ function fmtPct(value: number | null | undefined) {
 // ---------------------------------------------------------------------------
 // Tiny sub-components
 // ---------------------------------------------------------------------------
+
+const DIRECTION_DISPLAY: Record<TrendDirection, { label: string; color: string }> = {
+  strong_appreciation: { label: "Strong Appreciation", color: "bg-emerald-100 text-emerald-700" },
+  appreciating: { label: "Appreciating", color: "bg-emerald-50 text-emerald-600" },
+  flat: { label: "Flat", color: "bg-slate-100 text-slate-600" },
+  softening: { label: "Softening", color: "bg-amber-100 text-amber-700" },
+  declining: { label: "Declining", color: "bg-red-100 text-red-700" },
+  sharp_decline: { label: "Sharp Decline", color: "bg-red-200 text-red-800" },
+};
+
+function TrendDirectionBadge({ direction }: { direction: TrendDirection }) {
+  const { label, color } = DIRECTION_DISPLAY[direction];
+  return (
+    <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${color}`}>
+      {label}
+    </span>
+  );
+}
+
+function fmtRate(rate: number | null): string {
+  if (rate == null) return "\u2014";
+  return `${rate >= 0 ? "+" : ""}${(rate * 100).toFixed(1)}%`;
+}
+
+function TrendTierColumn({ label, radius, rate, stats }: {
+  label: string;
+  radius: number;
+  rate: number | null;
+  stats: TrendTierStats | null;
+}) {
+  const cc = stats?.compCount ?? 0;
+  return (
+    <div className="space-y-1 text-[10px]">
+      <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+        {label} <span className="font-normal">({cc} comps &le;{radius} mi)</span>
+      </div>
+      <div className="flex justify-between">
+        <span className="text-slate-400">Rate</span>
+        <span className={`font-mono ${rate != null && rate < 0 ? "text-red-600" : "text-slate-600"}`}>{fmtRate(rate)}/yr</span>
+      </div>
+      {/* Segments */}
+      {stats?.lowEnd && stats.lowEnd.compCount > 0 && (
+        <div className="flex justify-between">
+          <span className="text-slate-400">Low 25th ({stats.lowEnd.compCount})</span>
+          <span className="font-mono text-slate-600">{fmtRate(stats.lowEnd.rate)}</span>
+        </div>
+      )}
+      {stats?.highEnd && stats.highEnd.compCount > 0 && (
+        <div className="flex justify-between">
+          <span className="text-slate-400">High 75th ({stats.highEnd.compCount})</span>
+          <span className="font-mono text-slate-600">{fmtRate(stats.highEnd.rate)}</span>
+        </div>
+      )}
+      {/* Ranges */}
+      {stats && stats.salePriceLow != null && stats.salePriceHigh != null && (
+        <div className="flex justify-between">
+          <span className="text-slate-400">Price</span>
+          <span className="font-mono text-slate-500">{fmt(stats.salePriceLow)}&ndash;{fmt(stats.salePriceHigh)}</span>
+        </div>
+      )}
+      {stats && stats.psfBuildingLow != null && stats.psfBuildingHigh != null && (
+        <div className="flex justify-between">
+          <span className="text-slate-400">PSF Bldg</span>
+          <span className="font-mono text-slate-500">${fmtNum(stats.psfBuildingLow, 0)}&ndash;${fmtNum(stats.psfBuildingHigh, 0)}</span>
+        </div>
+      )}
+      {stats && stats.psfAboveGradeLow != null && stats.psfAboveGradeHigh != null && (
+        <div className="flex justify-between">
+          <span className="text-slate-400">PSF AG</span>
+          <span className="font-mono text-slate-500">${fmtNum(stats.psfAboveGradeLow, 0)}&ndash;${fmtNum(stats.psfAboveGradeHigh, 0)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function CostLine({ label, value, sub, negative }: { label: string; value: string; sub?: string; negative?: boolean }) {
   return (
@@ -476,6 +589,39 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                 <span className="font-mono">${fmtNum(d.arv.selectedDetail.arvPerSqft, 2)}</span>
               </div>
             )}
+            {/* Subject PSF from effective ARV */}
+            {(() => {
+              const bldg = d.physical?.buildingSqft ?? 0;
+              const ag = d.physical?.aboveGradeSqft ?? 0;
+              if (d.arv.effective <= 0 || (bldg <= 0 && ag <= 0)) return null;
+              const psfBldg = bldg > 0 ? d.arv.effective / bldg : null;
+              const psfAg = ag > 0 ? d.arv.effective / ag : null;
+              const ls = d.trend?.detailJson?.localStats;
+              const bldgAboveRange = psfBldg != null && ls?.psfBuildingHigh != null && psfBldg > ls.psfBuildingHigh;
+              const agAboveRange = psfAg != null && ls?.psfAboveGradeHigh != null && psfAg > ls.psfAboveGradeHigh;
+              return (
+                <div className="mt-0.5 space-y-0 text-[10px]">
+                  {psfBldg != null && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">PSF Bldg</span>
+                      <span className={`font-mono ${bldgAboveRange ? "text-red-600 font-semibold" : "text-slate-500"}`}>
+                        ${fmtNum(psfBldg, 2)}
+                        {bldgAboveRange && <span className="text-[8px] ml-0.5">&gt; local</span>}
+                      </span>
+                    </div>
+                  )}
+                  {psfAg != null && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">PSF AG</span>
+                      <span className={`font-mono ${agAboveRange ? "text-red-600 font-semibold" : "text-slate-500"}`}>
+                        ${fmtNum(psfAg, 2)}
+                        {agAboveRange && <span className="text-[8px] ml-0.5">&gt; local</span>}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
           {/* Per-comp details */}
           {d.arv.selectedDetail && d.arv.selectedDetail.perCompDetails.length > 0 && (
@@ -511,6 +657,62 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
             <span>Avg {fmt(d.compSummary.avgSelectedPrice)}</span>
             <span>${fmtNum(d.compSummary.avgSelectedPsf)}/sf</span>
           </div>
+        </div>
+
+        {/* ── PRICE TREND CARD ── */}
+        <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
+          <CardTitle>Price Trend</CardTitle>
+          {d.trend ? (
+            <div className="space-y-2">
+              {/* Badges: confidence + direction */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${
+                  d.trend.confidence === "high" ? "bg-emerald-100 text-emerald-700"
+                    : d.trend.confidence === "low" ? "bg-amber-100 text-amber-700"
+                      : "bg-red-100 text-red-700"
+                }`}>
+                  Confidence: {d.trend.confidence === "high" ? "High" : d.trend.confidence === "low" ? "Low" : "Fallback"}
+                </span>
+                <TrendDirectionBadge direction={d.trend.direction} />
+                {d.trend.isFallback && (
+                  <span className="text-[9px] text-red-500">Fixed rate — insufficient data</span>
+                )}
+              </div>
+
+              {/* Applied rate */}
+              <div className="rounded border border-slate-100 bg-slate-50 px-2 py-1.5">
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-500">Applied Rate</span>
+                  <span className={`font-mono font-bold ${d.trend.blendedAnnualRate >= 0 ? "text-emerald-700" : "text-red-600"}`}>
+                    {d.trend.blendedAnnualRate >= 0 ? "+" : ""}{(d.trend.blendedAnnualRate * 100).toFixed(1)}%/yr
+                  </span>
+                </div>
+              </div>
+
+              {/* Two-column: Local / Metro */}
+              <div className="grid grid-cols-2 gap-2">
+                <TrendTierColumn
+                  label="Local"
+                  radius={d.trend.localRadius}
+                  rate={d.trend.rawLocalRate}
+                  stats={d.trend.detailJson?.localStats ?? null}
+                />
+                <TrendTierColumn
+                  label="Metro"
+                  radius={d.trend.metroRadius}
+                  rate={d.trend.rawMetroRate}
+                  stats={d.trend.detailJson?.metroStats ?? null}
+                />
+              </div>
+
+              {/* Summary */}
+              {d.trend.summary && (
+                <p className="text-[9px] text-slate-400 leading-tight">{d.trend.summary}</p>
+              )}
+            </div>
+          ) : (
+            <p className="text-[10px] text-slate-400">No trend data — run screening first.</p>
+          )}
         </div>
 
         {/* ── REHAB DETAIL CARD (largest) ── */}

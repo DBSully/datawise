@@ -275,6 +275,78 @@ export default async function DealDetailPage({ params }: DealDetailPageProps) {
         </SectionCard>
       </div>
 
+      {/* Market Trend */}
+      <SectionCard title="Market Trend">
+        {result.trend_annual_rate != null ? (
+          <div className="space-y-3">
+            {/* Summary */}
+            <p className="text-sm text-slate-600">{result.trend_summary}</p>
+
+            {/* Badges: confidence + direction */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span
+                className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                  result.trend_confidence === "high"
+                    ? "bg-emerald-100 text-emerald-800"
+                    : result.trend_confidence === "low"
+                      ? "bg-amber-100 text-amber-800"
+                      : "bg-red-100 text-red-800"
+                }`}
+              >
+                {result.trend_confidence === "high"
+                  ? "Confidence: High"
+                  : result.trend_confidence === "low"
+                    ? "Confidence: Low"
+                    : "Confidence: Fallback"}
+              </span>
+              <TrendDirectionBadge direction={((result.trend_detail_json as Record<string, unknown> | null)?.direction as string) ?? "flat"} />
+              {result.trend_is_fallback && (
+                <span className="text-xs text-red-600">
+                  Insufficient comps — fixed {formatPercent(result.trend_annual_rate)}/yr applied
+                </span>
+              )}
+            </div>
+
+            {/* Applied rate */}
+            <div className="dw-detail-grid">
+              <DetailItem
+                label="Applied Rate"
+                value={`${formatPercent(result.trend_annual_rate)}/yr`}
+                highlight
+              />
+            </div>
+
+            {/* Two-column: Local / Metro */}
+            {(() => {
+              const td = result.trend_detail_json as {
+                localStats?: TrendTierStatsJson;
+                metroStats?: TrendTierStatsJson;
+              } | null;
+              return (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <TrendTierSection
+                    label="Local"
+                    radius={result.trend_local_radius ?? 0.75}
+                    rate={result.trend_local_rate}
+                    stats={td?.localStats ?? null}
+                  />
+                  <TrendTierSection
+                    label="Metro"
+                    radius={result.trend_metro_radius ?? 12}
+                    rate={result.trend_metro_rate}
+                    stats={td?.metroStats ?? null}
+                  />
+                </div>
+              );
+            })()}
+          </div>
+        ) : (
+          <p className="py-2 text-sm text-slate-400">
+            No market trend data available.
+          </p>
+        )}
+      </SectionCard>
+
       {/* Rehab breakdown */}
       <SectionCard title="Rehab Budget Estimate">
         <div className="grid gap-3 sm:grid-cols-2">
@@ -546,6 +618,72 @@ export default async function DealDetailPage({ params }: DealDetailPageProps) {
         </div>
       )}
     </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Trend helpers
+// ---------------------------------------------------------------------------
+
+type TrendSegmentJson = { rate: number | null; compCount: number };
+type TrendTierStatsJson = {
+  compCount: number; radiusMiles: number;
+  salePriceLow: number | null; salePriceHigh: number | null;
+  psfBuildingLow: number | null; psfBuildingHigh: number | null;
+  psfAboveGradeLow: number | null; psfAboveGradeHigh: number | null;
+  lowEnd?: TrendSegmentJson; highEnd?: TrendSegmentJson;
+};
+
+const DIRECTION_DISPLAY: Record<string, { label: string; color: string }> = {
+  strong_appreciation: { label: "Strong Appreciation", color: "bg-emerald-100 text-emerald-800" },
+  appreciating: { label: "Appreciating", color: "bg-emerald-50 text-emerald-700" },
+  flat: { label: "Flat", color: "bg-slate-100 text-slate-600" },
+  softening: { label: "Softening", color: "bg-amber-100 text-amber-800" },
+  declining: { label: "Declining", color: "bg-red-100 text-red-800" },
+  sharp_decline: { label: "Sharp Decline", color: "bg-red-200 text-red-900" },
+};
+
+function TrendDirectionBadge({ direction }: { direction: string }) {
+  const d = DIRECTION_DISPLAY[direction] ?? DIRECTION_DISPLAY.flat;
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${d.color}`}>
+      {d.label}
+    </span>
+  );
+}
+
+function fmtRate(rate: number | null | undefined): string {
+  if (rate == null) return "—";
+  const pct = (rate * 100).toFixed(1);
+  return rate >= 0 ? `+${pct}%` : `${pct}%`;
+}
+
+function TrendTierSection({ label, radius, rate, stats }: {
+  label: string; radius: number; rate: number | null | undefined; stats: TrendTierStatsJson | null;
+}) {
+  const cc = stats?.compCount ?? 0;
+  return (
+    <div className="space-y-1.5">
+      <h4 className="text-xs font-semibold text-slate-700">{label} <span className="font-normal text-slate-400">({cc} comps within {radius} mi)</span></h4>
+      <div className="dw-detail-grid">
+        <DetailItem label="Rate" value={`${fmtRate(rate)}/yr`} />
+        {stats?.lowEnd && stats.lowEnd.compCount > 0 && (
+          <DetailItem label={`Low-End 25th (${stats.lowEnd.compCount} comps)`} value={`${fmtRate(stats.lowEnd.rate)}/yr`} />
+        )}
+        {stats?.highEnd && stats.highEnd.compCount > 0 && (
+          <DetailItem label={`High-End 75th (${stats.highEnd.compCount} comps)`} value={`${fmtRate(stats.highEnd.rate)}/yr`} />
+        )}
+        {stats && stats.salePriceLow != null && stats.salePriceHigh != null && (
+          <DetailItem label="Sale Price Range" value={`${formatCurrency(stats.salePriceLow)} – ${formatCurrency(stats.salePriceHigh)}`} />
+        )}
+        {stats && stats.psfBuildingLow != null && stats.psfBuildingHigh != null && (
+          <DetailItem label="PSF Building" value={`$${formatNumber(stats.psfBuildingLow, 2)} – $${formatNumber(stats.psfBuildingHigh, 2)}`} />
+        )}
+        {stats && stats.psfAboveGradeLow != null && stats.psfAboveGradeHigh != null && (
+          <DetailItem label="PSF Above Grade" value={`$${formatNumber(stats.psfAboveGradeLow, 2)} – $${formatNumber(stats.psfAboveGradeHigh, 2)}`} />
+        )}
+      </div>
+    </div>
   );
 }
 

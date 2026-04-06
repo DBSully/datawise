@@ -139,6 +139,43 @@ export type FinancingConfig = {
 };
 
 // ---------------------------------------------------------------------------
+// Market trend configuration
+// ---------------------------------------------------------------------------
+
+export type TrendConfig = {
+  /** Local neighbourhood radius in miles. */
+  localRadiusMiles: number;
+  /** Broader metro radius in miles. */
+  metroRadiusMiles: number;
+  /** Rolling window length in months. */
+  windowMonths: number;
+  /** Blend weight for the local tier (local + metro must sum to 1). */
+  localWeight: number;
+  /** Blend weight for the metro tier. */
+  metroWeight: number;
+  /** Minimum comps required before falling back to fixed rate. */
+  minComps: number;
+  /** Low-confidence threshold — comps below this but ≥ minComps are flagged. */
+  lowConfidenceThreshold: number;
+  /** Asymmetric floor for the blended annual rate (e.g. -0.20). */
+  clampMin: number;
+  /** Asymmetric ceiling for the blended annual rate (e.g. +0.12). */
+  clampMax: number;
+  /** Fixed fallback rate when comp count < minComps. */
+  fallbackRate: number;
+  /** Subject sqft tolerance for similar-property matching (e.g. 0.20 = ±20%). */
+  sqftTolerancePct: number;
+  /** Subject year-built tolerance in years (e.g. 15 = ±15 years). */
+  yearBuiltToleranceYears: number;
+  /** Subject price tolerance for similar-property matching (e.g. 0.25 = ±25%). */
+  priceTierTolerancePct: number;
+  /** Percentile cutoff for low-end segment trend (e.g. 25). */
+  lowEndPercentile: number;
+  /** Percentile cutoff for high-end segment trend (e.g. 75). */
+  highEndPercentile: number;
+};
+
+// ---------------------------------------------------------------------------
 // Qualification configuration (Prime Candidates)
 // ---------------------------------------------------------------------------
 
@@ -167,6 +204,7 @@ export type FlipStrategyProfile = {
   /** Which comparable_profiles.slug to use per property type for comp search. */
   compProfileSlugByType: Record<PropertyTypeKey, string>;
   arv: ArvConfig;
+  trend: TrendConfig;
   rehab: RehabConfig;
   holding: HoldingConfig;
   transaction: TransactionConfig;
@@ -221,6 +259,25 @@ export const DENVER_FLIP_V1: FlipStrategyProfile = {
         aboveGradeDampening: 0.4,
       },
     },
+  },
+
+  // -- Market Trend ----------------------------------------------------------
+  trend: {
+    localRadiusMiles: 0.75,
+    metroRadiusMiles: 12,
+    windowMonths: 12,
+    localWeight: 0.7,
+    metroWeight: 0.3,
+    minComps: 8,
+    lowConfidenceThreshold: 15,
+    clampMin: -0.20,
+    clampMax: 0.12,
+    fallbackRate: -0.05,
+    sqftTolerancePct: 0.20,
+    yearBuiltToleranceYears: 15,
+    priceTierTolerancePct: 0.25,
+    lowEndPercentile: 25,
+    highEndPercentile: 75,
   },
 
   // -- Rehab ----------------------------------------------------------------

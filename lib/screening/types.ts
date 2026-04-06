@@ -182,6 +182,82 @@ export type QualificationResult = {
 };
 
 // ---------------------------------------------------------------------------
+// Market trend
+// ---------------------------------------------------------------------------
+
+/** Segment trend with comp count. */
+export type TrendSegment = {
+  rate: number | null;
+  compCount: number;
+};
+
+/** Statistics for a set of comps used in trend calculation. */
+export type TrendCompStats = {
+  compCount: number;
+  radiusMiles: number;
+  salePriceLow: number | null;
+  salePriceHigh: number | null;
+  psfBuildingLow: number | null;
+  psfBuildingHigh: number | null;
+  psfAboveGradeLow: number | null;
+  psfAboveGradeHigh: number | null;
+  /** Bottom-quartile segment trend for this tier. */
+  lowEnd: TrendSegment;
+  /** Top-quartile segment trend for this tier. */
+  highEnd: TrendSegment;
+};
+
+/** Trend direction category derived from the blended rate. */
+export type TrendDirection =
+  | "strong_appreciation"
+  | "appreciating"
+  | "flat"
+  | "softening"
+  | "declining"
+  | "sharp_decline";
+
+/** Full trend calculation result for a single subject property. */
+export type TrendResult = {
+  /** Blended annual rate actually applied (clamped). */
+  blendedAnnualRate: number;
+  /** Unclamped local-tier rate (null if insufficient comps). */
+  rawLocalRate: number | null;
+  /** Unclamped metro-tier rate (null if insufficient comps). */
+  rawMetroRate: number | null;
+  /** Stats for the local comp pool. */
+  localStats: TrendCompStats;
+  /** Stats for the metro comp pool. */
+  metroStats: TrendCompStats;
+  /** Rolling window length used. */
+  windowMonths: number;
+  /** Bottom-quartile segment trend (acquisition signal). Combined from best pool. */
+  lowEndTrendRate: number | null;
+  /** Top-quartile segment trend (ARV signal). Combined from best pool. */
+  highEndTrendRate: number | null;
+  /** Trend direction category. */
+  direction: TrendDirection;
+  /** True if fixed fallback rate was used. */
+  isFallback: boolean;
+  /** Confidence assessment. */
+  confidenceLevel: "high" | "low" | "fallback";
+  /** Plain-English explanation for the UI. */
+  summary: string;
+};
+
+/** A closed sale record suitable for trend analysis. */
+export type TrendSaleInput = {
+  realPropertyId: string;
+  latitude: number;
+  longitude: number;
+  closePrice: number;
+  closeDateIso: string;
+  buildingSqft: number;
+  aboveGradeSqft: number;
+  yearBuilt: number | null;
+  propertyType: string | null;
+};
+
+// ---------------------------------------------------------------------------
 // Screening result row (combines all engine outputs for one subject)
 // ---------------------------------------------------------------------------
 
@@ -199,6 +275,7 @@ export type ScreeningResultRow = {
   subjectYearBuilt: number | null;
 
   // Engine outputs
+  trend: TrendResult | null;
   arv: ArvResult | null;
   rehab: RehabResult | null;
   holding: HoldingResult | null;

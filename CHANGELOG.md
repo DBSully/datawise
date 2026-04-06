@@ -1,3 +1,81 @@
+## 2026-04-05 — Data-Driven Market Trend Engine
+
+### Summary
+
+Replaced the fixed -5%/year market time adjustment with an intelligent, data-driven rolling trend rate derived from actual closed sales in the database. Each subject property now receives a per-property blended market trend rate computed via OLS regression on $/sqft vs. close date across two geographic tiers (local neighbourhood and broader metro area). The trend rate flows through the entire ARV pipeline using a two-pass calculation and is fully auditable on every screening result.
+
+---
+
+### Trend Engine (`lib/screening/trend-engine.ts`)
+
+Pure function module with zero DB dependencies. Takes a pre-loaded pool of closed sales and subject property parameters, returns a full `TrendResult` with:
+
+- **OLS regression** on $/sqft vs. time for annualized rate of change
+- **Two-tier radius**: local (≤0.75 mi) and metro (≤12 mi), blended 70/30
+- **Similar property filtering**: same property type, ±20% sqft, ±15 years built, ±25% price tier
+- **Segment trends**: low-end (25th percentile) and high-end (75th percentile) computed independently per tier
+- **Guardrails**: minimum 8 comps required (fallback to fixed -5% with flag), asymmetric clamp (-20%/+12%)
+- **Direction classification**: strong appreciation / appreciating / flat / softening / declining / sharp decline
+- **Per-tier stats**: comp count, sale price range, PSF Building range, PSF Above Grade range
+
+### Two-Pass ARV in Bulk Runner
+
+1. **Pass 1**: Rough ARV using fallback rate → establishes price anchor for trend filtering
+2. **Trend calculation**: Per-subject trend rate using rough ARV as the price tier anchor
+3. **Pass 2**: Final ARV using the data-driven trend rate
+
+The trend sales pool is built from the same pre-loaded comp pool — zero additional DB queries per batch.
+
+### Strategy Profile (`TrendConfig`)
+
+All trend parameters are configurable in the strategy profile, not in engine code:
+
+| Parameter | Default | Purpose |
+|-----------|---------|---------|
+| `localRadiusMiles` | 0.75 | Local neighbourhood radius |
+| `metroRadiusMiles` | 12 | Broader metro radius |
+| `localWeight` / `metroWeight` | 0.7 / 0.3 | Blend weights |
+| `minComps` | 8 | Fallback threshold |
+| `clampMin` / `clampMax` | -0.20 / +0.12 | Asymmetric rate clamp |
+| `fallbackRate` | -0.05 | Fixed rate when data insufficient |
+
+Asymmetric clamp rationale: wider downside (-20%) lets depreciation signals flow through to protect against overpaying in falling markets; tighter upside (+12%) prevents chasing appreciation-inflated ARVs.
+
+### Database
+
+- 13 new columns on `screening_results`: `trend_annual_rate`, `trend_local_rate`, `trend_metro_rate`, comp counts, radii, confidence, segment rates, summary text, and full `trend_detail_json`
+- `analysis_queue_v` recreated to expose trend columns
+
+### UI: Deal Detail — Market Trend Card
+
+New section card on the screening deal detail page (`/analysis/screening/[batchId]/[resultId]`) showing:
+
+- **Confidence badge** ("Confidence: High/Low/Fallback") + **Direction badge** ("Softening", "Declining", etc.)
+- Applied blended rate
+- Two-column Local / Metro breakdown: rate, low-end segment (with comp count), high-end segment (with comp count), sale price range, PSF ranges
+- Plain-English summary with fallback explanation when applicable
+
+### UI: Analysis Workstation — Price Trend Card
+
+New card between ARV and Rehab in the analysis workstation (`/analysis/properties/[id]/analyses/[analysisId]`):
+
+- Same dual badges (confidence + direction)
+- Two-column Local / Metro layout with per-tier segments, comp counts, and ranges
+- Trend rate from screening flows into the analysis ARV calculation (overrides the fixed profile rate)
+
+### UI: ARV Card — Subject PSF with Range Check
+
+The Effective ARV box now shows:
+
+- **PSF Building** and **PSF Above Grade** derived from effective ARV / subject sqft
+- Values turn **red** with "> local" indicator when they exceed the local tier's PSF range high from trend data
+
+### UI: Analysis Queue — Trend Column
+
+New **Trend** column after ARV in the analysis queue table. Each cell shows the annualized rate as a color-coded pill matching the direction classification (green → amber → red spectrum).
+
+---
+
 ## 2026-04-05 — Analysis Workstation Redesign, Cost Breakdown Cards, and Cash-to-Close
 
 ### Summary

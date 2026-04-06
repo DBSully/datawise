@@ -22,10 +22,13 @@ import { calculateTransaction } from "./transaction-engine";
 import { calculateFinancing } from "./financing-engine";
 import { calculateDealMath } from "./deal-math";
 import { evaluateQualification } from "./qualification-engine";
+import { calculateTrend } from "./trend-engine";
 import type {
   PropertyTypeKey,
   CompArvInput,
   ScreeningResultRow,
+  TrendSaleInput,
+  TrendResult,
 } from "./types";
 import {
   haversineMiles,
@@ -193,6 +196,40 @@ function belowGradeUnfinished(p: PoolPhysical): number {
     return toNum(p.below_grade_unfinished_area_sqft);
   }
   return Math.max(0, toNum(p.below_grade_total_sqft) - toNum(p.below_grade_finished_area_sqft));
+}
+
+// ---------------------------------------------------------------------------
+// Build trend sales pool from comp pool data
+// ---------------------------------------------------------------------------
+
+function buildTrendSalesPool(pool: CompPool): TrendSaleInput[] {
+  const sales: TrendSaleInput[] = [];
+
+  for (const [propertyId, listings] of pool.closedListingsByProperty) {
+    const prop = pool.properties.get(propertyId);
+    const phys = pool.physicals.get(propertyId);
+    if (!prop || !phys) continue;
+
+    for (const listing of listings) {
+      if (!listing.close_date || !listing.close_price) continue;
+      const closePrice = toNum(listing.close_price);
+      if (closePrice <= 0) continue;
+
+      sales.push({
+        realPropertyId: propertyId,
+        latitude: prop.latitude,
+        longitude: prop.longitude,
+        closePrice,
+        closeDateIso: listing.close_date,
+        buildingSqft: pickBuildingSqft(phys),
+        aboveGradeSqft: pickAboveGradeSqft(phys),
+        yearBuilt: phys.year_built,
+        propertyType: phys.property_type,
+      });
+    }
+  }
+
+  return sales;
 }
 
 // ---------------------------------------------------------------------------
@@ -544,6 +581,7 @@ function screenSubject(
   pool: CompPool,
   profile: FlipStrategyProfile,
   referenceDate: Date,
+  trendSalesPool: TrendSaleInput[],
 ): ScreeningSubjectResult {
   const propertyType = resolvePropertyTypeKey(subject.physical.property_type);
   const buildingSqft = pickBuildingSqft(subject.physical);
@@ -552,7 +590,7 @@ function screenSubject(
 
   const base: Omit<
     ScreeningResultRow,
-    "arv" | "rehab" | "holding" | "transaction" | "financing" | "dealMath" | "qualification" | "screeningStatus" | "errorMessage"
+    "trend" | "arv" | "rehab" | "holding" | "transaction" | "financing" | "dealMath" | "qualification" | "screeningStatus" | "errorMessage"
   > = {
     realPropertyId: subject.property.id,
     listingRowId: subject.listing?.id ?? null,
@@ -568,7 +606,7 @@ function screenSubject(
   const skipResult = (msg: string): ScreeningSubjectResult => ({
     result: {
       ...base,
-      arv: null, rehab: null, holding: null, transaction: null, financing: null, dealMath: null,
+      trend: null, arv: null, rehab: null, holding: null, transaction: null, financing: null, dealMath: null,
       qualification: { isPrimeCandidate: false, qualifyingCompCount: 0, reasons: [], disqualifiers: [msg] },
       screeningStatus: "skipped", errorMessage: msg,
     },
@@ -583,12 +621,44 @@ function screenSubject(
   const comps = scored.map((s) => s.compArvInput);
   const candidateRows = scored.map((s) => s.candidateRow);
 
-  // ARV
+  // --- Two-pass ARV with data-driven trend rate ---
+
+  // Pass 1: Rough ARV using the fixed fallback rate (for price tier filtering)
+  const roughArvConfig = { ...profile.arv, timeAdjustmentAnnualRate: profile.trend.fallbackRate };
+  const roughArv = calculateArv({
+    subjectBuildingSqft: buildingSqft,
+    subjectAboveGradeSqft: aboveGradeSqft,
+    comps,
+    config: roughArvConfig,
+    propertyType,
+    referenceDate,
+  });
+
+  // Use rough ARV (or list price) as the price anchor for trend calculation
+  const priceAnchor = (roughArv && roughArv.arvAggregate > 0)
+    ? roughArv.arvAggregate
+    : listPrice;
+
+  // Trend calculation
+  const trend = calculateTrend({
+    subjectLat: subject.property.latitude,
+    subjectLon: subject.property.longitude,
+    subjectAboveGradeSqft: aboveGradeSqft,
+    subjectYearBuilt: subject.physical.year_built,
+    subjectEstimatedValue: priceAnchor,
+    subjectPropertyType: propertyType,
+    closedSales: trendSalesPool,
+    config: profile.trend,
+    referenceDate,
+  });
+
+  // Pass 2: Final ARV using the data-driven trend rate
+  const finalArvConfig = { ...profile.arv, timeAdjustmentAnnualRate: trend.blendedAnnualRate };
   const arv = calculateArv({
     subjectBuildingSqft: buildingSqft,
     subjectAboveGradeSqft: aboveGradeSqft,
     comps,
-    config: profile.arv,
+    config: finalArvConfig,
     propertyType,
     referenceDate,
   });
@@ -596,7 +666,7 @@ function screenSubject(
   if (!arv || arv.arvAggregate <= 0) {
     return {
       result: {
-        ...base, arv: null, rehab: null, holding: null, transaction: null, financing: null, dealMath: null,
+        ...base, trend, arv: null, rehab: null, holding: null, transaction: null, financing: null, dealMath: null,
         qualification: { isPrimeCandidate: false, qualifyingCompCount: 0, reasons: [], disqualifiers: ["No usable comparable sales found"] },
         screeningStatus: "screened", errorMessage: null,
       },
@@ -650,7 +720,7 @@ function screenSubject(
 
   return {
     result: {
-      ...base, arv, rehab, holding, transaction, financing, dealMath, qualification,
+      ...base, trend, arv, rehab, holding, transaction, financing, dealMath, qualification,
       screeningStatus: "screened", errorMessage: null,
     },
     candidateRows,
@@ -762,6 +832,20 @@ async function writeScreeningResults(
       arv_comp_count: r.arv?.compCount ?? null,
       arv_detail_json: r.arv?.perCompDetails ?? null,
 
+      trend_annual_rate: r.trend?.blendedAnnualRate ?? null,
+      trend_local_rate: r.trend?.rawLocalRate ?? null,
+      trend_metro_rate: r.trend?.rawMetroRate ?? null,
+      trend_local_comp_count: r.trend?.localStats.compCount ?? null,
+      trend_metro_comp_count: r.trend?.metroStats.compCount ?? null,
+      trend_local_radius: r.trend?.localStats.radiusMiles ?? null,
+      trend_metro_radius: r.trend?.metroStats.radiusMiles ?? null,
+      trend_is_fallback: r.trend?.isFallback ?? false,
+      trend_confidence: r.trend?.confidenceLevel ?? null,
+      trend_low_end_rate: r.trend?.lowEndTrendRate ?? null,
+      trend_high_end_rate: r.trend?.highEndTrendRate ?? null,
+      trend_summary: r.trend?.summary ?? null,
+      trend_detail_json: r.trend ?? null,
+
       rehab_total: r.rehab?.total ?? null,
       rehab_above_grade: r.rehab?.aboveGrade ?? null,
       rehab_below_finished: r.rehab?.belowGradeFinished ?? null,
@@ -850,6 +934,8 @@ export async function runScreeningBatch(
     const compProfileId = compProfile?.id ?? null;
 
     const referenceDate = new Date();
+    const trendSalesPool = buildTrendSalesPool(pool);
+
     const results: ScreeningResultRow[] = [];
     const compRunData: Array<{
       subjectPropertyId: string;
@@ -862,7 +948,7 @@ export async function runScreeningBatch(
       if (!subject) continue;
 
       try {
-        const { result, candidateRows } = screenSubject(subject, pool, profile, referenceDate);
+        const { result, candidateRows } = screenSubject(subject, pool, profile, referenceDate, trendSalesPool);
         results.push(result);
         if (candidateRows.length > 0) {
           compRunData.push({
@@ -882,7 +968,7 @@ export async function runScreeningBatch(
           subjectBuildingSqft: pickBuildingSqft(subject.physical),
           subjectAboveGradeSqft: pickAboveGradeSqft(subject.physical),
           subjectYearBuilt: subject.physical.year_built,
-          arv: null, rehab: null, holding: null, transaction: null, financing: null, dealMath: null,
+          trend: null, arv: null, rehab: null, holding: null, transaction: null, financing: null, dealMath: null,
           qualification: { isPrimeCandidate: false, qualifyingCompCount: 0, reasons: [], disqualifiers: ["Processing error"] },
           screeningStatus: "error",
           errorMessage: err instanceof Error ? err.message : "Unknown processing error",

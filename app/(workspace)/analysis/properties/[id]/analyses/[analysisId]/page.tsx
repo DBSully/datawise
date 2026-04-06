@@ -16,6 +16,19 @@ import {
 import type { RehabScopeTier } from "@/lib/screening/types";
 import { AnalysisWorkstation } from "./analysis-workstation";
 
+type TrendTierSegment = { rate: number | null; compCount: number };
+type TrendTierStatsShape = {
+  compCount: number; radiusMiles: number;
+  salePriceLow: number | null; salePriceHigh: number | null;
+  psfBuildingLow: number | null; psfBuildingHigh: number | null;
+  psfAboveGradeLow: number | null; psfAboveGradeHigh: number | null;
+  lowEnd: TrendTierSegment; highEnd: TrendTierSegment;
+};
+type TrendDetailJsonShape = {
+  localStats?: TrendTierStatsShape;
+  metroStats?: TrendTierStatsShape;
+};
+
 export const dynamic = "force-dynamic";
 
 type AnalysisPageProps = {
@@ -128,7 +141,7 @@ export default async function AnalysisPage({ params }: AnalysisPageProps) {
   // Load screening result (if promoted from screening)
   const { data: screeningResult } = await supabase
     .from("screening_results")
-    .select("arv_aggregate, arv_per_sqft, arv_comp_count, rehab_total, hold_total, hold_days, transaction_total, max_offer, est_gap_per_sqft, spread, offer_pct, rehab_composite_multiplier, target_profit")
+    .select("arv_aggregate, arv_per_sqft, arv_comp_count, rehab_total, hold_total, hold_days, transaction_total, max_offer, est_gap_per_sqft, spread, offer_pct, rehab_composite_multiplier, target_profit, trend_annual_rate, trend_local_rate, trend_metro_rate, trend_local_comp_count, trend_metro_comp_count, trend_local_radius, trend_metro_radius, trend_is_fallback, trend_confidence, trend_low_end_rate, trend_high_end_rate, trend_summary, trend_detail_json")
     .eq("promoted_analysis_id", analysisId)
     .maybeSingle();
 
@@ -203,6 +216,30 @@ export default async function AnalysisPage({ params }: AnalysisPageProps) {
   const belowGradeUnfinishedSqft = Math.max(0, belowGradeTotalSqft - belowGradeFinishedSqft);
   const listPrice = toNum(listing?.list_price);
 
+  // Trend data from screening (if promoted)
+  const trendDetailJson = screeningResult?.trend_detail_json as Record<string, unknown> | null;
+  const trendData = screeningResult?.trend_annual_rate != null ? {
+    blendedAnnualRate: toNum(screeningResult.trend_annual_rate),
+    rawLocalRate: screeningResult.trend_local_rate != null ? toNum(screeningResult.trend_local_rate) : null,
+    rawMetroRate: screeningResult.trend_metro_rate != null ? toNum(screeningResult.trend_metro_rate) : null,
+    localCompCount: screeningResult.trend_local_comp_count ?? 0,
+    metroCompCount: screeningResult.trend_metro_comp_count ?? 0,
+    localRadius: toNum(screeningResult.trend_local_radius),
+    metroRadius: toNum(screeningResult.trend_metro_radius),
+    direction: (trendDetailJson?.direction as string ?? "flat") as "strong_appreciation" | "appreciating" | "flat" | "softening" | "declining" | "sharp_decline",
+    isFallback: screeningResult.trend_is_fallback ?? false,
+    confidence: (screeningResult.trend_confidence as "high" | "low" | "fallback") ?? "fallback",
+    lowEndRate: screeningResult.trend_low_end_rate != null ? toNum(screeningResult.trend_low_end_rate) : null,
+    highEndRate: screeningResult.trend_high_end_rate != null ? toNum(screeningResult.trend_high_end_rate) : null,
+    summary: screeningResult.trend_summary ?? null,
+    detailJson: trendDetailJson as TrendDetailJsonShape | null,
+  } : null;
+
+  // Override ARV config with data-driven trend rate when available
+  const arvConfig = trendData
+    ? { ...profile.arv, timeAdjustmentAnnualRate: trendData.blendedAnnualRate }
+    : profile.arv;
+
   // Auto ARV (from screening, frozen)
   const autoArv = screeningResult?.arv_aggregate ? toNum(screeningResult.arv_aggregate) : null;
   const autoRehab = screeningResult?.rehab_total ? toNum(screeningResult.rehab_total) : null;
@@ -254,7 +291,7 @@ export default async function AnalysisPage({ params }: AnalysisPageProps) {
       subjectBuildingSqft: buildingSqft,
       subjectAboveGradeSqft: aboveGradeSqft,
       comps: compInputs,
-      config: profile.arv,
+      config: arvConfig,
       propertyType,
     });
 
@@ -506,6 +543,7 @@ export default async function AnalysisPage({ params }: AnalysisPageProps) {
       annualTax: toNum(financials.annual_property_tax),
       annualHoa: toNum(financials.annual_hoa_dues),
     } : null,
+    trend: trendData,
     arv: {
       auto: autoArv,
       selected: selectedArv,

@@ -38,6 +38,28 @@ function formatPercent(value: number | null | undefined) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+function trendColor(rate: number, detailJson: Record<string, unknown> | null): string {
+  const direction = (detailJson?.direction as string) ?? classifyDirection(rate);
+  switch (direction) {
+    case "strong_appreciation": return "bg-emerald-100 text-emerald-800";
+    case "appreciating": return "bg-emerald-50 text-emerald-700";
+    case "flat": return "bg-slate-100 text-slate-600";
+    case "softening": return "bg-amber-100 text-amber-800";
+    case "declining": return "bg-red-100 text-red-700";
+    case "sharp_decline": return "bg-red-200 text-red-800";
+    default: return "bg-slate-100 text-slate-600";
+  }
+}
+
+function classifyDirection(rate: number): string {
+  if (rate >= 0.05) return "strong_appreciation";
+  if (rate >= 0.02) return "appreciating";
+  if (rate >= -0.02) return "flat";
+  if (rate >= -0.05) return "softening";
+  if (rate >= -0.10) return "declining";
+  return "sharp_decline";
+}
+
 function buildHref(
   base: string,
   params: Record<string, string | undefined>,
@@ -234,6 +256,7 @@ export default async function AnalysisQueuePage({
               <th>Contract</th>
               <th className="text-right">List Price</th>
               <th className="text-right">ARV</th>
+              <th className="text-right">Trend</th>
               <th className="text-right">Spread</th>
               <th className="text-right">Gap/sqft</th>
               <th className="text-right">Comps</th>
@@ -248,7 +271,7 @@ export default async function AnalysisQueuePage({
           <tbody>
             {(!results || results.length === 0) ? (
               <tr>
-                <td colSpan={17} className="py-8 text-center text-sm text-slate-400">
+                <td colSpan={18} className="py-8 text-center text-sm text-slate-400">
                   No screened properties found. Run a screening batch first.
                 </td>
               </tr>
@@ -266,6 +289,9 @@ export default async function AnalysisQueuePage({
                   mls_status: string | null;
                   listing_contract_date: string | null;
                   arv_aggregate: number | null;
+                  trend_annual_rate: number | null;
+                  trend_confidence: string | null;
+                  trend_detail_json: Record<string, unknown> | null;
                   spread: number | null;
                   est_gap_per_sqft: number | null;
                   arv_comp_count: number | null;
@@ -298,6 +324,17 @@ export default async function AnalysisQueuePage({
                     <td className="text-slate-500">{r.listing_contract_date ? r.listing_contract_date.slice(0, 10) : "—"}</td>
                     <td className="text-right">{formatCurrency(r.subject_list_price)}</td>
                     <td className="text-right font-medium">{formatCurrency(r.arv_aggregate)}</td>
+                    <td className="text-right">
+                      {r.trend_annual_rate != null ? (
+                        <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                          trendColor(r.trend_annual_rate, r.trend_detail_json)
+                        }`}>
+                          {r.trend_annual_rate >= 0 ? "+" : ""}{(r.trend_annual_rate * 100).toFixed(1)}%
+                        </span>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
+                    </td>
                     <td className={`text-right font-medium ${(r.spread ?? 0) > 0 ? "text-emerald-700" : (r.spread ?? 0) < 0 ? "text-red-600" : ""}`}>
                       {formatCurrency(r.spread)}
                     </td>
