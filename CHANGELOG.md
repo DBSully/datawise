@@ -1,3 +1,35 @@
+## 2026-04-05 — Quick Comps Modal: Evaluate and Pick Comps from the Queue
+
+### Summary
+
+Added a one-click "Quick Comps" modal to both the **Screening Batch Results** and **Analysis Queue** pages. Users can now view the comp map, pick/unpick comps, and promote directly to a full analysis — all without leaving the queue. This eliminates the 3–4 click workflow that previously forced users to create an analysis before they could evaluate comparable quality.
+
+### What changed
+
+#### New components
+
+- **`components/screening/screening-comp-modal.tsx`** — Modal with a 420×420 square map (left) and condensed candidate table (right). Supports pick/unpick from both the map pins and table buttons with optimistic local state updates. Footer bar shows "Begin Analysis →" to promote the screening result, or "Open Analysis →" if already promoted. Escape / backdrop click to close.
+- **`components/screening/batch-results-table.tsx`** — Client wrapper for the screening batch results table. Manages modal state and renders the Map button as the far-left column.
+- **`components/screening/queue-results-table.tsx`** — Client wrapper for the analysis queue table with the same Map button + modal support, plus promoted-analysis awareness.
+
+#### New server actions (`screening/actions.ts`)
+
+- **`loadScreeningCompDataAction`** — Fetches comp candidates with coordinates and subject data for a given screening result.
+- **`toggleScreeningCompSelectionAction`** — Toggles comp candidate `selected_yn` without requiring an analysis ID (screening-context selection).
+
+#### Updated pages
+
+- **`/analysis/screening/[batchId]`** — Now uses `BatchResultsTable` client component. Map button is the first column.
+- **`/analysis/queue`** — Now uses `QueueResultsTable` client component. Map button is the first column.
+
+### Design decisions
+
+- **No analysis required to evaluate comps.** The toggle action works directly on `comparable_search_candidates` without an analysis ID, so comp picks persist on the screening result and carry forward when the user eventually promotes.
+- **Modal width 1060px** — wide enough for the square map + 8-column condensed table to display without horizontal scroll.
+- **Promote from modal.** The "Begin Analysis →" button calls the existing `promoteToAnalysisAction` which creates the analysis, links the comp search run, and redirects to the workstation with comps pre-loaded.
+
+---
+
 ## 2026-04-05 — Fix Screening Subject Query Pagination
 
 ### Summary

@@ -109,6 +109,134 @@ export async function runScreeningAction(formData: FormData): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Load comp data for screening result (used by Quick Comps modal)
+// ---------------------------------------------------------------------------
+
+export type ScreeningCompData = {
+  subjectAddress: string;
+  subjectCity: string;
+  subjectListPrice: number | null;
+  subjectBuildingSqft: number | null;
+  subjectLat: number | null;
+  subjectLng: number | null;
+  estGapPerSqft: number | null;
+  candidates: Array<{
+    id: string;
+    selected_yn: boolean;
+    distance_miles: number | null;
+    days_since_close: number | null;
+    sqft_delta_pct: number | null;
+    raw_score: number | null;
+    metrics_json: Record<string, unknown>;
+  }>;
+};
+
+export async function loadScreeningCompDataAction(
+  resultId: string,
+): Promise<ScreeningCompData | null> {
+  const supabase = await createClient();
+
+  const { data: result, error: resultError } = await supabase
+    .from("screening_results")
+    .select(
+      "id, real_property_id, comp_search_run_id, subject_address, subject_city, subject_list_price, subject_building_sqft, est_gap_per_sqft",
+    )
+    .eq("id", resultId)
+    .single();
+
+  if (resultError || !result) return null;
+
+  // Get subject coordinates
+  const { data: prop } = await supabase
+    .from("real_properties")
+    .select("latitude, longitude")
+    .eq("id", result.real_property_id)
+    .single();
+
+  if (!result.comp_search_run_id) {
+    return {
+      subjectAddress: result.subject_address,
+      subjectCity: result.subject_city,
+      subjectListPrice: result.subject_list_price,
+      subjectBuildingSqft: result.subject_building_sqft,
+      subjectLat: prop?.latitude ?? null,
+      subjectLng: prop?.longitude ?? null,
+      estGapPerSqft: result.est_gap_per_sqft,
+      candidates: [],
+    };
+  }
+
+  const { data: candidates } = await supabase
+    .from("comparable_search_candidates")
+    .select(
+      "id, selected_yn, distance_miles, days_since_close, sqft_delta_pct, raw_score, metrics_json",
+    )
+    .eq("comparable_search_run_id", result.comp_search_run_id)
+    .order("raw_score", { ascending: false });
+
+  return {
+    subjectAddress: result.subject_address,
+    subjectCity: result.subject_city,
+    subjectListPrice: result.subject_list_price,
+    subjectBuildingSqft: result.subject_building_sqft,
+    subjectLat: prop?.latitude ?? null,
+    subjectLng: prop?.longitude ?? null,
+    estGapPerSqft: result.est_gap_per_sqft,
+    candidates: (candidates ?? []).map((c) => ({
+      ...c,
+      metrics_json: (c.metrics_json ?? {}) as Record<string, unknown>,
+    })),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Toggle comp candidate selection from screening (no analysis required)
+// ---------------------------------------------------------------------------
+
+export async function toggleScreeningCompSelectionAction(
+  formData: FormData,
+): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/auth/sign-in");
+  }
+
+  const candidateId =
+    typeof formData.get("candidate_id") === "string"
+      ? (formData.get("candidate_id") as string).trim()
+      : "";
+  const nextSelected =
+    typeof formData.get("next_selected") === "string"
+      ? formData.get("next_selected") === "true"
+      : false;
+  const batchId =
+    typeof formData.get("batch_id") === "string"
+      ? (formData.get("batch_id") as string).trim()
+      : "";
+
+  if (!candidateId) {
+    throw new Error("Candidate ID is required.");
+  }
+
+  const { error } = await supabase
+    .from("comparable_search_candidates")
+    .update({ selected_yn: nextSelected })
+    .eq("id", candidateId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (batchId) {
+    revalidatePath(`/analysis/screening/${batchId}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Promote screening result to full analysis
 // ---------------------------------------------------------------------------
 
