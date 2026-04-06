@@ -679,13 +679,25 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                 )}
               </div>
 
-              {/* Applied rate */}
-              <div className="rounded border border-slate-100 bg-slate-50 px-2 py-1.5">
+              {/* Applied rate + blend weight bar */}
+              <div className="rounded border border-slate-100 bg-slate-50 px-2 py-1.5 space-y-1.5">
                 <div className="flex justify-between text-[11px]">
                   <span className="text-slate-500">Applied Rate</span>
                   <span className={`font-mono font-bold ${d.trend.blendedAnnualRate >= 0 ? "text-emerald-700" : "text-red-600"}`}>
                     {d.trend.blendedAnnualRate >= 0 ? "+" : ""}{(d.trend.blendedAnnualRate * 100).toFixed(1)}%/yr
                   </span>
+                </div>
+                {/* Blend weight visualization */}
+                <div>
+                  <div className="flex items-center gap-1 text-[9px] text-slate-400 mb-0.5">
+                    <span>Local 10%</span>
+                    <span className="flex-1" />
+                    <span>Metro 90%</span>
+                  </div>
+                  <div className="flex h-1.5 rounded-full overflow-hidden">
+                    <div className="bg-blue-400" style={{ width: "10%" }} />
+                    <div className="bg-slate-300" style={{ width: "90%" }} />
+                  </div>
                 </div>
               </div>
 
