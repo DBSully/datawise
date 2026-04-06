@@ -13,6 +13,7 @@ import {
   DENVER_FLIP_V1,
   resolvePropertyTypeKey,
 } from "@/lib/screening/strategy-profiles";
+import type { RehabScopeTier } from "@/lib/screening/types";
 import { AnalysisWorkstation } from "./analysis-workstation";
 
 export const dynamic = "force-dynamic";
@@ -197,6 +198,9 @@ export default async function AnalysisPage({ params }: AnalysisPageProps) {
   const propertyType = resolvePropertyTypeKey(physical?.property_type);
   const buildingSqft = toNum(physical?.building_area_total_sqft) || toNum(physical?.above_grade_finished_area_sqft);
   const aboveGradeSqft = toNum(physical?.above_grade_finished_area_sqft) || buildingSqft;
+  const belowGradeFinishedSqft = toNum(physical?.below_grade_finished_area_sqft);
+  const belowGradeTotalSqft = toNum(physical?.below_grade_total_sqft);
+  const belowGradeUnfinishedSqft = Math.max(0, belowGradeTotalSqft - belowGradeFinishedSqft);
   const listPrice = toNum(listing?.list_price);
 
   // Auto ARV (from screening, frozen)
@@ -205,7 +209,24 @@ export default async function AnalysisPage({ params }: AnalysisPageProps) {
 
   // Selected ARV (from currently selected comps)
   const selectedComps = compCandidates.filter((c: any) => c.selected_yn);
-  let selectedArv: number | null = null;
+  let selectedArvResult: {
+    arvAggregate: number;
+    arvPerSqft: number;
+    compCount: number;
+    perCompDetails: Array<{
+      address: string;
+      closePrice: number;
+      closeDateIso: string;
+      daysSinceClose: number;
+      distanceMiles: number;
+      compBuildingSqft: number;
+      psfBuilding: number;
+      arvBlended: number;
+      arvTimeAdjusted: number;
+      confidence: number;
+      decayWeight: number;
+    }>;
+  } | null = null;
 
   if (selectedComps.length > 0 && buildingSqft > 0) {
     const compInputs = selectedComps.map((c: any) => {
@@ -237,8 +258,29 @@ export default async function AnalysisPage({ params }: AnalysisPageProps) {
       propertyType,
     });
 
-    selectedArv = arvResult?.arvAggregate ?? null;
+    if (arvResult) {
+      selectedArvResult = {
+        arvAggregate: arvResult.arvAggregate,
+        arvPerSqft: arvResult.arvPerSqft,
+        compCount: arvResult.compCount,
+        perCompDetails: arvResult.perCompDetails.map((d) => ({
+          address: d.address,
+          closePrice: d.closePrice,
+          closeDateIso: d.closeDateIso,
+          daysSinceClose: d.daysSinceClose,
+          distanceMiles: d.distanceMiles,
+          compBuildingSqft: d.compBuildingSqft,
+          psfBuilding: d.psfBuilding,
+          arvBlended: d.arvBlended,
+          arvTimeAdjusted: d.arvTimeAdjusted,
+          confidence: d.confidence,
+          decayWeight: d.decayWeight,
+        })),
+      };
+    }
   }
+
+  const selectedArv = selectedArvResult?.arvAggregate ?? null;
 
   // Final ARV (manual override)
   const finalArv = manualAnalysis?.arv_manual ? toNum(manualAnalysis.arv_manual) : null;
@@ -246,26 +288,63 @@ export default async function AnalysisPage({ params }: AnalysisPageProps) {
   // Effective ARV = Final ?? Selected ?? Auto
   const effectiveArv = finalArv ?? selectedArv ?? autoArv ?? 0;
 
-  // Rehab
+  // Rehab — compute full result for detail card
   const manualRehab = manualAnalysis?.rehab_manual ? toNum(manualAnalysis.rehab_manual) : null;
-  let computedRehab: number | null = null;
+  const rehabScope = (manualAnalysis?.rehab_scope as RehabScopeTier | null) ?? null;
+  const scopeMultiplier = rehabScope ? profile.rehab.scopeMultipliers[rehabScope] : profile.rehab.scopeMultipliers.moderate;
+
+  let computedRehabResult: {
+    compositeMultiplier: number;
+    typeMultiplier: number;
+    conditionMultiplier: number;
+    priceMultiplier: number;
+    ageMultiplier: number;
+    aboveGrade: number;
+    belowGradeFinished: number;
+    belowGradeUnfinished: number;
+    belowGradeTotal: number;
+    interior: number;
+    exterior: number;
+    landscaping: number;
+    systems: number;
+    total: number;
+    perSqftBuilding: number;
+    perSqftAboveGrade: number;
+  } | null = null;
+
   if (buildingSqft > 0) {
     const rehabResult = calculateRehab({
       propertyType,
       aboveGradeSqft,
-      belowGradeFinishedSqft: toNum(physical?.below_grade_finished_area_sqft),
-      belowGradeUnfinishedSqft: Math.max(0, toNum(physical?.below_grade_total_sqft) - toNum(physical?.below_grade_finished_area_sqft)),
+      belowGradeFinishedSqft,
+      belowGradeUnfinishedSqft,
       buildingSqft,
       listPrice,
       yearBuilt: physical?.year_built ?? null,
       condition: listing?.property_condition_source ? String(listing.property_condition_source) : null,
       config: profile.rehab,
     });
-    computedRehab = rehabResult.total;
+    // Apply scope multiplier to all line items
+    computedRehabResult = {
+      ...rehabResult,
+      aboveGrade: Math.round(rehabResult.aboveGrade * scopeMultiplier),
+      belowGradeFinished: Math.round(rehabResult.belowGradeFinished * scopeMultiplier),
+      belowGradeUnfinished: Math.round(rehabResult.belowGradeUnfinished * scopeMultiplier),
+      belowGradeTotal: Math.round(rehabResult.belowGradeTotal * scopeMultiplier),
+      interior: Math.round(rehabResult.interior * scopeMultiplier),
+      exterior: Math.round(rehabResult.exterior * scopeMultiplier),
+      landscaping: Math.round(rehabResult.landscaping * scopeMultiplier),
+      systems: Math.round(rehabResult.systems * scopeMultiplier),
+      total: Math.round(rehabResult.total * scopeMultiplier),
+      perSqftBuilding: buildingSqft > 0 ? Math.round(rehabResult.total * scopeMultiplier / buildingSqft * 100) / 100 : 0,
+      perSqftAboveGrade: aboveGradeSqft > 0 ? Math.round(rehabResult.total * scopeMultiplier / aboveGradeSqft * 100) / 100 : 0,
+    };
   }
+
+  const computedRehab = computedRehabResult?.total ?? null;
   const effectiveRehab = manualRehab ?? computedRehab ?? autoRehab ?? 0;
 
-  // Holding
+  // Holding — full result
   const holdResult = buildingSqft > 0 ? calculateHolding({
     buildingSqft,
     listPrice,
@@ -274,7 +353,7 @@ export default async function AnalysisPage({ params }: AnalysisPageProps) {
     config: profile.holding,
   }) : null;
 
-  // Transaction
+  // Transaction — full result
   const transResult = effectiveArv > 0 ? calculateTransaction({
     acquisitionPrice: listPrice,
     arvPrice: effectiveArv,
@@ -311,6 +390,64 @@ export default async function AnalysisPage({ params }: AnalysisPageProps) {
     financingTotal: finResult?.total ?? 0,
     targetProfit: effectiveTargetProfit,
   }) : null;
+
+  // Cash out of pocket
+  const downPaymentRate = profile.financing.downPaymentRate;
+  let cashRequired: {
+    purchasePrice: number;
+    downPaymentRate: number;
+    downPayment: number;
+    loanForPurchase: number;
+    originationCost: number;
+    loanAvailableForRehab: number;
+    rehabTotal: number;
+    rehabFromLoan: number;
+    rehabOutOfPocket: number;
+    acquisitionTitle: number;
+    holdingTotal: number;
+    interestCost: number;
+    totalCashRequired: number;
+  } | null = null;
+
+  // Use max offer as purchase price basis — that's what we'd actually pay
+  const purchasePrice = dealMath?.maxOffer ?? 0;
+
+  if (purchasePrice > 0 && finResult) {
+    const downPayment = Math.round(purchasePrice * downPaymentRate);
+    const loanForPurchase = purchasePrice - downPayment;
+    const originationCost = finResult.originationCost;
+    // Origination is deducted from loan proceeds at closing, reducing available funds
+    const loanAvailableForRehab = Math.max(0, finResult.loanAmount - loanForPurchase - originationCost);
+    const rehabFromLoan = Math.min(effectiveRehab, loanAvailableForRehab);
+    const rehabOutOfPocket = Math.max(0, effectiveRehab - loanAvailableForRehab);
+    const acquisitionTitle = transResult?.acquisitionTitle ?? 0;
+    const holdingTotal = holdResult?.total ?? 0;
+    const interestCost = finResult.interestCost;
+
+    const totalCashRequired =
+      downPayment +
+      acquisitionTitle +
+      originationCost +
+      rehabOutOfPocket +
+      holdingTotal +
+      interestCost;
+
+    cashRequired = {
+      purchasePrice,
+      downPaymentRate,
+      downPayment,
+      loanForPurchase,
+      originationCost,
+      loanAvailableForRehab,
+      rehabTotal: effectiveRehab,
+      rehabFromLoan,
+      rehabOutOfPocket,
+      acquisitionTitle,
+      holdingTotal,
+      interestCost,
+      totalCashRequired,
+    };
+  }
 
   // Comp summary stats
   const totalComps = compCandidates.length;
@@ -350,8 +487,8 @@ export default async function AnalysisPage({ params }: AnalysisPageProps) {
       levelClass: physical.level_class_standardized,
       buildingSqft,
       aboveGradeSqft,
-      belowGradeTotalSqft: toNum(physical.below_grade_total_sqft),
-      belowGradeFinishedSqft: toNum(physical.below_grade_finished_area_sqft),
+      belowGradeTotalSqft,
+      belowGradeFinishedSqft,
       yearBuilt: physical.year_built,
       bedroomsTotal: physical.bedrooms_total,
       bathroomsTotal: physical.bathrooms_total,
@@ -374,18 +511,19 @@ export default async function AnalysisPage({ params }: AnalysisPageProps) {
       selected: selectedArv,
       final: finalArv,
       effective: effectiveArv,
+      selectedDetail: selectedArvResult,
     },
     rehab: {
       auto: autoRehab,
       computed: computedRehab,
       manual: manualRehab,
       effective: effectiveRehab,
+      scope: rehabScope,
+      scopeMultiplier,
+      detail: computedRehabResult,
     },
-    holding: holdResult ? {
-      total: holdResult.total,
-      daysHeld: holdResult.daysHeld,
-    } : null,
-    transaction: transResult ? { total: transResult.total } : null,
+    holding: holdResult,
+    transaction: transResult,
     financing: finResult,
     dealMath,
     compSummary: {
@@ -438,6 +576,9 @@ export default async function AnalysisPage({ params }: AnalysisPageProps) {
       address: property.unparsed_address,
       listPrice,
     },
+    // Scope multipliers for client-side display
+    scopeMultipliers: profile.rehab.scopeMultipliers,
+    cashRequired,
   };
 
   return <AnalysisWorkstation data={workstationData} />;

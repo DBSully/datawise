@@ -8,7 +8,7 @@ import type { MapPin, MapPinTooltipData } from "@/components/properties/comp-map
 
 const CompMap = dynamic(
   () => import("@/components/properties/comp-map").then((m) => m.CompMap),
-  { ssr: false, loading: () => <div className="flex h-[300px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-400">Loading map...</div> },
+  { ssr: false, loading: () => <div className="flex h-[340px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-400">Loading map...</div> },
 );
 import {
   saveManualAnalysisAction,
@@ -24,6 +24,75 @@ import { ComparableWorkspacePanel } from "@/components/properties/comparable-wor
 // Types
 // ---------------------------------------------------------------------------
 
+type RehabScopeTier = "cosmetic" | "moderate" | "heavy" | "gut";
+
+type RehabDetail = {
+  compositeMultiplier: number;
+  typeMultiplier: number;
+  conditionMultiplier: number;
+  priceMultiplier: number;
+  ageMultiplier: number;
+  aboveGrade: number;
+  belowGradeFinished: number;
+  belowGradeUnfinished: number;
+  belowGradeTotal: number;
+  interior: number;
+  exterior: number;
+  landscaping: number;
+  systems: number;
+  total: number;
+  perSqftBuilding: number;
+  perSqftAboveGrade: number;
+};
+
+type HoldingDetail = {
+  daysHeld: number;
+  dailyTax: number;
+  dailyInsurance: number;
+  dailyHoa: number;
+  dailyUtilities: number;
+  dailyTotal: number;
+  holdTax: number;
+  holdInsurance: number;
+  holdHoa: number;
+  holdUtilities: number;
+  total: number;
+};
+
+type TransactionDetail = {
+  acquisitionTitle: number;
+  dispositionTitle: number;
+  dispositionCommissions: number;
+  total: number;
+};
+
+type FinancingDetail = {
+  loanAmount: number;
+  ltvPct: number;
+  annualRate: number;
+  pointsRate: number;
+  daysHeld: number;
+  interestCost: number;
+  originationCost: number;
+  monthlyPayment: number;
+  dailyInterest: number;
+  total: number;
+};
+
+type ArvPerCompDetail = {
+  address: string;
+  closePrice: number;
+  closeDateIso: string;
+  daysSinceClose: number;
+  distanceMiles: number;
+  compBuildingSqft: number;
+  psfBuilding: number;
+  arvBlended: number;
+  arvTimeAdjusted: number;
+  confidence: number;
+  decayWeight: number;
+};
+
 type WorkstationData = {
   propertyId: string;
   analysisId: string;
@@ -38,15 +107,22 @@ type WorkstationData = {
   } | null;
   listing: { listingId: string; mlsStatus: string | null; listPrice: number; originalListPrice: number; listingContractDate: string | null } | null;
   financials: { annualTax: number; annualHoa: number } | null;
-  arv: { auto: number | null; selected: number | null; final: number | null; effective: number };
-  rehab: { auto: number | null; computed: number | null; manual: number | null; effective: number };
-  holding: { total: number; daysHeld: number } | null;
-  transaction: { total: number } | null;
-  financing: {
-    loanAmount: number; ltvPct: number; annualRate: number; pointsRate: number;
-    daysHeld: number; interestCost: number; originationCost: number;
-    monthlyPayment: number; dailyInterest: number; total: number;
-  } | null;
+  arv: {
+    auto: number | null; selected: number | null; final: number | null; effective: number;
+    selectedDetail: {
+      arvAggregate: number; arvPerSqft: number; compCount: number;
+      perCompDetails: ArvPerCompDetail[];
+    } | null;
+  };
+  rehab: {
+    auto: number | null; computed: number | null; manual: number | null; effective: number;
+    scope: RehabScopeTier | null;
+    scopeMultiplier: number;
+    detail: RehabDetail | null;
+  };
+  holding: HoldingDetail | null;
+  transaction: TransactionDetail | null;
+  financing: FinancingDetail | null;
   dealMath: {
     arv: number; listPrice: number; rehabTotal: number; holdTotal: number;
     transactionTotal: number; financingTotal: number; targetProfit: number; totalCosts: number;
@@ -64,6 +140,22 @@ type WorkstationData = {
     compCandidates: Array<Record<string, unknown>>;
   };
   subjectContext: Record<string, unknown>;
+  scopeMultipliers: Record<RehabScopeTier, number>;
+  cashRequired: {
+    purchasePrice: number;
+    downPaymentRate: number;
+    downPayment: number;
+    loanForPurchase: number;
+    originationCost: number;
+    loanAvailableForRehab: number;
+    rehabTotal: number;
+    rehabFromLoan: number;
+    rehabOutOfPocket: number;
+    acquisitionTitle: number;
+    holdingTotal: number;
+    interestCost: number;
+    totalCashRequired: number;
+  } | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -71,75 +163,64 @@ type WorkstationData = {
 // ---------------------------------------------------------------------------
 
 function fmt(value: number | null | undefined) {
-  if (value === null || value === undefined) return "—";
+  if (value === null || value === undefined) return "\u2014";
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
 }
 
 function fmtNum(value: number | null | undefined, d = 0) {
-  if (value === null || value === undefined) return "—";
+  if (value === null || value === undefined) return "\u2014";
   return new Intl.NumberFormat("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }).format(value);
 }
 
 function fmtPct(value: number | null | undefined) {
-  if (value === null || value === undefined) return "—";
+  if (value === null || value === undefined) return "\u2014";
   return `${(value * 100).toFixed(1)}%`;
 }
 
 // ---------------------------------------------------------------------------
-// Sub-components
+// Tiny sub-components
 // ---------------------------------------------------------------------------
 
-function StatChip({ label, value, highlight }: { label: string; value: ReactNode; highlight?: boolean }) {
+function CostLine({ label, value, sub, negative }: { label: string; value: string; sub?: string; negative?: boolean }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
-      <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500">{label}</div>
-      <div className={`mt-1 text-sm font-semibold ${highlight ? "text-emerald-700" : "text-slate-900"}`}>{value}</div>
-    </div>
-  );
-}
-
-function DetailItem({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="dw-detail-item">
-      <div className="dw-detail-label">{label}</div>
-      <div className="dw-detail-value">{value}</div>
-    </div>
-  );
-}
-
-function DealLine({ label, value, negative, bold }: { label: string; value: string; negative?: boolean; bold?: boolean }) {
-  return (
-    <div className="flex items-center justify-between py-0.5">
-      <span className={`${negative ? "text-slate-500" : ""} ${bold ? "font-semibold" : ""}`}>{label}</span>
-      <span className={`font-mono text-sm ${negative ? "text-red-600" : ""} ${bold ? "font-bold text-emerald-700" : ""}`}>{value}</span>
-    </div>
-  );
-}
-
-function SectionCard({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
-  return (
-    <div className="dw-card-compact space-y-2">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-700">{title}</h3>
-        {action}
+    <div className="flex items-baseline justify-between gap-2 py-[1px]">
+      <span className="text-slate-500 truncate">{label}</span>
+      <div className="text-right shrink-0">
+        <span className={`font-mono ${negative ? "text-red-600" : "text-slate-700"}`}>{value}</span>
+        {sub && <span className="ml-1 text-[10px] text-slate-400">{sub}</span>}
       </div>
-      {children}
+    </div>
+  );
+}
+
+function CardTitle({ children, action }: { children: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between mb-1.5">
+      <h3 className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">{children}</h3>
+      {action}
     </div>
   );
 }
 
 const NOTE_CATEGORIES = [
-  { value: "location", label: "Location", icon: "📍" },
-  { value: "scope", label: "Scope", icon: "🔧" },
-  { value: "valuation", label: "Valuation", icon: "💰" },
-  { value: "property", label: "Property", icon: "🏠" },
-  { value: "internal", label: "Internal", icon: "💬" },
-  { value: "offer", label: "Offer", icon: "📋" },
+  { value: "location", label: "Location", icon: "L" },
+  { value: "scope", label: "Scope", icon: "S" },
+  { value: "valuation", label: "Valuation", icon: "V" },
+  { value: "property", label: "Property", icon: "P" },
+  { value: "internal", label: "Internal", icon: "I" },
+  { value: "offer", label: "Offer", icon: "O" },
 ];
 
 const PIPELINE_INTEREST = ["Low", "Medium", "High", "Hot"];
 const PIPELINE_SHOWING = ["Not Scheduled", "Scheduled", "Complete", "Virtual Complete"];
 const PIPELINE_OFFER = ["No Offer", "Drafting", "Submitted", "Accepted", "Expired", "Rejected"];
+
+const SCOPE_TIERS: { key: RehabScopeTier; label: string; short: string }[] = [
+  { key: "cosmetic", label: "Cosmetic", short: "0.6x" },
+  { key: "moderate", label: "Moderate", short: "1.0x" },
+  { key: "heavy", label: "Heavy", short: "1.4x" },
+  { key: "gut", label: "Gut", short: "2.0x" },
+];
 
 // ---------------------------------------------------------------------------
 // Main workstation component
@@ -148,7 +229,6 @@ const PIPELINE_OFFER = ["No Offer", "Drafting", "Submitted", "Accepted", "Expire
 export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
   const router = useRouter();
   const [showCompModal, setShowCompModal] = useState(false);
-  const [showFinancingModal, setShowFinancingModal] = useState(false);
   const [showNoteForm, setShowNoteForm] = useState(false);
   const [noteCategory, setNoteCategory] = useState("location");
   const [noteBody, setNoteBody] = useState("");
@@ -157,7 +237,6 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
   const d = data;
   const p = d.physical;
 
-  // Load default profile rules for comp panel (empty object as fallback)
   const profileRules = d.compModalData.latestRun?.parameters_json ?? {};
 
   // Toggle comp selection from map click
@@ -182,7 +261,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
         const m = (c.metrics_json ?? {}) as Record<string, unknown>;
         return {
           id: String(c.id),
-          address: String(m.address ?? "—"),
+          address: String(m.address ?? "\u2014"),
           closePrice: m.close_price as number | null,
           ppsf: m.ppsf as number | null,
           sqft: m.building_area_total_sqft as number | null,
@@ -192,14 +271,13 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
       });
   }, [d]);
 
-  // Build map pins from comp candidates
+  // Build map pins
   const subjectSqft = p?.buildingSqft ?? 0;
   const subjectListPrice = d.listing?.listPrice ?? 0;
 
   const mapPins = useMemo<MapPin[]>(() => {
     const pins: MapPin[] = [];
 
-    // Subject pin — show deal-level gap/sqft
     if (d.property.latitude && d.property.longitude) {
       pins.push({
         id: "subject",
@@ -215,7 +293,6 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
       });
     }
 
-    // Comp pins from candidates (lat/lng stored in metrics_json)
     for (const c of d.compModalData.compCandidates) {
       const m = (c.metrics_json ?? {}) as Record<string, unknown>;
       const lat = Number(m.latitude);
@@ -223,11 +300,9 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
       if (!lat || !lng || !Number.isFinite(lat) || !Number.isFinite(lng)) continue;
 
       const compSqft = Number(m.building_area_total_sqft) || null;
-      // Positive = subject is larger (good for buyer), negative = subject is smaller
       const sqftDelta = compSqft && subjectSqft ? subjectSqft - compSqft : null;
       const sqftDeltaPct = compSqft && subjectSqft ? (subjectSqft - compSqft) / subjectSqft : null;
 
-      // Per-comp gap/sqft: (comp close price − subject list price) / subject sqft
       const compClosePrice = Number(m.close_price) || 0;
       const perCompGapPerSqft =
         subjectSqft > 0 && compClosePrice > 0 && subjectListPrice > 0
@@ -239,7 +314,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
         id: String(c.id),
         lat,
         lng,
-        label: String(m.address ?? "—"),
+        label: String(m.address ?? "\u2014"),
         tooltipData: {
           closePrice: (m.close_price as number) ?? null,
           closeDate: m.close_date ? String(m.close_date).slice(0, 10) : null,
@@ -257,502 +332,652 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
     return pins;
   }, [d, subjectSqft, subjectListPrice]);
 
+  // Active scope for display
+  const activeScope: RehabScopeTier = d.rehab.scope ?? "moderate";
+
   return (
     <section className="dw-section-stack-compact">
-      {/* ── Header ── */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <Link
-            href={`/analysis/properties/${d.propertyId}`}
-            className="text-[11px] uppercase tracking-[0.16em] text-slate-500 hover:text-slate-900"
-          >
-            ← Property Hub
-          </Link>
-          <h1 className="dw-page-title mt-1">{d.property.address}</h1>
-          <p className="dw-page-copy">
-            {d.property.city}, {d.property.state} {d.property.postalCode} &middot;{" "}
-            {d.analysis.scenarioName ?? "Analysis"} &middot;{" "}
-            {d.listing?.mlsStatus ?? "No Listing"}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-medium uppercase tracking-[0.14em] text-slate-600">
-            {d.analysis.strategyType ?? "general"}
-          </span>
-          {d.listing?.listingId && (
-            <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-mono text-slate-600">
-              MLS# {d.listing.listingId}
+      {/* ================================================================== */}
+      {/* HEADER BAR — compact property identity + key metrics               */}
+      {/* ================================================================== */}
+      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <Link
+              href={`/analysis/properties/${d.propertyId}`}
+              className="text-[10px] uppercase tracking-[0.14em] text-slate-400 hover:text-slate-700 shrink-0"
+            >
+              &larr; Hub
+            </Link>
+            <h1 className="text-sm font-bold text-slate-900 truncate">{d.property.address}</h1>
+            <span className="text-xs text-slate-500 shrink-0">
+              {d.property.city}, {d.property.state} {d.property.postalCode}
             </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {d.listing?.listingId && (
+              <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-mono text-slate-500">
+                MLS# {d.listing.listingId}
+              </span>
+            )}
+            <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.1em] text-slate-500">
+              {d.listing?.mlsStatus ?? "No Listing"}
+            </span>
+            <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.1em] text-slate-500">
+              {d.analysis.strategyType ?? "general"}
+            </span>
+          </div>
+        </div>
+        {/* Inline property facts */}
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[11px] text-slate-500">
+          <span><b className="text-slate-700">{p?.propertyType ?? "\u2014"}</b> {p?.structureType ? `\u00b7 ${p.structureType}` : ""}</span>
+          <span><b className="text-slate-700">{fmtNum(p?.bedroomsTotal)}</b> bd / <b className="text-slate-700">{fmtNum(p?.bathroomsTotal, 1)}</b> ba</span>
+          <span><b className="text-slate-700">{fmtNum(p?.buildingSqft)}</b> sqft</span>
+          {(p?.belowGradeTotalSqft ?? 0) > 0 && <span>Bsmt: {fmtNum(p!.belowGradeTotalSqft)} ({fmtNum(p!.belowGradeFinishedSqft)} fin)</span>}
+          <span>Built <b className="text-slate-700">{p?.yearBuilt ?? "\u2014"}</b></span>
+          <span>Lot: {fmtNum(p?.lotSizeSqft)} sqft</span>
+          <span>Garage: {fmtNum(p?.garageSpaces, 1)}</span>
+          <span>Tax: {fmt(d.financials?.annualTax)}/yr</span>
+          {(d.financials?.annualHoa ?? 0) > 0 && <span>HOA: {fmt(d.financials!.annualHoa)}/yr</span>}
+          <span>List: <b className="text-slate-700">{fmt(d.listing?.listPrice)}</b></span>
+        </div>
+      </div>
+
+      {/* ================================================================== */}
+      {/* MAIN ANALYSIS GRID — deal waterfall + 5 cost cards + overrides     */}
+      {/* ================================================================== */}
+      <div className="grid gap-2" style={{ gridTemplateColumns: "180px 1fr 1.4fr 1fr 1fr" }}>
+
+        {/* ── DEAL WATERFALL (narrow spine) ── */}
+        <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
+          <CardTitle>Deal Math</CardTitle>
+          <div className="space-y-0.5 text-[11px]">
+            <div className="flex justify-between py-0.5">
+              <span className="font-medium text-slate-700">Eff. ARV</span>
+              <span className="font-mono font-semibold text-slate-800">{fmt(d.arv.effective)}</span>
+            </div>
+            <div className="flex justify-between py-0.5">
+              <span className="text-slate-500">&minus; Rehab</span>
+              <span className="font-mono text-red-600">{fmt(d.rehab.effective)}</span>
+            </div>
+            <div className="flex justify-between py-0.5">
+              <span className="text-slate-500">&minus; Hold</span>
+              <span className="font-mono text-red-600">{fmt(d.holding?.total)}</span>
+            </div>
+            <div className="flex justify-between py-0.5">
+              <span className="text-slate-500">&minus; Trans</span>
+              <span className="font-mono text-red-600">{fmt(d.transaction?.total)}</span>
+            </div>
+            <div className="flex justify-between py-0.5">
+              <span className="text-slate-500">&minus; Finance</span>
+              <span className="font-mono text-red-600">{fmt(d.financing?.total)}</span>
+            </div>
+            <div className="flex justify-between py-0.5">
+              <span className="text-slate-500">&minus; Profit</span>
+              <span className="font-mono text-red-600">{fmt(d.dealMath?.targetProfit)}</span>
+            </div>
+            <div className="border-t border-slate-300 pt-1 mt-1">
+              <div className="flex justify-between py-0.5">
+                <span className="font-bold text-slate-800">Financed</span>
+                <span className="font-mono font-bold text-emerald-700">{fmt(d.dealMath?.maxOffer)}</span>
+              </div>
+              <div className="flex justify-between py-0.5">
+                <span className="font-bold text-slate-800">Cash</span>
+                <span className="font-mono font-bold text-emerald-700">{fmt(d.dealMath && d.financing ? d.dealMath.maxOffer + d.financing.total : d.dealMath?.maxOffer)}</span>
+              </div>
+            </div>
+            <div className="border-t border-slate-200 pt-1 mt-1 space-y-0.5 text-[10px]">
+              <div className="flex justify-between">
+                <span className="text-slate-400">Offer %</span>
+                <span className="font-mono text-slate-600">{fmtPct(d.dealMath?.offerPct)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Spread</span>
+                <span className="font-mono text-slate-600">{fmt(d.dealMath?.spread)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Gap/sqft</span>
+                <span className="font-mono text-slate-600">{d.dealMath?.estGapPerSqft !== undefined ? `$${fmtNum(d.dealMath.estGapPerSqft)}` : "\u2014"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Project Costs</span>
+                <span className="font-mono text-slate-600">{fmt(d.dealMath?.totalCosts)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── ARV DETAIL CARD ── */}
+        <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
+          <CardTitle>ARV</CardTitle>
+          {/* 3-tier */}
+          <div className="grid grid-cols-3 gap-1 text-center mb-2">
+            <div className="rounded border border-slate-100 bg-slate-50 px-1 py-1">
+              <div className="text-[9px] text-slate-400 uppercase">Auto</div>
+              <div className="text-xs font-medium text-slate-600">{fmt(d.arv.auto)}</div>
+            </div>
+            <div className="rounded border border-blue-100 bg-blue-50 px-1 py-1">
+              <div className="text-[9px] text-blue-400 uppercase">Selected</div>
+              <div className="text-xs font-semibold text-blue-700">{fmt(d.arv.selected)}</div>
+            </div>
+            <div className="rounded border border-emerald-100 bg-emerald-50 px-1 py-1">
+              <div className="text-[9px] text-emerald-400 uppercase">Final</div>
+              <div className="text-xs font-bold text-emerald-700">{d.arv.final !== null ? fmt(d.arv.final) : <span className="text-slate-300">&mdash;</span>}</div>
+            </div>
+          </div>
+          <div className="rounded border border-slate-100 bg-slate-50 px-2 py-1.5 mb-2">
+            <div className="flex justify-between text-[11px]">
+              <span className="text-slate-500">Effective ARV</span>
+              <span className="font-mono font-bold text-emerald-700">{fmt(d.arv.effective)}</span>
+            </div>
+            {d.arv.selectedDetail && (
+              <div className="flex justify-between text-[10px] text-slate-400">
+                <span>$/sqft</span>
+                <span className="font-mono">${fmtNum(d.arv.selectedDetail.arvPerSqft, 2)}</span>
+              </div>
+            )}
+          </div>
+          {/* Per-comp details */}
+          {d.arv.selectedDetail && d.arv.selectedDetail.perCompDetails.length > 0 && (
+            <div className="space-y-0">
+              <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-1">Per-Comp ARV</div>
+              <div className="overflow-auto max-h-[140px]">
+                <table className="w-full text-[10px]">
+                  <thead>
+                    <tr className="text-left text-[9px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+                      <th className="py-0.5 pr-1">Address</th>
+                      <th className="py-0.5 text-right">Close</th>
+                      <th className="py-0.5 text-right">ARV Adj</th>
+                      <th className="py-0.5 text-right">Wt</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.arv.selectedDetail.perCompDetails.map((comp, i) => (
+                      <tr key={i} className="border-b border-slate-50">
+                        <td className="py-0.5 pr-1 text-slate-600 truncate max-w-[120px]">{comp.address}</td>
+                        <td className="py-0.5 text-right font-mono text-slate-600">{fmt(comp.closePrice)}</td>
+                        <td className="py-0.5 text-right font-mono text-slate-700">{fmt(comp.arvTimeAdjusted)}</td>
+                        <td className="py-0.5 text-right font-mono text-slate-400">{comp.decayWeight.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {/* Comp summary stats */}
+          <div className="mt-2 flex gap-2 text-[10px] text-slate-400">
+            <span>{d.compSummary.selectedCount} comps</span>
+            <span>Avg {fmt(d.compSummary.avgSelectedPrice)}</span>
+            <span>${fmtNum(d.compSummary.avgSelectedPsf)}/sf</span>
+          </div>
+        </div>
+
+        {/* ── REHAB DETAIL CARD (largest) ── */}
+        <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
+          <CardTitle
+            action={
+              d.rehab.manual !== null ? (
+                <span className="text-[9px] font-semibold text-emerald-600 uppercase">Manual Override Active</span>
+              ) : undefined
+            }
+          >
+            Rehab
+          </CardTitle>
+
+          {/* Scope tier selector */}
+          <form
+            action={async (formData: FormData) => {
+              setIsSaving(true);
+              await saveManualAnalysisAction(initialManualAnalysisFormState, formData);
+              setIsSaving(false);
+              router.refresh();
+            }}
+          >
+            <input type="hidden" name="analysis_id" value={d.analysisId} />
+            <input type="hidden" name="property_id" value={d.propertyId} />
+            {/* Preserve existing overrides */}
+            <input type="hidden" name="arv_manual" value={d.manualAnalysis?.arv_manual as string ?? ""} />
+            <input type="hidden" name="rehab_manual" value={d.manualAnalysis?.rehab_manual as string ?? ""} />
+            <input type="hidden" name="days_held_manual" value={d.manualAnalysis?.days_held_manual as string ?? ""} />
+            <input type="hidden" name="target_profit_manual" value={d.manualAnalysis?.target_profit_manual as string ?? ""} />
+            <input type="hidden" name="analyst_condition" value={d.manualAnalysis?.analyst_condition as string ?? ""} />
+            <input type="hidden" name="location_rating" value={d.manualAnalysis?.location_rating as string ?? ""} />
+            <input type="hidden" name="rent_estimate_monthly" value={d.manualAnalysis?.rent_estimate_monthly as string ?? ""} />
+            <input type="hidden" name="financing_rate_manual" value={d.manualAnalysis?.financing_rate_manual ? String(Number(d.manualAnalysis.financing_rate_manual) * 100) : ""} />
+            <input type="hidden" name="financing_points_manual" value={d.manualAnalysis?.financing_points_manual ? String(Number(d.manualAnalysis.financing_points_manual) * 100) : ""} />
+            <input type="hidden" name="financing_ltv_manual" value={d.manualAnalysis?.financing_ltv_manual ? String(Number(d.manualAnalysis.financing_ltv_manual) * 100) : ""} />
+
+            <div className="flex gap-1 mb-2">
+              {SCOPE_TIERS.map((tier) => (
+                <button
+                  key={tier.key}
+                  type="submit"
+                  name="rehab_scope"
+                  value={tier.key}
+                  disabled={isSaving}
+                  className={`flex-1 rounded-md border px-1.5 py-1 text-center text-[10px] font-medium transition-colors ${
+                    activeScope === tier.key
+                      ? "border-blue-300 bg-blue-50 text-blue-700 shadow-sm"
+                      : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:bg-slate-50"
+                  }`}
+                >
+                  <div>{tier.label}</div>
+                  <div className="text-[9px] opacity-70">{tier.short}</div>
+                </button>
+              ))}
+            </div>
+          </form>
+
+          {d.rehab.detail && (
+            <>
+              {/* Multiplier breakdown */}
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-slate-400 mb-1.5">
+                <span>Type: {d.rehab.detail.typeMultiplier}</span>
+                <span>Cond: {d.rehab.detail.conditionMultiplier}</span>
+                <span>Price: {d.rehab.detail.priceMultiplier}</span>
+                <span>Age: {d.rehab.detail.ageMultiplier}</span>
+                <span>Scope: {d.rehab.scopeMultiplier}</span>
+                <span className="font-semibold text-slate-600">Composite: {(d.rehab.detail.compositeMultiplier * d.rehab.scopeMultiplier).toFixed(3)}</span>
+              </div>
+
+              {/* Line items in two columns */}
+              <div className="grid grid-cols-2 gap-x-3 text-[11px]">
+                <CostLine label="Above Grade" value={fmt(d.rehab.detail.aboveGrade)} />
+                <CostLine label="Below Grade (fin)" value={fmt(d.rehab.detail.belowGradeFinished)} />
+                <CostLine label="Below Grade (unfin)" value={fmt(d.rehab.detail.belowGradeUnfinished)} />
+                <CostLine label="Exterior" value={fmt(d.rehab.detail.exterior)} />
+                <CostLine label="Landscaping" value={fmt(d.rehab.detail.landscaping)} />
+                <CostLine label="Systems" value={fmt(d.rehab.detail.systems)} />
+              </div>
+
+              <div className="border-t border-slate-200 mt-1.5 pt-1.5 flex items-center justify-between text-[11px]">
+                <span className="font-bold text-slate-700">Total Rehab</span>
+                <span className="font-mono font-bold text-slate-800">{fmt(d.rehab.detail.total)}</span>
+              </div>
+              <div className="flex justify-between text-[10px] text-slate-400">
+                <span>${fmtNum(d.rehab.detail.perSqftBuilding, 2)}/sqft bldg</span>
+                <span>${fmtNum(d.rehab.detail.perSqftAboveGrade, 2)}/sqft above</span>
+              </div>
+            </>
           )}
         </div>
+
+        {/* ── HOLD + TRANSACTION stacked ── */}
+        <div className="flex flex-col gap-2">
+          {/* Holding */}
+          <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm flex-1">
+            <CardTitle>Holding</CardTitle>
+            {d.holding ? (
+              <div className="text-[11px] space-y-0.5">
+                <div className="rounded border border-slate-100 bg-slate-50 px-2 py-1 text-center mb-1.5">
+                  <span className="text-[10px] text-slate-400">Hold Period </span>
+                  <span className="font-mono font-bold text-slate-700">{d.holding.daysHeld} days</span>
+                </div>
+                <CostLine label="Property Tax" value={fmt(d.holding.holdTax)} sub={`$${fmtNum(d.holding.dailyTax, 2)}/d`} />
+                <CostLine label="Insurance" value={fmt(d.holding.holdInsurance)} sub={`$${fmtNum(d.holding.dailyInsurance, 2)}/d`} />
+                <CostLine label="HOA" value={fmt(d.holding.holdHoa)} sub={`$${fmtNum(d.holding.dailyHoa, 2)}/d`} />
+                <CostLine label="Utilities" value={fmt(d.holding.holdUtilities)} sub={`$${fmtNum(d.holding.dailyUtilities, 2)}/d`} />
+                <div className="border-t border-slate-200 pt-1 mt-1 flex justify-between">
+                  <span className="font-bold text-slate-700">Total</span>
+                  <div>
+                    <span className="font-mono font-bold text-slate-800">{fmt(d.holding.total)}</span>
+                    <span className="ml-1 text-[10px] text-slate-400">${fmtNum(d.holding.dailyTotal, 2)}/d</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="text-[10px] text-slate-400">No data</p>
+            )}
+          </div>
+
+          {/* Transaction */}
+          <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm flex-1">
+            <CardTitle>Transaction</CardTitle>
+            {d.transaction ? (
+              <div className="text-[11px] space-y-0.5">
+                <CostLine label="Acq. Title (0.3%)" value={fmt(d.transaction.acquisitionTitle)} />
+                <CostLine label="Disp. Title (0.47%)" value={fmt(d.transaction.dispositionTitle)} />
+                <CostLine label="Commissions (4%)" value={fmt(d.transaction.dispositionCommissions)} />
+                <div className="border-t border-slate-200 pt-1 mt-1 flex justify-between">
+                  <span className="font-bold text-slate-700">Total</span>
+                  <span className="font-mono font-bold text-slate-800">{fmt(d.transaction.total)}</span>
+                </div>
+              </div>
+            ) : (
+              <p className="text-[10px] text-slate-400">No data</p>
+            )}
+          </div>
+        </div>
+
+        {/* ── FINANCING + OVERRIDES stacked ── */}
+        <div className="flex flex-col gap-2">
+          {/* Financing */}
+          <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
+            <CardTitle>Financing</CardTitle>
+            {d.financing ? (
+              <div className="text-[11px] space-y-0.5">
+                <div className="rounded border border-slate-100 bg-slate-50 px-2 py-1 mb-1.5 text-[10px]">
+                  <div className="flex justify-between"><span className="text-slate-400">Loan</span><span className="font-mono text-slate-600">{fmt(d.financing.loanAmount)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-400">LTV / Rate / Pts</span><span className="font-mono text-slate-600">{fmtPct(d.financing.ltvPct)} / {fmtPct(d.financing.annualRate)} / {fmtPct(d.financing.pointsRate)}</span></div>
+                </div>
+                <CostLine label={`Interest (@ $${fmtNum(d.financing.dailyInterest, 2)}/day)`} value={fmt(d.financing.interestCost)} sub={`${d.financing.daysHeld}d`} />
+                <CostLine label="Origination" value={fmt(d.financing.originationCost)} />
+                <div className="border-t border-slate-200 pt-1 mt-1 flex justify-between">
+                  <span className="font-bold text-slate-700">Total</span>
+                  <span className="font-mono font-bold text-slate-800">{fmt(d.financing.total)}</span>
+                </div>
+                <div className="text-[10px] text-slate-400 flex justify-between">
+                  <span>I/O pmt</span><span className="font-mono">{fmt(d.financing.monthlyPayment)}/mo</span>
+                </div>
+              </div>
+            ) : (
+              <p className="text-[10px] text-slate-400">Financing disabled</p>
+            )}
+          </div>
+
+          {/* Cash Out of Pocket */}
+          {d.cashRequired && (
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50/30 p-2.5 shadow-sm">
+              <CardTitle>Cash Required <span className="normal-case font-normal tracking-normal text-[9px] text-slate-400">@ Max Offer {fmt(d.cashRequired.purchasePrice)}</span></CardTitle>
+              <div className="text-[11px] space-y-0.5">
+                <CostLine label={`Down Pmt (${fmtPct(d.cashRequired.downPaymentRate)} of ${fmt(d.cashRequired.purchasePrice)})`} value={fmt(d.cashRequired.downPayment)} />
+                <CostLine label="Acq. Title" value={fmt(d.cashRequired.acquisitionTitle)} />
+                <CostLine label="Origination" value={fmt(d.cashRequired.originationCost)} />
+                <CostLine label="Rehab OOP" value={fmt(d.cashRequired.rehabOutOfPocket)} sub={d.cashRequired.rehabOutOfPocket > 0 ? `of ${fmt(d.cashRequired.rehabTotal)}` : `${fmt(d.cashRequired.rehabTotal)} covered`} />
+                <CostLine label="Holding" value={fmt(d.cashRequired.holdingTotal)} />
+                <CostLine label="Interest" value={fmt(d.cashRequired.interestCost)} />
+                <div className="border-t border-indigo-200 pt-1 mt-1 flex justify-between">
+                  <span className="font-bold text-slate-700">Total Cash</span>
+                  <span className="font-mono font-bold text-indigo-700">{fmt(d.cashRequired.totalCashRequired)}</span>
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">
+                  <div className="flex justify-between">
+                    <span>Loan funds purchase</span>
+                    <span className="font-mono">{fmt(d.cashRequired.loanForPurchase)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Loan funds rehab</span>
+                    <span className="font-mono">{fmt(d.cashRequired.rehabFromLoan)}</span>
+                  </div>
+                </div>
+                <p className="text-[9px] text-slate-400 mt-1 leading-tight">
+                  Excludes disp. costs (paid from sale proceeds). Down payment is equity returned at sale.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Analyst Overrides (compact) */}
+          <div className="rounded-lg border border-amber-200 bg-amber-50/30 p-2.5 shadow-sm flex-1">
+            <CardTitle>Overrides</CardTitle>
+            <form
+              action={async (formData: FormData) => {
+                setIsSaving(true);
+                await saveManualAnalysisAction(initialManualAnalysisFormState, formData);
+                setIsSaving(false);
+                router.refresh();
+              }}
+              className="space-y-1"
+            >
+              <input type="hidden" name="analysis_id" value={d.analysisId} />
+              <input type="hidden" name="property_id" value={d.propertyId} />
+              <input type="hidden" name="rehab_scope" value={d.rehab.scope ?? ""} />
+              <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+                <div>
+                  <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Final ARV</label>
+                  <input type="number" name="arv_manual" className="dw-input !py-1 !px-1.5 !text-xs" defaultValue={d.manualAnalysis?.arv_manual as number ?? ""} placeholder="Auto" />
+                </div>
+                <div>
+                  <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Rehab $</label>
+                  <input type="number" name="rehab_manual" className="dw-input !py-1 !px-1.5 !text-xs" defaultValue={d.manualAnalysis?.rehab_manual as number ?? ""} placeholder="Auto" />
+                </div>
+                <div>
+                  <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Days Held</label>
+                  <input type="number" name="days_held_manual" className="dw-input !py-1 !px-1.5 !text-xs" defaultValue={d.manualAnalysis?.days_held_manual as number ?? ""} placeholder="Auto" />
+                </div>
+                <div>
+                  <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Profit $</label>
+                  <input type="number" name="target_profit_manual" className="dw-input !py-1 !px-1.5 !text-xs" defaultValue={d.manualAnalysis?.target_profit_manual as number ?? ""} placeholder="$40K" />
+                </div>
+                <div>
+                  <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Condition</label>
+                  <select name="analyst_condition" className="dw-select !py-1 !px-1.5 !text-xs" defaultValue={d.manualAnalysis?.analyst_condition as string ?? ""}>
+                    <option value="">—</option>
+                    <option>Fixer</option><option>Poor</option><option>Fair</option>
+                    <option>Average</option><option>Good</option><option>Excellent</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Location</label>
+                  <select name="location_rating" className="dw-select !py-1 !px-1.5 !text-xs" defaultValue={d.manualAnalysis?.location_rating as string ?? ""}>
+                    <option value="">—</option>
+                    <option>Poor</option><option>Fair</option><option>Average</option>
+                    <option>Good</option><option>Excellent</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Rate %</label>
+                  <input type="number" step="0.1" name="financing_rate_manual" className="dw-input !py-1 !px-1.5 !text-xs" defaultValue={d.manualAnalysis?.financing_rate_manual ? String(Number(d.manualAnalysis.financing_rate_manual) * 100) : ""} placeholder="11" />
+                </div>
+                <div>
+                  <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">LTV %</label>
+                  <input type="number" step="1" name="financing_ltv_manual" className="dw-input !py-1 !px-1.5 !text-xs" defaultValue={d.manualAnalysis?.financing_ltv_manual ? String(Number(d.manualAnalysis.financing_ltv_manual) * 100) : ""} placeholder="80" />
+                </div>
+              </div>
+              <input type="hidden" name="rent_estimate_monthly" value={d.manualAnalysis?.rent_estimate_monthly as string ?? ""} />
+              <input type="hidden" name="financing_points_manual" value={d.manualAnalysis?.financing_points_manual ? String(Number(d.manualAnalysis.financing_points_manual) * 100) : ""} />
+              <button type="submit" className="w-full rounded-md border border-amber-300 bg-amber-100 px-2 py-1 text-[10px] font-semibold text-amber-800 hover:bg-amber-200 transition-colors mt-1" disabled={isSaving}>
+                {isSaving ? "Saving..." : "Save Overrides"}
+              </button>
+            </form>
+          </div>
+        </div>
       </div>
 
-      {/* ── Stat chips ── */}
-      <div className="grid gap-2 sm:grid-cols-4 xl:grid-cols-7">
-        <StatChip label="List Price" value={fmt(d.listing?.listPrice)} />
-        <StatChip label="Type" value={p?.propertyType ?? "—"} />
-        <StatChip label="Beds / Baths" value={`${fmtNum(p?.bedroomsTotal)} / ${fmtNum(p?.bathroomsTotal, 1)}`} />
-        <StatChip label="Building Sqft" value={fmtNum(p?.buildingSqft)} />
-        <StatChip label="Year Built" value={p?.yearBuilt?.toString() ?? "—"} />
-        <StatChip label="Effective ARV" value={fmt(d.arv.effective)} highlight />
-        <StatChip label="Max Offer" value={fmt(d.dealMath?.maxOffer)} highlight />
-      </div>
-
-      {/* ── Property Facts + Deal Analysis ── */}
-      <div className="grid gap-3 xl:grid-cols-[0.85fr_1.15fr]">
-        <SectionCard title="Property Facts">
-          <div className="dw-detail-grid">
-            <DetailItem label="Property Type" value={p?.propertyType ?? "—"} />
-            <DetailItem label="Structure" value={p?.structureType ?? "—"} />
-            <DetailItem label="Level Class" value={p?.levelClass ?? "—"} />
-            <DetailItem label="Beds" value={fmtNum(p?.bedroomsTotal)} />
-            <DetailItem label="Baths" value={fmtNum(p?.bathroomsTotal, 1)} />
-            <DetailItem label="Garage" value={fmtNum(p?.garageSpaces, 1)} />
-            <DetailItem label="Above Grade" value={fmtNum(p?.aboveGradeSqft)} />
-            <DetailItem label="Below Grade" value={fmtNum(p?.belowGradeTotalSqft)} />
-            <DetailItem label="Lot Sqft" value={fmtNum(p?.lotSizeSqft)} />
-            <DetailItem label="Year Built" value={p?.yearBuilt?.toString() ?? "—"} />
-            <DetailItem label="Taxes/yr" value={fmt(d.financials?.annualTax)} />
-            <DetailItem label="HOA/yr" value={fmt(d.financials?.annualHoa)} />
-          </div>
-        </SectionCard>
-
-        <SectionCard title="Deal Analysis">
-          <div className="space-y-3">
-            {/* 3-tier ARV */}
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                After Repair Value (ARV)
-              </div>
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div>
-                  <div className="text-[10px] text-slate-400">Auto</div>
-                  <div className="text-sm font-medium text-slate-600">{fmt(d.arv.auto)}</div>
-                </div>
-                <div>
-                  <div className="text-[10px] text-slate-400">Selected ({d.compSummary.selectedCount} comps)</div>
-                  <div className="text-sm font-semibold text-blue-700">{fmt(d.arv.selected)}</div>
-                </div>
-                <div>
-                  <div className="text-[10px] text-slate-400">Final (manual)</div>
-                  <div className="text-sm font-bold text-emerald-700">{d.arv.final !== null ? fmt(d.arv.final) : <span className="text-slate-300">—</span>}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Deal math waterfall */}
-            <div className="space-y-0.5 text-sm">
-              <DealLine label="Effective ARV" value={fmt(d.arv.effective)} />
-              <DealLine label="− Rehab" value={fmt(d.rehab.effective)} negative />
-              <DealLine label="− Holding" value={fmt(d.holding?.total)} negative />
-              <DealLine label="− Transaction" value={fmt(d.transaction?.total)} negative />
-              {d.financing && (
-                <div className="flex items-center justify-between py-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setShowFinancingModal(true)}
-                    className="text-slate-500 underline decoration-dotted underline-offset-2 hover:text-blue-600"
-                  >
-                    − Financing
-                  </button>
-                  <span className="font-mono text-sm text-red-600">{fmt(d.financing.total)}</span>
-                </div>
-              )}
-              <DealLine label="− Target Profit" value={fmt(d.dealMath?.targetProfit)} negative />
-              <div className="border-t border-slate-300 pt-1">
-                <DealLine label="= Max Offer" value={fmt(d.dealMath?.maxOffer)} bold />
-                <div className="flex items-center justify-between text-xs text-slate-500">
-                  <span>Offer %</span>
-                  <span>{fmtPct(d.dealMath?.offerPct)}</span>
-                </div>
-                <div className="flex items-center justify-between text-xs text-slate-500">
-                  <span>Spread (ARV − List)</span>
-                  <span>{fmt(d.dealMath?.spread)}</span>
-                </div>
-                <div className="flex items-center justify-between text-xs text-slate-500">
-                  <span>Gap/sqft</span>
-                  <span>{d.dealMath?.estGapPerSqft !== undefined ? `$${fmtNum(d.dealMath.estGapPerSqft)}` : "—"}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Cost breakdown summary */}
-            <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-0.5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-500">Rehab</span>
-                <span>
-                  <span className="text-slate-400">Auto: {fmt(d.rehab.auto ?? d.rehab.computed)}</span>
-                  {d.rehab.manual !== null && (
-                    <span className="ml-2 font-semibold text-emerald-700">Manual: {fmt(d.rehab.manual)}</span>
-                  )}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-500">Hold ({d.holding?.daysHeld ?? "—"} days)</span>
-                <span>{fmt(d.holding?.total)}</span>
-              </div>
-              {d.financing && (
-                <div className="flex items-center justify-between text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setShowFinancingModal(true)}
-                    className="text-slate-500 underline decoration-dotted underline-offset-2 hover:text-blue-600"
-                  >
-                    Financing ({fmtPct(d.financing.annualRate)} @ {fmtPct(d.financing.ltvPct)} LTV)
-                  </button>
-                  <span>{fmt(d.financing.total)}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </SectionCard>
-      </div>
-
-      {/* ── Manual Overrides (inline form) ── */}
-      <SectionCard title="Analyst Overrides">
-        <form
-          action={async (formData: FormData) => {
-            setIsSaving(true);
-            await saveManualAnalysisAction(initialManualAnalysisFormState, formData);
-            setIsSaving(false);
-            router.refresh();
-          }}
-          className="space-y-3"
-        >
-          <input type="hidden" name="analysis_id" value={d.analysisId} />
-          <input type="hidden" name="property_id" value={d.propertyId} />
-          <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-6">
-            <div>
-              <label className="dw-label">Final ARV</label>
-              <input type="number" name="arv_manual" className="dw-input" defaultValue={d.manualAnalysis?.arv_manual as number ?? ""} placeholder="Auto" />
-            </div>
-            <div>
-              <label className="dw-label">Manual Rehab</label>
-              <input type="number" name="rehab_manual" className="dw-input" defaultValue={d.manualAnalysis?.rehab_manual as number ?? ""} placeholder="Auto" />
-            </div>
-            <div>
-              <label className="dw-label">Days Held</label>
-              <input type="number" name="days_held_manual" className="dw-input" defaultValue={d.manualAnalysis?.days_held_manual as number ?? ""} placeholder="Auto" />
-            </div>
-            <div>
-              <label className="dw-label">Target Profit</label>
-              <input type="number" name="target_profit_manual" className="dw-input" defaultValue={d.manualAnalysis?.target_profit_manual as number ?? ""} placeholder="$40,000" />
-            </div>
-            <div>
-              <label className="dw-label">Condition</label>
-              <select name="analyst_condition" className="dw-select" defaultValue={d.manualAnalysis?.analyst_condition as string ?? ""}>
-                <option value="">—</option>
-                <option>Fixer</option><option>Poor</option><option>Fair</option>
-                <option>Average</option><option>Good</option><option>Excellent</option>
-              </select>
-            </div>
-            <div>
-              <label className="dw-label">Location Rating</label>
-              <select name="location_rating" className="dw-select" defaultValue={d.manualAnalysis?.location_rating as string ?? ""}>
-                <option value="">—</option>
-                <option>Poor</option><option>Fair</option><option>Average</option>
-                <option>Good</option><option>Excellent</option>
-              </select>
-            </div>
-            <div>
-              <label className="dw-label">Est. Rent/mo</label>
-              <input type="number" name="rent_estimate_monthly" className="dw-input" defaultValue={d.manualAnalysis?.rent_estimate_monthly as number ?? ""} />
-            </div>
-            <div>
-              <label className="dw-label">Loan Rate %</label>
-              <input type="number" step="0.1" name="financing_rate_manual" className="dw-input" defaultValue={d.manualAnalysis?.financing_rate_manual ? String(Number(d.manualAnalysis.financing_rate_manual) * 100) : ""} placeholder="11" />
-            </div>
-            <div>
-              <label className="dw-label">Points %</label>
-              <input type="number" step="0.1" name="financing_points_manual" className="dw-input" defaultValue={d.manualAnalysis?.financing_points_manual ? String(Number(d.manualAnalysis.financing_points_manual) * 100) : ""} placeholder="1" />
-            </div>
-            <div>
-              <label className="dw-label">LTV %</label>
-              <input type="number" step="1" name="financing_ltv_manual" className="dw-input" defaultValue={d.manualAnalysis?.financing_ltv_manual ? String(Number(d.manualAnalysis.financing_ltv_manual) * 100) : ""} placeholder="80" />
-            </div>
-          </div>
-          <button type="submit" className="dw-button-secondary text-xs" disabled={isSaving}>
-            {isSaving ? "Saving..." : "Save Overrides"}
-          </button>
-        </form>
-      </SectionCard>
-
-      {/* ── Comparable Sales ── */}
-      <SectionCard
-        title={`Comparable Sales (${d.compSummary.selectedCount} selected of ${d.compSummary.totalComps})`}
-        action={
+      {/* ================================================================== */}
+      {/* COMPARABLE SALES — map + table                                     */}
+      {/* ================================================================== */}
+      <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
+        <div className="flex items-center justify-between mb-2">
+          <CardTitle>
+            Comparable Sales ({d.compSummary.selectedCount} selected of {d.compSummary.totalComps})
+          </CardTitle>
           <button
             type="button"
             onClick={() => setShowCompModal(true)}
-            className="dw-button-secondary text-xs"
+            className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
           >
-            Edit Comps ↗
+            Edit Comps
           </button>
-        }
-      >
-        <div className="grid gap-2 sm:grid-cols-4 mb-3">
-          <StatChip label="Avg Close Price" value={fmt(d.compSummary.avgSelectedPrice)} />
-          <StatChip label="Avg PSF" value={d.compSummary.avgSelectedPsf ? `$${fmtNum(d.compSummary.avgSelectedPsf)}` : "—"} />
-          <StatChip label="Avg Distance" value={d.compSummary.avgSelectedDist ? `${fmtNum(d.compSummary.avgSelectedDist, 2)} mi` : "—"} />
-          <StatChip label="Selected ARV" value={fmt(d.arv.selected)} highlight />
         </div>
-
-        <div className="grid gap-3 xl:grid-cols-[400px_1fr]">
-          {/* Map — square (hidden when comp modal is open to avoid z-index overlap) */}
+        <div className="grid gap-2" style={{ gridTemplateColumns: "340px 1fr" }}>
+          {/* Map */}
           <div>
             {showCompModal ? (
-              <div className="flex h-[400px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-400">
+              <div className="flex h-[340px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-400">
                 Map open in comp editor
               </div>
             ) : mapPins.length > 1 ? (
               <CompMap
                 pins={mapPins}
-                height={400}
+                height={340}
                 subjectLat={d.property.latitude}
                 subjectLng={d.property.longitude}
               />
             ) : (
-              <div className="flex h-[400px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-400">
-                No location data available
+              <div className="flex h-[340px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-400">
+                No location data
               </div>
             )}
           </div>
-
           {/* Selected comps table */}
           <div>
             {selectedComps.length > 0 ? (
-              <div className="overflow-auto rounded-lg border border-slate-200">
-                <table className="w-full text-xs">
+              <div className="overflow-auto rounded-lg border border-slate-200 max-h-[340px]">
+                <table className="w-full text-[11px]">
                   <thead>
-                    <tr className="border-b border-slate-200 bg-slate-50 text-left text-[10px] uppercase tracking-[0.12em] text-slate-500">
-                      <th className="px-2 py-1.5">Address</th>
-                      <th className="px-2 py-1.5 text-right">Close Price</th>
-                      <th className="px-2 py-1.5 text-right">PSF</th>
-                      <th className="px-2 py-1.5 text-right">Sqft</th>
-                      <th className="px-2 py-1.5 text-right">Dist</th>
-                      <th className="px-2 py-1.5 text-right">Close Date</th>
+                    <tr className="border-b border-slate-200 bg-slate-50 text-left text-[9px] uppercase tracking-[0.1em] text-slate-500 sticky top-0">
+                      <th className="px-2 py-1">Address</th>
+                      <th className="px-2 py-1 text-right">Close</th>
+                      <th className="px-2 py-1 text-right">PSF</th>
+                      <th className="px-2 py-1 text-right">Sqft</th>
+                      <th className="px-2 py-1 text-right">Dist</th>
+                      <th className="px-2 py-1 text-right">Date</th>
                     </tr>
                   </thead>
                   <tbody>
                     {selectedComps.map((c) => (
                       <tr key={c.id} className="border-b border-slate-100 hover:bg-slate-50">
-                        <td className="px-2 py-1.5 font-medium text-slate-700">{c.address}</td>
-                        <td className="px-2 py-1.5 text-right font-mono text-slate-700">{fmt(c.closePrice)}</td>
-                        <td className="px-2 py-1.5 text-right font-mono text-slate-600">${fmtNum(c.ppsf)}</td>
-                        <td className="px-2 py-1.5 text-right text-slate-600">{fmtNum(c.sqft)}</td>
-                        <td className="px-2 py-1.5 text-right text-slate-600">{fmtNum(c.distance, 2)} mi</td>
-                        <td className="px-2 py-1.5 text-right text-slate-500">{c.closeDate ?? "—"}</td>
+                        <td className="px-2 py-1 font-medium text-slate-700">{c.address}</td>
+                        <td className="px-2 py-1 text-right font-mono text-slate-700">{fmt(c.closePrice)}</td>
+                        <td className="px-2 py-1 text-right font-mono text-slate-600">${fmtNum(c.ppsf)}</td>
+                        <td className="px-2 py-1 text-right text-slate-600">{fmtNum(c.sqft)}</td>
+                        <td className="px-2 py-1 text-right text-slate-600">{fmtNum(c.distance, 2)} mi</td>
+                        <td className="px-2 py-1 text-right text-slate-500">{c.closeDate ?? "\u2014"}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             ) : (
-              <div className="flex h-full items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-400">
-                No comps selected yet. Click &quot;Edit Comps&quot; to review and select comparable sales.
+              <div className="flex h-[340px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-400">
+                No comps selected. Click &quot;Edit Comps&quot; to review.
               </div>
             )}
           </div>
         </div>
-      </SectionCard>
+      </div>
 
-      {/* ── Notes ── */}
-      <SectionCard
-        title={`Notes (${d.notes.length})`}
-        action={
-          <button
-            type="button"
-            onClick={() => setShowNoteForm(!showNoteForm)}
-            className="text-xs text-blue-600 hover:underline"
-          >
-            {showNoteForm ? "Cancel" : "+ Add Note"}
-          </button>
-        }
-      >
-        {showNoteForm && (
+      {/* ================================================================== */}
+      {/* NOTES + PIPELINE (side by side, compressed)                        */}
+      {/* ================================================================== */}
+      <div className="grid gap-2 xl:grid-cols-[1fr_auto]">
+        {/* Notes */}
+        <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
+          <div className="flex items-center justify-between mb-1.5">
+            <CardTitle>Notes ({d.notes.length})</CardTitle>
+            <button
+              type="button"
+              onClick={() => setShowNoteForm(!showNoteForm)}
+              className="text-[10px] text-blue-600 hover:underline"
+            >
+              {showNoteForm ? "Cancel" : "+ Add"}
+            </button>
+          </div>
+
+          {showNoteForm && (
+            <form
+              action={async (formData: FormData) => {
+                await addAnalysisNoteAction(formData);
+                setNoteBody("");
+                setShowNoteForm(false);
+                router.refresh();
+              }}
+              className="mb-2 space-y-1.5 rounded border border-slate-200 bg-slate-50 p-2"
+            >
+              <input type="hidden" name="analysis_id" value={d.analysisId} />
+              <div className="flex gap-2">
+                <select
+                  name="note_type"
+                  className="dw-select !py-1 !text-xs"
+                  value={noteCategory}
+                  onChange={(e) => setNoteCategory(e.target.value)}
+                >
+                  {NOTE_CATEGORIES.map((c) => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </select>
+                <label className="flex items-center gap-1 text-[10px] text-slate-500">
+                  <input type="checkbox" name="is_public" defaultChecked={noteCategory !== "internal"} />
+                  Public
+                </label>
+              </div>
+              <textarea
+                name="note_body"
+                className="dw-textarea !py-1 !text-xs w-full"
+                rows={2}
+                placeholder="Enter note..."
+                value={noteBody}
+                onChange={(e) => setNoteBody(e.target.value)}
+                required
+              />
+              <button type="submit" className="dw-button-primary !py-1 !text-[10px]">Save Note</button>
+            </form>
+          )}
+
+          {d.notes.length === 0 && !showNoteForm ? (
+            <p className="py-2 text-center text-[10px] text-slate-400">No notes yet.</p>
+          ) : (
+            <div className="space-y-0.5">
+              {d.notes.map((note) => {
+                const cat = NOTE_CATEGORIES.find((c) => c.value === note.note_type);
+                return (
+                  <div key={note.id} className="flex items-start gap-1.5 rounded border border-slate-100 bg-white px-1.5 py-1 text-[11px]">
+                    <span className="shrink-0 rounded bg-slate-100 px-1 py-0.5 text-[9px] font-bold uppercase text-slate-500">
+                      {cat?.icon ?? "?"} {cat?.label ?? note.note_type}
+                    </span>
+                    <span className="flex-1 text-slate-700">{note.note_body}</span>
+                    <span className={`shrink-0 text-[9px] ${note.is_public ? "text-emerald-600" : "text-slate-400"}`}>
+                      {note.is_public ? "Pub" : "Int"}
+                    </span>
+                    <form action={async (formData: FormData) => { await deleteAnalysisNoteAction(formData); router.refresh(); }}>
+                      <input type="hidden" name="note_id" value={note.id} />
+                      <input type="hidden" name="analysis_id" value={d.analysisId} />
+                      <button type="submit" className="text-[10px] text-red-400 hover:text-red-600">x</button>
+                    </form>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Pipeline */}
+        <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
+          <CardTitle>Pipeline</CardTitle>
           <form
             action={async (formData: FormData) => {
-              await addAnalysisNoteAction(formData);
-              setNoteBody("");
-              setShowNoteForm(false);
+              await savePipelineAction(formData);
               router.refresh();
             }}
-            className="mb-3 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3"
+            className="space-y-1.5"
           >
             <input type="hidden" name="analysis_id" value={d.analysisId} />
-            <div className="flex gap-2">
-              <select
-                name="note_type"
-                className="dw-select"
-                value={noteCategory}
-                onChange={(e) => setNoteCategory(e.target.value)}
-              >
-                {NOTE_CATEGORIES.map((c) => (
-                  <option key={c.value} value={c.value}>{c.icon} {c.label}</option>
-                ))}
+            <div>
+              <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Interest</label>
+              <select name="interest_level" className="dw-select !py-1 !text-xs" defaultValue={d.pipeline?.interest_level as string ?? ""}>
+                <option value="">—</option>
+                {PIPELINE_INTEREST.map((v) => <option key={v}>{v}</option>)}
               </select>
-              <label className="flex items-center gap-1 text-xs text-slate-500">
-                <input
-                  type="checkbox"
-                  name="is_public"
-                  defaultChecked={noteCategory !== "internal"}
-                />
-                Public
-              </label>
             </div>
-            <textarea
-              name="note_body"
-              className="dw-textarea w-full"
-              rows={2}
-              placeholder="Enter note..."
-              value={noteBody}
-              onChange={(e) => setNoteBody(e.target.value)}
-              required
-            />
-            <button type="submit" className="dw-button-primary text-xs">Save Note</button>
+            <div>
+              <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Showing</label>
+              <select name="showing_status" className="dw-select !py-1 !text-xs" defaultValue={d.pipeline?.showing_status as string ?? ""}>
+                <option value="">—</option>
+                {PIPELINE_SHOWING.map((v) => <option key={v}>{v}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Offer</label>
+              <select name="offer_status" className="dw-select !py-1 !text-xs" defaultValue={d.pipeline?.offer_status as string ?? ""}>
+                <option value="">—</option>
+                {PIPELINE_OFFER.map((v) => <option key={v}>{v}</option>)}
+              </select>
+            </div>
+            <button type="submit" className="dw-button-secondary !py-1 !text-[10px] w-full">Save</button>
           </form>
-        )}
-
-        {d.notes.length === 0 && !showNoteForm ? (
-          <p className="py-3 text-center text-xs text-slate-400">No notes yet.</p>
-        ) : (
-          <div className="space-y-1">
-            {d.notes.map((note) => {
-              const cat = NOTE_CATEGORIES.find((c) => c.value === note.note_type);
-              return (
-                <div key={note.id} className="flex items-start gap-2 rounded border border-slate-100 bg-white px-2 py-1.5 text-sm">
-                  <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600">
-                    {cat?.icon} {cat?.label ?? note.note_type}
-                  </span>
-                  <span className="flex-1 text-slate-700">{note.note_body}</span>
-                  <span className={`shrink-0 text-[10px] ${note.is_public ? "text-emerald-600" : "text-slate-400"}`}>
-                    {note.is_public ? "Public" : "Internal"}
-                  </span>
-                  <form action={async (formData: FormData) => { await deleteAnalysisNoteAction(formData); router.refresh(); }}>
-                    <input type="hidden" name="note_id" value={note.id} />
-                    <input type="hidden" name="analysis_id" value={d.analysisId} />
-                    <button type="submit" className="text-[10px] text-red-400 hover:text-red-600">✕</button>
-                  </form>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </SectionCard>
-
-      {/* ── Pipeline ── */}
-      <SectionCard title="Pipeline">
-        <form
-          action={async (formData: FormData) => {
-            await savePipelineAction(formData);
-            router.refresh();
-          }}
-          className="flex flex-wrap items-end gap-3"
-        >
-          <input type="hidden" name="analysis_id" value={d.analysisId} />
-          <div>
-            <label className="dw-label">Interest Level</label>
-            <select name="interest_level" className="dw-select" defaultValue={d.pipeline?.interest_level as string ?? ""}>
-              <option value="">—</option>
-              {PIPELINE_INTEREST.map((v) => <option key={v}>{v}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="dw-label">Showing Status</label>
-            <select name="showing_status" className="dw-select" defaultValue={d.pipeline?.showing_status as string ?? ""}>
-              <option value="">—</option>
-              {PIPELINE_SHOWING.map((v) => <option key={v}>{v}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="dw-label">Offer Status</label>
-            <select name="offer_status" className="dw-select" defaultValue={d.pipeline?.offer_status as string ?? ""}>
-              <option value="">—</option>
-              {PIPELINE_OFFER.map((v) => <option key={v}>{v}</option>)}
-            </select>
-          </div>
-          <button type="submit" className="dw-button-secondary text-xs">Save Pipeline</button>
-        </form>
-      </SectionCard>
-
-      {/* ── Financing Detail Modal ── */}
-      {showFinancingModal && d.financing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="relative w-full max-w-md rounded-xl border border-slate-300 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-              <h2 className="text-sm font-semibold text-slate-800">Financing Detail</h2>
-              <button
-                type="button"
-                onClick={() => setShowFinancingModal(false)}
-                className="rounded px-2 py-1 text-sm font-medium text-slate-600 hover:bg-slate-100"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="space-y-3 p-4">
-              {/* Loan parameters */}
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Loan Parameters</div>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                  <span className="text-slate-500">Loan Basis (ARV)</span>
-                  <span className="text-right font-mono">{fmt(d.arv.effective)}</span>
-                  <span className="text-slate-500">LTV</span>
-                  <span className="text-right font-mono">{fmtPct(d.financing.ltvPct)}</span>
-                  <span className="text-slate-500">Loan Amount</span>
-                  <span className="text-right font-mono font-semibold">{fmt(d.financing.loanAmount)}</span>
-                  <span className="text-slate-500">Annual Rate</span>
-                  <span className="text-right font-mono">{fmtPct(d.financing.annualRate)}</span>
-                  <span className="text-slate-500">Origination Points</span>
-                  <span className="text-right font-mono">{fmtPct(d.financing.pointsRate)}</span>
-                  <span className="text-slate-500">Hold Period</span>
-                  <span className="text-right font-mono">{d.financing.daysHeld} days</span>
-                </div>
-              </div>
-
-              {/* Cost breakdown */}
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Cost Breakdown</div>
-                <div className="space-y-1 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Interest ({d.financing.daysHeld} days)</span>
-                    <span className="font-mono text-red-600">{fmt(d.financing.interestCost)}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Origination Fee</span>
-                    <span className="font-mono text-red-600">{fmt(d.financing.originationCost)}</span>
-                  </div>
-                  <div className="flex items-center justify-between border-t border-slate-300 pt-1">
-                    <span className="font-semibold">Total Financing</span>
-                    <span className="font-mono font-bold text-red-700">{fmt(d.financing.total)}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Reference rates */}
-              <div className="rounded-lg border border-slate-200 bg-white p-3">
-                <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Reference</div>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                  <span className="text-slate-500">Monthly Payment (I/O)</span>
-                  <span className="text-right font-mono">{fmt(d.financing.monthlyPayment)}</span>
-                  <span className="text-slate-500">Daily Interest</span>
-                  <span className="text-right font-mono">${fmtNum(d.financing.dailyInterest, 2)}</span>
-                </div>
-              </div>
-
-              <p className="text-[10px] text-slate-400">
-                Loan based on ARV &times; LTV (hard money). Override rate, points, and LTV in Analyst Overrides.
-              </p>
-            </div>
-          </div>
         </div>
-      )}
+      </div>
 
-      {/* ── Comp Selection Modal ── */}
+      {/* ================================================================== */}
+      {/* COMP SELECTION MODAL                                               */}
+      {/* ================================================================== */}
       {showCompModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="relative flex h-[90vh] w-[92vw] flex-col overflow-hidden rounded-xl border border-slate-300 bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
-              <h2 className="text-sm font-semibold text-slate-800">Comparable Selection — {d.property.address}</h2>
+              <h2 className="text-sm font-semibold text-slate-800">Comparable Selection &mdash; {d.property.address}</h2>
               <div className="flex items-center gap-3">
                 <p className="text-[10px] text-slate-400">
                   Hover for details &middot; Click to select/deselect &middot;
@@ -765,7 +990,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                   onClick={() => { setShowCompModal(false); router.refresh(); }}
                   className="rounded px-3 py-1 text-sm font-medium text-slate-600 hover:bg-slate-100"
                 >
-                  ✕ Close
+                  Close
                 </button>
               </div>
             </div>

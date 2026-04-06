@@ -301,6 +301,7 @@ export async function saveManualAnalysisAction(
     financing_ltv_manual: nullablePctToDecimal(formData, "financing_ltv_manual"),
     design_rating: nullableText(formData, "design_rating"),
     location_rating: nullableText(formData, "location_rating"),
+    rehab_scope: nullableText(formData, "rehab_scope"),
   });
 
   if (manualError) {

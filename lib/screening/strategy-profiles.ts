@@ -6,7 +6,7 @@
 // contain no hardcoded constants. To adjust behaviour, edit the profile.
 // ---------------------------------------------------------------------------
 
-import type { PropertyTypeKey } from "./types";
+import type { PropertyTypeKey, RehabScopeTier } from "./types";
 
 // ---------------------------------------------------------------------------
 // ARV configuration
@@ -85,6 +85,8 @@ export type RehabMultiplierConfig = {
 export type RehabConfig = {
   ratesByPropertyType: Record<PropertyTypeKey, RehabRates>;
   multipliers: RehabMultiplierConfig;
+  /** Scope tier multipliers applied on top of composite multiplier. */
+  scopeMultipliers: Record<RehabScopeTier, number>;
 };
 
 // ---------------------------------------------------------------------------
@@ -132,6 +134,8 @@ export type FinancingConfig = {
   originationPointsRate: number;
   /** Loan-to-value ratio based on ARV (e.g. 0.80 = 80% LTV). */
   ltvPct: number;
+  /** Down payment as a fraction of purchase price (e.g. 0.20 = 20%). */
+  downPaymentRate: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -275,6 +279,12 @@ export const DENVER_FLIP_V1: FlipStrategyProfile = {
       ],
       ageDefault: 1.0,
     },
+    scopeMultipliers: {
+      cosmetic: 0.6,
+      moderate: 1.0,
+      heavy: 1.4,
+      gut: 2.0,
+    },
   },
 
   // -- Holding --------------------------------------------------------------
@@ -300,6 +310,7 @@ export const DENVER_FLIP_V1: FlipStrategyProfile = {
     annualRate: 0.11,           // 11% hard money rate
     originationPointsRate: 0.01, // 1 point origination fee
     ltvPct: 0.80,               // 80% of ARV
+    downPaymentRate: 0.20,      // 20% of purchase price
   },
 
   // -- Qualification (Prime Candidates) -------------------------------------

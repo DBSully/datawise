@@ -5,6 +5,9 @@
 /** Canonical property-type key used to look up strategy-profile parameters. */
 export type PropertyTypeKey = "detached" | "condo" | "townhome";
 
+/** Rehab scope tiers — analyst-selectable renovation depth. */
+export type RehabScopeTier = "cosmetic" | "moderate" | "heavy" | "gut";
+
 // ---------------------------------------------------------------------------
 // ARV
 // ---------------------------------------------------------------------------
@@ -126,6 +129,26 @@ export type FinancingResult = {
   monthlyPayment: number;
   dailyInterest: number;
   total: number;
+};
+
+// ---------------------------------------------------------------------------
+// Cash out of pocket
+// ---------------------------------------------------------------------------
+
+export type CashRequiredResult = {
+  purchasePrice: number;
+  downPaymentRate: number;
+  downPayment: number;
+  loanForPurchase: number;
+  originationCost: number;
+  loanAvailableForRehab: number;
+  rehabTotal: number;
+  rehabFromLoan: number;
+  rehabOutOfPocket: number;
+  acquisitionTitle: number;
+  holdingTotal: number;
+  interestCost: number;
+  totalCashRequired: number;
 };
 
 // ---------------------------------------------------------------------------

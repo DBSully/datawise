@@ -1,3 +1,106 @@
+## 2026-04-05 — Analysis Workstation Redesign, Cost Breakdown Cards, and Cash-to-Close
+
+### Summary
+
+Complete redesign of the analysis workstation page for single-screen productivity. Replaced the spread-out card layout with a dense 5-column analysis grid showing the deal waterfall, detailed cost breakdown cards for all five calculation components (ARV, Rehab, Holding, Transaction, Financing), and compressed analyst overrides — all above the comp map and table. Added rehab scope tiers (Cosmetic/Moderate/Heavy/Gut), a Cash Required calculator, and dual max offer display (Financed vs Cash buyer).
+
+---
+
+### Analysis Workstation UX Redesign
+
+#### Compact header bar
+Property facts (type, beds/baths, sqft, basement, year built, lot, tax, HOA, list price) collapsed into a single dense inline bar, replacing the oversized Property Facts card and 7-chip stat row.
+
+#### 5-column analysis grid
+All cost analysis fits in one horizontal band:
+
+| Column | Content |
+|--------|---------|
+| Deal Waterfall (180px) | ARV → costs → Max Offer (Financed + Cash) with Offer %, Spread, Gap/sqft, Project Costs |
+| ARV Detail | 3-tier ARV (Auto/Selected/Final), per-comp ARV table with adjusted values and decay weights |
+| Rehab Detail | Scope tier selector, multiplier breakdown, line items (above/below grade, exterior, landscaping, systems) |
+| Holding + Transaction (stacked) | Holding: daily cost breakdown with daily rates. Transaction: title + commission line items with percentages |
+| Financing + Cash Required + Overrides (stacked) | Financing detail, cash-to-close breakdown, compressed override form |
+
+#### Comps + map
+Map (340px) and selected comps table side by side below the analysis grid. Notes and Pipeline compressed side by side at the bottom.
+
+---
+
+### Rehab Scope Tiers (New Feature)
+
+Added analyst-selectable renovation depth that multiplies all rehab line items:
+
+| Tier | Multiplier | Description |
+|------|-----------|-------------|
+| Cosmetic | 0.6x | Paint, carpet, cleaning |
+| Moderate | 1.0x | Standard rehab (default) |
+| Heavy | 1.4x | Significant structural/mechanical |
+| Gut | 2.0x | Down to studs |
+
+- Clickable buttons in the Rehab card — saves immediately and recalculates
+- Scope multiplier applied on top of existing composite multiplier (type × condition × price × age × scope)
+- New `rehab_scope` column in `manual_analysis` table
+- New `scopeMultipliers` config in `RehabConfig` type and `DENVER_FLIP_V1` profile
+- New `RehabScopeTier` type in `lib/screening/types.ts`
+
+#### Database migration
+- `20260405180000_add_rehab_scope.sql` — adds `rehab_scope text` with check constraint for valid values
+
+---
+
+### Cash Required Calculator (New Feature)
+
+Answers "how much cash do I need in the bank to execute this deal?" based on the max offer price:
+
+```
+Down Payment     = Max Offer × 20%
+Loan for Purchase = Max Offer − Down Payment
+Origination      = deducted from loan at closing
+Loan for Rehab   = Loan Amount − Purchase Portion − Origination
+Rehab OOP        = max(0, Rehab Total − Loan Available for Rehab)
+
+Total Cash = Down Payment + Acq Title + Origination + Rehab OOP + Holding + Interest
+```
+
+- Uses max offer (not list price) as purchase basis
+- Shows loan utilization: how much funds purchase vs rehab draws
+- Excludes disposition costs (paid from sale proceeds)
+- Notes that down payment is equity returned at sale
+- New `downPaymentRate` field in `FinancingConfig` (default 20%)
+
+---
+
+### Dual Max Offer Display
+
+Deal Math waterfall now shows two offer lines:
+- **Financed** — standard max offer accounting for all costs including financing
+- **Cash** — max offer + financing cost (cash buyer avoids interest + origination, can offer more for same profit)
+
+---
+
+### Full Calculation Detail Cards
+
+All five cost components now show detailed breakdowns inline (previously only totals were visible):
+
+- **ARV**: per-comp table with close price, time-adjusted ARV, and decay weight
+- **Rehab**: scope selector, individual multipliers, 6 line items with per-sqft rates
+- **Holding**: daily rates for each cost category (tax, insurance, HOA, utilities) alongside period totals
+- **Transaction**: each line item with its rate percentage
+- **Financing**: loan parameters, daily interest rate inline with interest cost, I/O monthly payment
+
+---
+
+### Technical Changes
+
+- **page.tsx**: Now computes and passes full `RehabResult`, `HoldingResult`, `TransactionResult`, and ARV per-comp details to the client component (previously only totals)
+- **strategy-profiles.ts**: Added `scopeMultipliers` to `RehabConfig`, `downPaymentRate` to `FinancingConfig`
+- **types.ts**: Added `RehabScopeTier`, `CashRequiredResult` types
+- **actions.ts**: `saveManualAnalysisAction` now persists `rehab_scope`
+- "Total Costs" renamed to "Project Costs" in Deal Math to distinguish from Cash Required
+
+---
+
 ## 2026-04-05 — Financing Engine, Methodology Report, and Map Enrichments
 
 ### Summary
