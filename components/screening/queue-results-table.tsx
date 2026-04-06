@@ -103,6 +103,7 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
           <thead>
             <tr>
               <th style={{ width: 40 }}></th>
+              <th style={{ width: 72 }}></th>
               <th style={{ width: 20 }}></th>
               <th>Address</th>
               <th>City</th>
@@ -119,7 +120,6 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
               <th className="text-right">Hold</th>
               <th className="text-right">Max Offer</th>
               <th className="text-right">Offer%</th>
-              <th></th>
               <th></th>
             </tr>
           </thead>
@@ -147,6 +147,18 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
                         Map
                       </button>
                     ) : null}
+                  </td>
+                  <td>
+                    {r.promoted_analysis_id ? (
+                      <Link
+                        href={`/analysis/properties/${r.real_property_id}/analyses/${r.promoted_analysis_id}`}
+                        className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800"
+                      >
+                        In Analysis
+                      </Link>
+                    ) : (
+                      <span className="text-[10px] text-slate-400">Ready</span>
+                    )}
                   </td>
                   <td className="text-center">
                     {r.is_prime_candidate ? (
@@ -211,18 +223,6 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
                   </td>
                   <td className="text-right text-slate-500">
                     {formatPercent(r.offer_pct)}
-                  </td>
-                  <td>
-                    {r.promoted_analysis_id ? (
-                      <Link
-                        href={`/analysis/properties/${r.real_property_id}/analyses/${r.promoted_analysis_id}`}
-                        className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800"
-                      >
-                        In Analysis
-                      </Link>
-                    ) : (
-                      <span className="text-[10px] text-slate-400">Ready</span>
-                    )}
                   </td>
                   <td>
                     <Link
