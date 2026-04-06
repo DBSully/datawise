@@ -105,18 +105,18 @@ export function CompMap({
 }: CompMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
+  const markerLayerRef = useRef<L.LayerGroup | null>(null);
+  const circleLayerRef = useRef<L.LayerGroup | null>(null);
+  const initialFitDoneRef = useRef(false);
   // Keep a stable ref to the callback so the effect doesn't re-run on every render
   const onPinClickRef = useRef(onPinClick);
   onPinClickRef.current = onPinClick;
 
+  // -- Effect 1: Create the map instance once --
   useEffect(() => {
-    if (!containerRef.current || pins.length === 0) return;
+    if (!containerRef.current) return;
 
-    // Clean up previous map instance
-    if (mapRef.current) {
-      mapRef.current.remove();
-      mapRef.current = null;
-    }
+    if (mapRef.current) return; // already initialized
 
     const map = L.map(containerRef.current, {
       scrollWheelZoom: false,
@@ -133,6 +133,38 @@ export function CompMap({
         '&copy; <a href="https://openstreetmap.org/copyright">OSM</a>',
       )
       .addTo(map);
+
+    // Set a default view so the map is valid before pins arrive
+    map.setView([39.7392, -104.9903], 11);
+
+    markerLayerRef.current = L.layerGroup().addTo(map);
+    circleLayerRef.current = L.layerGroup().addTo(map);
+    mapRef.current = map;
+    initialFitDoneRef.current = false;
+
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+        markerLayerRef.current = null;
+        circleLayerRef.current = null;
+        initialFitDoneRef.current = false;
+      }
+    };
+  }, []); // only runs once
+
+  // -- Effect 2: Update markers when pins change (preserve zoom/center) --
+  useEffect(() => {
+    const map = mapRef.current;
+    const markerLayer = markerLayerRef.current;
+    const circleLayer = circleLayerRef.current;
+    if (!map || !markerLayer || !circleLayer) return;
+
+    // Clear previous markers and circles
+    markerLayer.clearLayers();
+    circleLayer.clearLayers();
+
+    if (pins.length === 0) return;
 
     const bounds = L.latLngBounds([]);
 
@@ -209,8 +241,8 @@ export function CompMap({
       const pad = iconSize / 2 + 4;
 
       function bestDir(): { direction: L.Direction; offset: L.PointExpression } {
-        const pinPt = map.latLngToContainerPoint(marker.getLatLng());
-        const size = map.getSize();
+        const pinPt = map!.latLngToContainerPoint(marker.getLatLng());
+        const size = map!.getSize();
         const dx = size.x / 2 - pinPt.x;
         const dy = size.y / 2 - pinPt.y;
 
@@ -244,11 +276,12 @@ export function CompMap({
       const marker = L.marker([pin.lat, pin.lng], {
         icon: compIcon("#94a3b8", border, 13),
         zIndexOffset: 100,
-      }).addTo(map);
+      });
       addSmartTooltip(marker, pin, 13);
       if (onPinClickRef.current) {
         marker.on("click", () => onPinClickRef.current?.(pin.id, "candidate"));
       }
+      markerLayer.addLayer(marker);
       bounds.extend([pin.lat, pin.lng]);
     }
 
@@ -257,11 +290,12 @@ export function CompMap({
       const marker = L.marker([pin.lat, pin.lng], {
         icon: ICONS.selected,
         zIndexOffset: 200,
-      }).addTo(map);
+      });
       addSmartTooltip(marker, pin, 14);
       if (onPinClickRef.current) {
         marker.on("click", () => onPinClickRef.current?.(pin.id, "selected"));
       }
+      markerLayer.addLayer(marker);
       bounds.extend([pin.lat, pin.lng]);
     }
 
@@ -270,8 +304,9 @@ export function CompMap({
       const marker = L.marker([pin.lat, pin.lng], {
         icon: ICONS.subject,
         zIndexOffset: 1000,
-      }).addTo(map);
+      });
       addSmartTooltip(marker, pin, 20);
+      markerLayer.addLayer(marker);
       bounds.extend([pin.lat, pin.lng]);
     }
 
@@ -279,27 +314,27 @@ export function CompMap({
     if (showDistanceCircles && subjectLat && subjectLng) {
       const subjectLatLng = L.latLng(subjectLat, subjectLng);
 
-      const halfMileCircle = L.circle(subjectLatLng, {
+      circleLayer.addLayer(L.circle(subjectLatLng, {
         radius: 0.5 * METERS_PER_MILE,
         color: "#6366f1",
         weight: 1.5,
         dashArray: "6 4",
         fillOpacity: 0.03,
         interactive: false,
-      }).addTo(map);
+      }));
 
-      const oneMileCircle = L.circle(subjectLatLng, {
+      circleLayer.addLayer(L.circle(subjectLatLng, {
         radius: 1 * METERS_PER_MILE,
         color: "#6366f1",
         weight: 1.5,
         dashArray: "6 4",
         fillOpacity: 0.02,
         interactive: false,
-      }).addTo(map);
+      }));
 
       // Place labels on the right edge of each ring
       const halfMilePt = subjectLatLng.toBounds(0.5 * METERS_PER_MILE * 2);
-      L.marker([subjectLat, halfMilePt.getEast()], {
+      circleLayer.addLayer(L.marker([subjectLat, halfMilePt.getEast()], {
         icon: L.divIcon({
           className: "leaflet-distance-label",
           html: "0.5 mi",
@@ -307,10 +342,10 @@ export function CompMap({
           iconAnchor: [20, 8],
         }),
         interactive: false,
-      }).addTo(map);
+      }));
 
       const oneMilePt = subjectLatLng.toBounds(1 * METERS_PER_MILE * 2);
-      L.marker([subjectLat, oneMilePt.getEast()], {
+      circleLayer.addLayer(L.marker([subjectLat, oneMilePt.getEast()], {
         icon: L.divIcon({
           className: "leaflet-distance-label",
           html: "1 mi",
@@ -318,21 +353,14 @@ export function CompMap({
           iconAnchor: [16, 8],
         }),
         interactive: false,
-      }).addTo(map);
+      }));
     }
 
-    if (bounds.isValid()) {
+    // Only fit bounds on the first render — preserve user's zoom/pan after that
+    if (!initialFitDoneRef.current && bounds.isValid()) {
       map.fitBounds(bounds, { padding: [30, 30], maxZoom: 16 });
+      initialFitDoneRef.current = true;
     }
-
-    mapRef.current = map;
-
-    return () => {
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-      }
-    };
   }, [pins, subjectLat, subjectLng, showDistanceCircles]);
 
   if (pins.length === 0) {
