@@ -39,19 +39,34 @@ export async function runScreeningAction(formData: FormData): Promise<void> {
     .filter(Boolean);
 
   // Find subject properties: those with active/coming-soon listings
-  const { data: listings, error: listingsError } = await supabase
-    .from("mls_listings")
-    .select("real_property_id")
-    .in("mls_status", statuses);
+  // Paginate to avoid the default PostgREST 1,000-row cap
+  const PAGE_SIZE = 1000;
+  const propertyIdSet = new Set<string>();
+  let offset = 0;
+  let hasMore = true;
 
-  if (listingsError) {
-    throw new Error(listingsError.message);
+  while (hasMore) {
+    const { data: page, error: pageError } = await supabase
+      .from("mls_listings")
+      .select("real_property_id")
+      .in("mls_status", statuses)
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (pageError) {
+      throw new Error(pageError.message);
+    }
+
+    for (const row of page ?? []) {
+      propertyIdSet.add(row.real_property_id);
+    }
+
+    if (!page || page.length < PAGE_SIZE) {
+      hasMore = false;
+    } else {
+      offset += PAGE_SIZE;
+    }
   }
 
-  // Deduplicate property IDs
-  const propertyIdSet = new Set<string>(
-    (listings ?? []).map((l: { real_property_id: string }) => l.real_property_id),
-  );
   const propertyIds = Array.from(propertyIdSet);
 
   if (propertyIds.length === 0) {

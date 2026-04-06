@@ -1,3 +1,19 @@
+## 2026-04-05 — Fix Screening Subject Query Pagination
+
+### Summary
+
+Fixed a bug where screening batches were silently capped at ~1,000 subjects due to the default Supabase/PostgREST row limit. The subject listing query in `app/(workspace)/analysis/screening/actions.ts` was fetching matching MLS listings without pagination, so only the first 1,000 rows were returned. After deduplication this yielded 984 unique properties instead of the expected 6,410+ active listings.
+
+### What changed
+
+- **`actions.ts` → `runScreeningAction`**: Replaced the single unpaginated Supabase query with a paginated loop that fetches listings in pages of 1,000 and accumulates all `real_property_id` values until no more rows remain.
+
+### Root cause
+
+Same class of bug as the import batch processing cap documented in CLAUDE.md §21.7 — any Supabase `.select()` without explicit `.range()` or `.limit()` silently returns at most 1,000 rows.
+
+---
+
 ## 2026-04-05 — Data-Driven Market Trend Engine
 
 ### Summary
