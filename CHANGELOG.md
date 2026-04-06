@@ -1,3 +1,66 @@
+## 2026-04-06 — Reports Feature: PDF-Ready Analysis Reports with Comp Map
+
+### Summary
+
+Full reports workflow enabling analysts to generate professional, PDF-ready analysis reports from completed analyses. Reports are frozen snapshots stored in `analysis_reports.content_json`, rendering subject property details, deal math waterfall, rehab budget, comparable sales table with numbered pins on an interactive map, and public analysis notes — all branded with the DataWise logo.
+
+### Architecture
+
+- **Reports are snapshots** — `content_json` freezes analysis state at generation time. Reports never re-query live data, making them stable and shareable.
+- **Shared data loading** — Extracted ~570 lines of data loading + computation from the analysis page into `lib/analysis/load-workstation-data.ts`. Both the analysis workstation and report generation call the same function, ensuring the snapshot matches what the analyst sees.
+- **Shared formatters** — `fmt`, `fmtNum`, `fmtPct` extracted from the workstation to `lib/reports/format.ts` for reuse across workstation and report components.
+- **Shared types** — `WorkstationData`, `ReportContentJson`, and all sub-types (`RehabDetail`, `HoldingDetail`, etc.) centralized in `lib/reports/types.ts`.
+
+### Features
+
+- **Generate Report button** on the analysis workstation header bar. Opens a dialog to confirm the report title, then snapshots current analysis data and redirects to the report view.
+- **Report viewer** at `/reports/[reportId]` renders a clean, professional document with DataWise branding, print-optimized layout.
+- **Print / Save PDF** button triggers browser print with custom `@media print` CSS that hides app chrome, preserves map/marker colors, and formats for letter-size pages.
+- **Report Library** at `/reports` lists all reports grouped by property with title, type, date, and view links.
+- **Comp map in reports** — same `CompMap` component used elsewhere, rendered with selected comps only (no interactivity). Subject = red pin, comps = numbered green pins.
+- **Numbered comp cross-reference** — each comparable sale is numbered (#1, #2, ...) in the table with a green badge, and the corresponding map pin displays the same number inside the marker.
+- **Print color preservation** — `print-color-adjust: exact` applied to map tiles, markers, and report badges so colors render correctly in PDF output.
+
+### Report document sections
+
+1. Header with DataWise logo, strategy type, generation date
+2. Subject property details (type, sqft, beds/baths, year built, lot, list price)
+3. Deal math summary cards (ARV, Max Offer, Spread, Gap/SqFt) + full waterfall + cash required
+4. Rehab budget (scope, multiplier, line items)
+5. Holding & transaction cost breakdown
+6. Comparable sales table (numbered) with summary stats + interactive map with numbered pins
+7. Public analysis notes
+8. Footer with DataWise branding
+
+### Future-ready
+
+- `analysis_reports.access_token` column + anon RLS policy already support password-protected public report sharing (not yet wired up).
+- `ReportContentJson.staticMapUrl` field reserved for future static map image API integration.
+- `MapPin.pinLabel` is generic — can be used for any labeling need beyond reports.
+
+### New files
+
+- `lib/reports/types.ts` — `ReportContentJson`, `WorkstationData`, shared sub-types
+- `lib/reports/format.ts` — shared formatting utilities
+- `lib/reports/snapshot.ts` — `buildReportSnapshot()` converts workstation data to report JSON
+- `lib/analysis/load-workstation-data.ts` — extracted data loading + computation
+- `app/(workspace)/reports/actions.ts` — `generateReportAction`, `deleteReportAction`
+- `app/(workspace)/reports/[reportId]/page.tsx` — report viewer route
+- `app/(workspace)/reports/[reportId]/report-viewer.tsx` — client component with print/delete
+- `components/reports/report-document.tsx` — full report layout
+- `public/logos/datawise-logo.png` — DataWise logo for report headers
+
+### Modified files
+
+- `app/(workspace)/analysis/properties/[id]/analyses/[analysisId]/page.tsx` — simplified from ~620 to ~30 lines using `loadWorkstationData()`
+- `app/(workspace)/analysis/properties/[id]/analyses/[analysisId]/analysis-workstation.tsx` — types/formatters extracted to shared modules, Generate Report button + dialog added
+- `app/(workspace)/reports/page.tsx` — replaced placeholder with full Report Library
+- `app/globals.css` — `@media print` block with color preservation
+- `components/layout/app-chrome.tsx` — `data-print-hide` on header bars
+- `components/properties/comp-map.tsx` — `pinLabel` field on `MapPin`, `numberedIcon()` for labeled markers
+
+---
+
 ## 2026-04-06 — Screen Unscreened, Import-Linked Screening, Dashboard & Lifecycle
 
 ### Summary

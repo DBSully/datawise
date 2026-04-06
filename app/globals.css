@@ -305,3 +305,67 @@ body {
 .comp-map-tooltip::before {
   border-top-color: #e2e8f0 !important;
 }
+
+/* ================================================================== */
+/* Print styles for report PDF export                                 */
+/* ================================================================== */
+@media print {
+  /* Hide app chrome */
+  [data-print-hide] {
+    display: none !important;
+  }
+
+  /* Hide report action buttons */
+  .report-actions {
+    display: none !important;
+  }
+
+  /* Reset page */
+  html, body {
+    background: white !important;
+    color: black !important;
+    font-size: 12px !important;
+  }
+
+  /* Remove card wrapper styling for clean print */
+  .report-document {
+    box-shadow: none !important;
+    border: none !important;
+    max-width: 100% !important;
+  }
+
+  /* Prevent section splits across pages */
+  .report-section {
+    break-inside: avoid;
+  }
+
+  /* Page margins */
+  @page {
+    margin: 0.6in 0.5in;
+    size: letter;
+  }
+
+  /* Ensure tables print cleanly */
+  table {
+    font-size: 10px !important;
+  }
+
+  /* Preserve map marker, tile, and badge colors in print */
+  .leaflet-container,
+  .leaflet-container *,
+  .report-document {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  /* Hide the main content padding/wrapper border on print */
+  main {
+    padding: 0 !important;
+  }
+  main > div > .rounded-lg {
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+}

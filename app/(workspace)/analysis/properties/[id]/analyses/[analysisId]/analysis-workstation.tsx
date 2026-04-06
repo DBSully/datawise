@@ -19,201 +19,20 @@ import {
 } from "@/app/(workspace)/analysis/properties/actions";
 import { initialManualAnalysisFormState } from "@/lib/analysis/manual-analysis-state";
 import { ComparableWorkspacePanel } from "@/components/properties/comparable-workspace-panel";
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-type RehabScopeTier = "cosmetic" | "moderate" | "heavy" | "gut";
-
-type RehabDetail = {
-  compositeMultiplier: number;
-  typeMultiplier: number;
-  conditionMultiplier: number;
-  priceMultiplier: number;
-  ageMultiplier: number;
-  aboveGrade: number;
-  belowGradeFinished: number;
-  belowGradeUnfinished: number;
-  belowGradeTotal: number;
-  interior: number;
-  exterior: number;
-  landscaping: number;
-  systems: number;
-  total: number;
-  perSqftBuilding: number;
-  perSqftAboveGrade: number;
-};
-
-type HoldingDetail = {
-  daysHeld: number;
-  dailyTax: number;
-  dailyInsurance: number;
-  dailyHoa: number;
-  dailyUtilities: number;
-  dailyTotal: number;
-  holdTax: number;
-  holdInsurance: number;
-  holdHoa: number;
-  holdUtilities: number;
-  total: number;
-};
-
-type TransactionDetail = {
-  acquisitionTitle: number;
-  dispositionTitle: number;
-  dispositionCommissions: number;
-  total: number;
-};
-
-type FinancingDetail = {
-  loanAmount: number;
-  ltvPct: number;
-  annualRate: number;
-  pointsRate: number;
-  daysHeld: number;
-  interestCost: number;
-  originationCost: number;
-  monthlyPayment: number;
-  dailyInterest: number;
-  total: number;
-};
-
-type ArvPerCompDetail = {
-  address: string;
-  closePrice: number;
-  closeDateIso: string;
-  daysSinceClose: number;
-  distanceMiles: number;
-  compBuildingSqft: number;
-  psfBuilding: number;
-  arvBlended: number;
-  arvTimeAdjusted: number;
-  confidence: number;
-  decayWeight: number;
-};
-
-type TrendTierSegment = { rate: number | null; compCount: number };
-
-type TrendTierStats = {
-  compCount: number;
-  radiusMiles: number;
-  salePriceLow: number | null;
-  salePriceHigh: number | null;
-  psfBuildingLow: number | null;
-  psfBuildingHigh: number | null;
-  psfAboveGradeLow: number | null;
-  psfAboveGradeHigh: number | null;
-  lowEnd: TrendTierSegment;
-  highEnd: TrendTierSegment;
-};
-
-type TrendDirection = "strong_appreciation" | "appreciating" | "flat" | "softening" | "declining" | "sharp_decline";
-
-type TrendData = {
-  blendedAnnualRate: number;
-  rawLocalRate: number | null;
-  rawMetroRate: number | null;
-  localCompCount: number;
-  metroCompCount: number;
-  localRadius: number;
-  metroRadius: number;
-  direction: TrendDirection;
-  isFallback: boolean;
-  confidence: "high" | "low" | "fallback";
-  lowEndRate: number | null;
-  highEndRate: number | null;
-  summary: string | null;
-  detailJson: {
-    localStats?: TrendTierStats;
-    metroStats?: TrendTierStats;
-  } | null;
-};
-
-type WorkstationData = {
-  propertyId: string;
-  analysisId: string;
-  analysis: { scenarioName: string | null; strategyType: string | null; status: string | null };
-  property: { address: string; city: string; county: string | null; state: string; postalCode: string | null; latitude: number | null; longitude: number | null };
-  trend: TrendData | null;
-  physical: {
-    propertyType: string | null; propertySubType: string | null; structureType: string | null;
-    levelClass: string | null; buildingSqft: number; aboveGradeSqft: number;
-    belowGradeTotalSqft: number; belowGradeFinishedSqft: number;
-    yearBuilt: number | null; bedroomsTotal: number | null; bathroomsTotal: number | null;
-    garageSpaces: number | null; lotSizeSqft: number;
-  } | null;
-  listing: { listingId: string; mlsStatus: string | null; listPrice: number; originalListPrice: number; listingContractDate: string | null } | null;
-  financials: { annualTax: number; annualHoa: number } | null;
-  arv: {
-    auto: number | null; selected: number | null; final: number | null; effective: number;
-    selectedDetail: {
-      arvAggregate: number; arvPerSqft: number; compCount: number;
-      perCompDetails: ArvPerCompDetail[];
-    } | null;
-  };
-  rehab: {
-    auto: number | null; computed: number | null; manual: number | null; effective: number;
-    scope: RehabScopeTier | null;
-    scopeMultiplier: number;
-    detail: RehabDetail | null;
-  };
-  holding: HoldingDetail | null;
-  transaction: TransactionDetail | null;
-  financing: FinancingDetail | null;
-  dealMath: {
-    arv: number; listPrice: number; rehabTotal: number; holdTotal: number;
-    transactionTotal: number; financingTotal: number; targetProfit: number; totalCosts: number;
-    maxOffer: number; offerPct: number; spread: number; estGapPerSqft: number;
-  } | null;
-  compSummary: { totalComps: number; selectedCount: number; avgSelectedPrice: number | null; avgSelectedPsf: number | null; avgSelectedDist: number | null };
-  manualAnalysis: Record<string, unknown> | null;
-  pipeline: Record<string, unknown> | null;
-  notes: Array<{ id: string; note_type: string; note_body: string; is_public: boolean; created_at: string }>;
-  compModalData: {
-    subjectListingRowId: string | null;
-    subjectListingMlsNumber: string | null;
-    defaultProfileSlug: string;
-    latestRun: { id: string; status: string | null; created_at: string | null; parameters_json: Record<string, unknown> | null; summary_json: Record<string, unknown> | null } | null;
-    compCandidates: Array<Record<string, unknown>>;
-  };
-  subjectContext: Record<string, unknown>;
-  scopeMultipliers: Record<RehabScopeTier, number>;
-  cashRequired: {
-    purchasePrice: number;
-    downPaymentRate: number;
-    downPayment: number;
-    loanForPurchase: number;
-    originationCost: number;
-    loanAvailableForRehab: number;
-    rehabTotal: number;
-    rehabFromLoan: number;
-    rehabOutOfPocket: number;
-    acquisitionTitle: number;
-    holdingTotal: number;
-    interestCost: number;
-    totalCashRequired: number;
-  } | null;
-};
-
-// ---------------------------------------------------------------------------
-// Formatters
-// ---------------------------------------------------------------------------
-
-function fmt(value: number | null | undefined) {
-  if (value === null || value === undefined) return "\u2014";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
-}
-
-function fmtNum(value: number | null | undefined, d = 0) {
-  if (value === null || value === undefined) return "\u2014";
-  return new Intl.NumberFormat("en-US", { minimumFractionDigits: d, maximumFractionDigits: d }).format(value);
-}
-
-function fmtPct(value: number | null | undefined) {
-  if (value === null || value === undefined) return "\u2014";
-  return `${(value * 100).toFixed(1)}%`;
-}
+import { fmt, fmtNum, fmtPct } from "@/lib/reports/format";
+import { generateReportAction } from "@/app/(workspace)/reports/actions";
+import type {
+  RehabScopeTier,
+  RehabDetail,
+  HoldingDetail,
+  TransactionDetail,
+  FinancingDetail,
+  ArvPerCompDetail,
+  TrendTierStats,
+  TrendDirection,
+  TrendData,
+  WorkstationData,
+} from "@/lib/reports/types";
 
 // ---------------------------------------------------------------------------
 // Tiny sub-components
@@ -344,6 +163,9 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
   const [showCompModal, setShowCompModal] = useState(false);
   const [showNoteForm, setShowNoteForm] = useState(false);
   const [showHoldTransDetail, setShowHoldTransDetail] = useState(false);
+  const [showReportDialog, setShowReportDialog] = useState(false);
+  const [reportTitle, setReportTitle] = useState("");
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [noteCategory, setNoteCategory] = useState("location");
   const [noteBody, setNoteBody] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -525,6 +347,16 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
             <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.1em] text-slate-500">
               {d.analysis.strategyType ?? "general"}
             </span>
+            <button
+              type="button"
+              onClick={() => {
+                setReportTitle(`${d.property.address} - ${d.analysis.strategyType === "flip" ? "Fix & Flip" : d.analysis.strategyType ?? "Analysis"}`);
+                setShowReportDialog(true);
+              }}
+              className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100"
+            >
+              Generate Report
+            </button>
           </div>
         </div>
         {/* Inline property facts */}
@@ -1317,6 +1149,59 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                   subjectContext={d.subjectContext as any}
                 />
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================== */}
+      {/* GENERATE REPORT DIALOG                                            */}
+      {/* ================================================================== */}
+      {showReportDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-xl border border-slate-300 bg-white p-5 shadow-2xl">
+            <h2 className="mb-3 text-sm font-semibold text-slate-800">Generate Report</h2>
+            <p className="mb-3 text-xs text-slate-500">
+              This will create a snapshot of the current analysis as a shareable report.
+            </p>
+            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Report Title
+            </label>
+            <input
+              type="text"
+              value={reportTitle}
+              onChange={(e) => setReportTitle(e.target.value)}
+              className="dw-input mb-4 w-full"
+              placeholder="Report title..."
+            />
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowReportDialog(false)}
+                className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                disabled={isGeneratingReport}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isGeneratingReport || !reportTitle.trim()}
+                onClick={async () => {
+                  setIsGeneratingReport(true);
+                  try {
+                    const fd = new FormData();
+                    fd.set("analysis_id", d.analysisId);
+                    fd.set("property_id", d.propertyId);
+                    fd.set("title", reportTitle.trim());
+                    await generateReportAction(fd);
+                  } catch {
+                    setIsGeneratingReport(false);
+                  }
+                }}
+                className="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+              >
+                {isGeneratingReport ? "Generating..." : "Generate Report"}
+              </button>
             </div>
           </div>
         </div>

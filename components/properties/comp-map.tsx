@@ -28,6 +28,8 @@ export type MapPin = {
   detail?: string;
   tooltipData?: MapPinTooltipData;
   type: "subject" | "selected" | "candidate";
+  /** Optional number/label shown inside the marker (e.g. "1", "2") */
+  pinLabel?: string;
 };
 
 type CompMapProps = {
@@ -66,6 +68,20 @@ function compIcon(color: string, border: string, size: number) {
       background:${color};border:2px solid ${border};border-radius:50%;
       box-shadow:0 1px 4px rgba(0,0,0,0.3);cursor:pointer;
     "></div>`,
+    size,
+  );
+}
+
+function numberedIcon(color: string, border: string, size: number, label: string) {
+  return makeDivIcon(
+    `<div style="
+      width:${size}px;height:${size}px;
+      background:${color};border:2px solid ${border};border-radius:50%;
+      box-shadow:0 1px 4px rgba(0,0,0,0.3);cursor:pointer;
+      display:flex;align-items:center;justify-content:center;
+      font-size:${Math.max(9, size - 8)}px;font-weight:700;color:#fff;
+      line-height:1;font-family:Arial,sans-serif;
+    ">${label}</div>`,
     size,
   );
 }
@@ -273,8 +289,11 @@ export function CompMap({
     // Candidates (bottom layer) — border color reflects gap/sqft
     for (const pin of candidatePins) {
       const border = gapBorderColor(pin.tooltipData?.gapPerSqft);
+      const icon = pin.pinLabel
+        ? numberedIcon("#94a3b8", border, 20, pin.pinLabel)
+        : compIcon("#94a3b8", border, 13);
       const marker = L.marker([pin.lat, pin.lng], {
-        icon: compIcon("#94a3b8", border, 13),
+        icon,
         zIndexOffset: 100,
       });
       addSmartTooltip(marker, pin, 13);
@@ -287,8 +306,11 @@ export function CompMap({
 
     // Selected (middle layer)
     for (const pin of selectedPins) {
+      const icon = pin.pinLabel
+        ? numberedIcon("#16a34a", "#fff", 20, pin.pinLabel)
+        : ICONS.selected;
       const marker = L.marker([pin.lat, pin.lng], {
-        icon: ICONS.selected,
+        icon,
         zIndexOffset: 200,
       });
       addSmartTooltip(marker, pin, 14);

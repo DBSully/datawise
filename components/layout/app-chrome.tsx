@@ -115,7 +115,7 @@ export function AppChrome({ children }: AppChromeProps) {
 
   return (
     <div className="min-h-screen bg-[var(--dw-bg)] text-[var(--dw-text)]">
-      <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-950 text-slate-100">
+      <header data-print-hide className="sticky top-0 z-40 border-b border-slate-800 bg-slate-950 text-slate-100">
         <div className="flex h-[var(--dw-header-height)] items-center justify-between gap-4 px-[var(--dw-page-pad-x)]">
           <div className="flex min-w-0 items-center gap-6">
             <Link
@@ -148,7 +148,7 @@ export function AppChrome({ children }: AppChromeProps) {
         </div>
       </header>
 
-      <div className="sticky top-[var(--dw-header-height)] z-30 border-b border-[var(--dw-border)] bg-white/95 backdrop-blur">
+      <div data-print-hide className="sticky top-[var(--dw-header-height)] z-30 border-b border-[var(--dw-border)] bg-white/95 backdrop-blur">
         <div className="flex h-[var(--dw-subheader-height)] items-center justify-between gap-4 px-[var(--dw-page-pad-x)]">
           <div className="flex min-w-0 items-center gap-2 overflow-hidden">
             <span className="truncate text-sm font-semibold text-slate-900">
@@ -164,7 +164,7 @@ export function AppChrome({ children }: AppChromeProps) {
         </div>
       </div>
 
-      <div className="sticky top-[calc(var(--dw-header-height)+var(--dw-subheader-height))] z-20 border-b border-[var(--dw-border)] bg-slate-100/95 backdrop-blur">
+      <div data-print-hide className="sticky top-[calc(var(--dw-header-height)+var(--dw-subheader-height))] z-20 border-b border-[var(--dw-border)] bg-slate-100/95 backdrop-blur">
         <div className="flex h-[var(--dw-subheader-2-height)] items-center justify-between gap-4 px-[var(--dw-page-pad-x)]">
           <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
             {section.tabs.map((tab) => (
