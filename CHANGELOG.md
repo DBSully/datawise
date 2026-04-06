@@ -1,3 +1,30 @@
+## 2026-04-06 — Analysis Workstation Layout Redesign + MLS Copy Buttons
+
+### Summary
+
+Redesigned the analysis workstation from a 5-column horizontal layout into a 3-column layout (`260px | 1fr | 330px`) that fits entirely on a single desktop screen. Grouped related tiles logically, elevated high-priority controls (Notes, Pipeline, Overrides) to always-visible positions, and demoted low-priority tiles (Holding, Transaction) into a collapsible detail section. Added MLS# quick-copy buttons to the Comparable Sales tile.
+
+### Layout changes
+
+- **Left column (260px):** Deal Math waterfall → Financing → Cash Required → Hold & Trans Detail (collapsed by default). Groups all financial summary tiles in one vertical spine.
+- **Center column (flexible):** ARV + Price Trend side-by-side → Comparable Sales (map + table, reduced to 250px height) → Notes. Keeps valuation and comp data front-and-center.
+- **Right column (330px):** Rehab (single-column line items, ready for future tall/thin detail expansion) → Overrides → Pipeline. Puts analyst input controls always on-screen.
+- **Holding & Transaction** collapsed behind a toggle button — totals already visible in the Deal Math waterfall, breakdowns available on demand.
+
+### MLS# quick-copy buttons
+
+- Added **Copy All MLS#** and **Copy Selected MLS#** buttons to the Comparable Sales tile header, alongside the existing Edit Comps button.
+- Uses `font-mono text-[11px]` matching the style from the Comparable Selection modal.
+- Brief "Copied!" confirmation on click, same pattern as the modal's quick-copy fields.
+
+### Design decisions
+
+- **Single-screen priority.** Notes, Pipeline, and Overrides were previously below the fold — now always visible without scrolling.
+- **Rehab right column.** Positioned for planned future expansion into a taller, more detailed breakdown.
+- **Hold/Trans collapsible.** Least-used tiles; totals are redundant with the Deal Math waterfall, so full breakdowns are one click away but don't consume space by default.
+
+---
+
 ## 2026-04-05 — Quick Comps Modal: Evaluate and Pick Comps from the Queue
 
 ### Summary

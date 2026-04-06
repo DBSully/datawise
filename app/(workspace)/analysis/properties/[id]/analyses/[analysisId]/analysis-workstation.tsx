@@ -343,9 +343,12 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
   const router = useRouter();
   const [showCompModal, setShowCompModal] = useState(false);
   const [showNoteForm, setShowNoteForm] = useState(false);
+  const [showHoldTransDetail, setShowHoldTransDetail] = useState(false);
   const [noteCategory, setNoteCategory] = useState("location");
   const [noteBody, setNoteBody] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [copiedAll, setCopiedAll] = useState(false);
+  const [copiedSelected, setCopiedSelected] = useState(false);
 
   const d = data;
   const p = d.physical;
@@ -383,6 +386,49 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
         };
       });
   }, [d]);
+
+  // MLS number clipboard helpers
+  const allMlsText = useMemo(() => {
+    const nums = [
+      d.compModalData.subjectListingMlsNumber,
+      ...d.compModalData.compCandidates.map((c) => {
+        const m = (c.metrics_json ?? {}) as Record<string, unknown>;
+        return c.listing_id ?? m.listing_id ?? m.mls_number ?? m.mlsNumber ?? null;
+      }),
+    ].filter((v): v is string => typeof v === "string" && v.length > 0);
+    return [...new Set(nums)].join(", ");
+  }, [d]);
+
+  const selectedMlsText = useMemo(() => {
+    const nums = [
+      d.compModalData.subjectListingMlsNumber,
+      ...d.compModalData.compCandidates
+        .filter((c) => Boolean(c.selected_yn))
+        .map((c) => {
+          const m = (c.metrics_json ?? {}) as Record<string, unknown>;
+          return c.listing_id ?? m.listing_id ?? m.mls_number ?? m.mlsNumber ?? null;
+        }),
+    ].filter((v): v is string => typeof v === "string" && v.length > 0);
+    return [...new Set(nums)].join(", ");
+  }, [d]);
+
+  async function handleCopyAllMls() {
+    if (!allMlsText) return;
+    try {
+      await navigator.clipboard.writeText(allMlsText);
+      setCopiedAll(true);
+      window.setTimeout(() => setCopiedAll(false), 1800);
+    } catch { /* noop */ }
+  }
+
+  async function handleCopySelectedMls() {
+    if (!selectedMlsText) return;
+    try {
+      await navigator.clipboard.writeText(selectedMlsText);
+      setCopiedSelected(true);
+      window.setTimeout(() => setCopiedSelected(false), 1800);
+    } catch { /* noop */ }
+  }
 
   // Build map pins
   const subjectSqft = p?.buildingSqft ?? 0;
@@ -497,376 +543,75 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
       </div>
 
       {/* ================================================================== */}
-      {/* MAIN ANALYSIS GRID — deal waterfall + 5 cost cards + overrides     */}
+      {/* MAIN 3-COLUMN LAYOUT — Left: financials / Center: valuation+comps / Right: rehab+controls */}
       {/* ================================================================== */}
-      <div className="grid gap-2" style={{ gridTemplateColumns: "180px 1fr 1.4fr 1fr 1fr" }}>
+      <div className="grid gap-2" style={{ gridTemplateColumns: "260px 1fr 330px" }}>
 
-        {/* ── DEAL WATERFALL (narrow spine) ── */}
-        <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
-          <CardTitle>Deal Math</CardTitle>
-          <div className="space-y-0.5 text-[11px]">
-            <div className="flex justify-between py-0.5">
-              <span className="font-medium text-slate-700">Eff. ARV</span>
-              <span className="font-mono font-semibold text-slate-800">{fmt(d.arv.effective)}</span>
-            </div>
-            <div className="flex justify-between py-0.5">
-              <span className="text-slate-500">&minus; Rehab</span>
-              <span className="font-mono text-red-600">{fmt(d.rehab.effective)}</span>
-            </div>
-            <div className="flex justify-between py-0.5">
-              <span className="text-slate-500">&minus; Hold</span>
-              <span className="font-mono text-red-600">{fmt(d.holding?.total)}</span>
-            </div>
-            <div className="flex justify-between py-0.5">
-              <span className="text-slate-500">&minus; Trans</span>
-              <span className="font-mono text-red-600">{fmt(d.transaction?.total)}</span>
-            </div>
-            <div className="flex justify-between py-0.5">
-              <span className="text-slate-500">&minus; Finance</span>
-              <span className="font-mono text-red-600">{fmt(d.financing?.total)}</span>
-            </div>
-            <div className="flex justify-between py-0.5">
-              <span className="text-slate-500">&minus; Profit</span>
-              <span className="font-mono text-red-600">{fmt(d.dealMath?.targetProfit)}</span>
-            </div>
-            <div className="border-t border-slate-300 pt-1 mt-1">
+        {/* ================================================================ */}
+        {/* LEFT COLUMN — Deal Math + Financing + Cash Required + Hold/Trans */}
+        {/* ================================================================ */}
+        <div className="flex flex-col gap-2">
+
+          {/* ── DEAL WATERFALL ── */}
+          <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
+            <CardTitle>Deal Math</CardTitle>
+            <div className="space-y-0.5 text-[11px]">
               <div className="flex justify-between py-0.5">
-                <span className="font-bold text-slate-800">Financed</span>
-                <span className="font-mono font-bold text-emerald-700">{fmt(d.dealMath?.maxOffer)}</span>
+                <span className="font-medium text-slate-700">Eff. ARV</span>
+                <span className="font-mono font-semibold text-slate-800">{fmt(d.arv.effective)}</span>
               </div>
               <div className="flex justify-between py-0.5">
-                <span className="font-bold text-slate-800">Cash</span>
-                <span className="font-mono font-bold text-emerald-700">{fmt(d.dealMath && d.financing ? d.dealMath.maxOffer + d.financing.total : d.dealMath?.maxOffer)}</span>
+                <span className="text-slate-500">&minus; Rehab</span>
+                <span className="font-mono text-red-600">{fmt(d.rehab.effective)}</span>
               </div>
-            </div>
-            <div className="border-t border-slate-200 pt-1 mt-1 space-y-0.5 text-[10px]">
-              <div className="flex justify-between">
-                <span className="text-slate-400">Offer %</span>
-                <span className="font-mono text-slate-600">{fmtPct(d.dealMath?.offerPct)}</span>
+              <div className="flex justify-between py-0.5">
+                <span className="text-slate-500">&minus; Hold</span>
+                <span className="font-mono text-red-600">{fmt(d.holding?.total)}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Spread</span>
-                <span className="font-mono text-slate-600">{fmt(d.dealMath?.spread)}</span>
+              <div className="flex justify-between py-0.5">
+                <span className="text-slate-500">&minus; Trans</span>
+                <span className="font-mono text-red-600">{fmt(d.transaction?.total)}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Gap/sqft</span>
-                <span className="font-mono text-slate-600">{d.dealMath?.estGapPerSqft !== undefined ? `$${fmtNum(d.dealMath.estGapPerSqft)}` : "\u2014"}</span>
+              <div className="flex justify-between py-0.5">
+                <span className="text-slate-500">&minus; Finance</span>
+                <span className="font-mono text-red-600">{fmt(d.financing?.total)}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Project Costs</span>
-                <span className="font-mono text-slate-600">{fmt(d.dealMath?.totalCosts)}</span>
+              <div className="flex justify-between py-0.5">
+                <span className="text-slate-500">&minus; Profit</span>
+                <span className="font-mono text-red-600">{fmt(d.dealMath?.targetProfit)}</span>
+              </div>
+              <div className="border-t border-slate-300 pt-1 mt-1">
+                <div className="flex justify-between py-0.5">
+                  <span className="font-bold text-slate-800">Financed</span>
+                  <span className="font-mono font-bold text-emerald-700">{fmt(d.dealMath?.maxOffer)}</span>
+                </div>
+                <div className="flex justify-between py-0.5">
+                  <span className="font-bold text-slate-800">Cash</span>
+                  <span className="font-mono font-bold text-emerald-700">{fmt(d.dealMath && d.financing ? d.dealMath.maxOffer + d.financing.total : d.dealMath?.maxOffer)}</span>
+                </div>
+              </div>
+              <div className="border-t border-slate-200 pt-1 mt-1 space-y-0.5 text-[10px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Offer %</span>
+                  <span className="font-mono text-slate-600">{fmtPct(d.dealMath?.offerPct)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Spread</span>
+                  <span className="font-mono text-slate-600">{fmt(d.dealMath?.spread)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Gap/sqft</span>
+                  <span className="font-mono text-slate-600">{d.dealMath?.estGapPerSqft !== undefined ? `$${fmtNum(d.dealMath.estGapPerSqft)}` : "\u2014"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Project Costs</span>
+                  <span className="font-mono text-slate-600">{fmt(d.dealMath?.totalCosts)}</span>
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* ── ARV DETAIL CARD ── */}
-        <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
-          <CardTitle>ARV</CardTitle>
-          {/* 3-tier */}
-          <div className="grid grid-cols-3 gap-1 text-center mb-2">
-            <div className="rounded border border-slate-100 bg-slate-50 px-1 py-1">
-              <div className="text-[9px] text-slate-400 uppercase">Auto</div>
-              <div className="text-xs font-medium text-slate-600">{fmt(d.arv.auto)}</div>
-            </div>
-            <div className="rounded border border-blue-100 bg-blue-50 px-1 py-1">
-              <div className="text-[9px] text-blue-400 uppercase">Selected</div>
-              <div className="text-xs font-semibold text-blue-700">{fmt(d.arv.selected)}</div>
-            </div>
-            <div className="rounded border border-emerald-100 bg-emerald-50 px-1 py-1">
-              <div className="text-[9px] text-emerald-400 uppercase">Final</div>
-              <div className="text-xs font-bold text-emerald-700">{d.arv.final !== null ? fmt(d.arv.final) : <span className="text-slate-300">&mdash;</span>}</div>
-            </div>
-          </div>
-          <div className="rounded border border-slate-100 bg-slate-50 px-2 py-1.5 mb-2">
-            <div className="flex justify-between text-[11px]">
-              <span className="text-slate-500">Effective ARV</span>
-              <span className="font-mono font-bold text-emerald-700">{fmt(d.arv.effective)}</span>
-            </div>
-            {d.arv.selectedDetail && (
-              <div className="flex justify-between text-[10px] text-slate-400">
-                <span>$/sqft</span>
-                <span className="font-mono">${fmtNum(d.arv.selectedDetail.arvPerSqft, 2)}</span>
-              </div>
-            )}
-            {/* Subject PSF from effective ARV */}
-            {(() => {
-              const bldg = d.physical?.buildingSqft ?? 0;
-              const ag = d.physical?.aboveGradeSqft ?? 0;
-              if (d.arv.effective <= 0 || (bldg <= 0 && ag <= 0)) return null;
-              const psfBldg = bldg > 0 ? d.arv.effective / bldg : null;
-              const psfAg = ag > 0 ? d.arv.effective / ag : null;
-              const ls = d.trend?.detailJson?.localStats;
-              const bldgAboveRange = psfBldg != null && ls?.psfBuildingHigh != null && psfBldg > ls.psfBuildingHigh;
-              const agAboveRange = psfAg != null && ls?.psfAboveGradeHigh != null && psfAg > ls.psfAboveGradeHigh;
-              return (
-                <div className="mt-0.5 space-y-0 text-[10px]">
-                  {psfBldg != null && (
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">PSF Bldg</span>
-                      <span className={`font-mono ${bldgAboveRange ? "text-red-600 font-semibold" : "text-slate-500"}`}>
-                        ${fmtNum(psfBldg, 2)}
-                        {bldgAboveRange && <span className="text-[8px] ml-0.5">&gt; local</span>}
-                      </span>
-                    </div>
-                  )}
-                  {psfAg != null && (
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">PSF AG</span>
-                      <span className={`font-mono ${agAboveRange ? "text-red-600 font-semibold" : "text-slate-500"}`}>
-                        ${fmtNum(psfAg, 2)}
-                        {agAboveRange && <span className="text-[8px] ml-0.5">&gt; local</span>}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-          </div>
-          {/* Per-comp details */}
-          {d.arv.selectedDetail && d.arv.selectedDetail.perCompDetails.length > 0 && (
-            <div className="space-y-0">
-              <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-1">Per-Comp ARV</div>
-              <div className="overflow-auto max-h-[140px]">
-                <table className="w-full text-[10px]">
-                  <thead>
-                    <tr className="text-left text-[9px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
-                      <th className="py-0.5 pr-1">Address</th>
-                      <th className="py-0.5 text-right">Close</th>
-                      <th className="py-0.5 text-right">ARV Adj</th>
-                      <th className="py-0.5 text-right">Wt</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {d.arv.selectedDetail.perCompDetails.map((comp, i) => (
-                      <tr key={i} className="border-b border-slate-50">
-                        <td className="py-0.5 pr-1 text-slate-600 truncate max-w-[120px]">{comp.address}</td>
-                        <td className="py-0.5 text-right font-mono text-slate-600">{fmt(comp.closePrice)}</td>
-                        <td className="py-0.5 text-right font-mono text-slate-700">{fmt(comp.arvTimeAdjusted)}</td>
-                        <td className="py-0.5 text-right font-mono text-slate-400">{comp.decayWeight.toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-          {/* Comp summary stats */}
-          <div className="mt-2 flex gap-2 text-[10px] text-slate-400">
-            <span>{d.compSummary.selectedCount} comps</span>
-            <span>Avg {fmt(d.compSummary.avgSelectedPrice)}</span>
-            <span>${fmtNum(d.compSummary.avgSelectedPsf)}/sf</span>
-          </div>
-        </div>
-
-        {/* ── PRICE TREND CARD ── */}
-        <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
-          <CardTitle>Price Trend</CardTitle>
-          {d.trend ? (
-            <div className="space-y-2">
-              {/* Badges: confidence + direction */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${
-                  d.trend.confidence === "high" ? "bg-emerald-100 text-emerald-700"
-                    : d.trend.confidence === "low" ? "bg-amber-100 text-amber-700"
-                      : "bg-red-100 text-red-700"
-                }`}>
-                  Confidence: {d.trend.confidence === "high" ? "High" : d.trend.confidence === "low" ? "Low" : "Fallback"}
-                </span>
-                <TrendDirectionBadge direction={d.trend.direction} />
-                {d.trend.isFallback && (
-                  <span className="text-[9px] text-red-500">Fixed rate — insufficient data</span>
-                )}
-              </div>
-
-              {/* Applied rate + blend weight bar */}
-              <div className="rounded border border-slate-100 bg-slate-50 px-2 py-1.5 space-y-1.5">
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-500">Applied Rate</span>
-                  <span className={`font-mono font-bold ${d.trend.blendedAnnualRate >= 0 ? "text-emerald-700" : "text-red-600"}`}>
-                    {d.trend.blendedAnnualRate >= 0 ? "+" : ""}{(d.trend.blendedAnnualRate * 100).toFixed(1)}%/yr
-                  </span>
-                </div>
-                {/* Blend weight visualization */}
-                <div>
-                  <div className="flex items-center gap-1 text-[9px] text-slate-400 mb-0.5">
-                    <span>Local 10%</span>
-                    <span className="flex-1" />
-                    <span>Metro 90%</span>
-                  </div>
-                  <div className="flex h-1.5 rounded-full overflow-hidden">
-                    <div className="bg-blue-400" style={{ width: "10%" }} />
-                    <div className="bg-slate-300" style={{ width: "90%" }} />
-                  </div>
-                </div>
-              </div>
-
-              {/* Two-column: Local / Metro */}
-              <div className="grid grid-cols-2 gap-2">
-                <TrendTierColumn
-                  label="Local"
-                  radius={d.trend.localRadius}
-                  rate={d.trend.rawLocalRate}
-                  stats={d.trend.detailJson?.localStats ?? null}
-                />
-                <TrendTierColumn
-                  label="Metro"
-                  radius={d.trend.metroRadius}
-                  rate={d.trend.rawMetroRate}
-                  stats={d.trend.detailJson?.metroStats ?? null}
-                />
-              </div>
-
-              {/* Summary */}
-              {d.trend.summary && (
-                <p className="text-[9px] text-slate-400 leading-tight">{d.trend.summary}</p>
-              )}
-            </div>
-          ) : (
-            <p className="text-[10px] text-slate-400">No trend data — run screening first.</p>
-          )}
-        </div>
-
-        {/* ── REHAB DETAIL CARD (largest) ── */}
-        <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
-          <CardTitle
-            action={
-              d.rehab.manual !== null ? (
-                <span className="text-[9px] font-semibold text-emerald-600 uppercase">Manual Override Active</span>
-              ) : undefined
-            }
-          >
-            Rehab
-          </CardTitle>
-
-          {/* Scope tier selector */}
-          <form
-            action={async (formData: FormData) => {
-              setIsSaving(true);
-              await saveManualAnalysisAction(initialManualAnalysisFormState, formData);
-              setIsSaving(false);
-              router.refresh();
-            }}
-          >
-            <input type="hidden" name="analysis_id" value={d.analysisId} />
-            <input type="hidden" name="property_id" value={d.propertyId} />
-            {/* Preserve existing overrides */}
-            <input type="hidden" name="arv_manual" value={d.manualAnalysis?.arv_manual as string ?? ""} />
-            <input type="hidden" name="rehab_manual" value={d.manualAnalysis?.rehab_manual as string ?? ""} />
-            <input type="hidden" name="days_held_manual" value={d.manualAnalysis?.days_held_manual as string ?? ""} />
-            <input type="hidden" name="target_profit_manual" value={d.manualAnalysis?.target_profit_manual as string ?? ""} />
-            <input type="hidden" name="analyst_condition" value={d.manualAnalysis?.analyst_condition as string ?? ""} />
-            <input type="hidden" name="location_rating" value={d.manualAnalysis?.location_rating as string ?? ""} />
-            <input type="hidden" name="rent_estimate_monthly" value={d.manualAnalysis?.rent_estimate_monthly as string ?? ""} />
-            <input type="hidden" name="financing_rate_manual" value={d.manualAnalysis?.financing_rate_manual ? String(Number(d.manualAnalysis.financing_rate_manual) * 100) : ""} />
-            <input type="hidden" name="financing_points_manual" value={d.manualAnalysis?.financing_points_manual ? String(Number(d.manualAnalysis.financing_points_manual) * 100) : ""} />
-            <input type="hidden" name="financing_ltv_manual" value={d.manualAnalysis?.financing_ltv_manual ? String(Number(d.manualAnalysis.financing_ltv_manual) * 100) : ""} />
-
-            <div className="flex gap-1 mb-2">
-              {SCOPE_TIERS.map((tier) => (
-                <button
-                  key={tier.key}
-                  type="submit"
-                  name="rehab_scope"
-                  value={tier.key}
-                  disabled={isSaving}
-                  className={`flex-1 rounded-md border px-1.5 py-1 text-center text-[10px] font-medium transition-colors ${
-                    activeScope === tier.key
-                      ? "border-blue-300 bg-blue-50 text-blue-700 shadow-sm"
-                      : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:bg-slate-50"
-                  }`}
-                >
-                  <div>{tier.label}</div>
-                  <div className="text-[9px] opacity-70">{tier.short}</div>
-                </button>
-              ))}
-            </div>
-          </form>
-
-          {d.rehab.detail && (
-            <>
-              {/* Multiplier breakdown */}
-              <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-slate-400 mb-1.5">
-                <span>Type: {d.rehab.detail.typeMultiplier}</span>
-                <span>Cond: {d.rehab.detail.conditionMultiplier}</span>
-                <span>Price: {d.rehab.detail.priceMultiplier}</span>
-                <span>Age: {d.rehab.detail.ageMultiplier}</span>
-                <span>Scope: {d.rehab.scopeMultiplier}</span>
-                <span className="font-semibold text-slate-600">Composite: {(d.rehab.detail.compositeMultiplier * d.rehab.scopeMultiplier).toFixed(3)}</span>
-              </div>
-
-              {/* Line items in two columns */}
-              <div className="grid grid-cols-2 gap-x-3 text-[11px]">
-                <CostLine label="Above Grade" value={fmt(d.rehab.detail.aboveGrade)} />
-                <CostLine label="Below Grade (fin)" value={fmt(d.rehab.detail.belowGradeFinished)} />
-                <CostLine label="Below Grade (unfin)" value={fmt(d.rehab.detail.belowGradeUnfinished)} />
-                <CostLine label="Exterior" value={fmt(d.rehab.detail.exterior)} />
-                <CostLine label="Landscaping" value={fmt(d.rehab.detail.landscaping)} />
-                <CostLine label="Systems" value={fmt(d.rehab.detail.systems)} />
-              </div>
-
-              <div className="border-t border-slate-200 mt-1.5 pt-1.5 flex items-center justify-between text-[11px]">
-                <span className="font-bold text-slate-700">Total Rehab</span>
-                <span className="font-mono font-bold text-slate-800">{fmt(d.rehab.detail.total)}</span>
-              </div>
-              <div className="flex justify-between text-[10px] text-slate-400">
-                <span>${fmtNum(d.rehab.detail.perSqftBuilding, 2)}/sqft bldg</span>
-                <span>${fmtNum(d.rehab.detail.perSqftAboveGrade, 2)}/sqft above</span>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* ── HOLD + TRANSACTION stacked ── */}
-        <div className="flex flex-col gap-2">
-          {/* Holding */}
-          <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm flex-1">
-            <CardTitle>Holding</CardTitle>
-            {d.holding ? (
-              <div className="text-[11px] space-y-0.5">
-                <div className="rounded border border-slate-100 bg-slate-50 px-2 py-1 text-center mb-1.5">
-                  <span className="text-[10px] text-slate-400">Hold Period </span>
-                  <span className="font-mono font-bold text-slate-700">{d.holding.daysHeld} days</span>
-                </div>
-                <CostLine label="Property Tax" value={fmt(d.holding.holdTax)} sub={`$${fmtNum(d.holding.dailyTax, 2)}/d`} />
-                <CostLine label="Insurance" value={fmt(d.holding.holdInsurance)} sub={`$${fmtNum(d.holding.dailyInsurance, 2)}/d`} />
-                <CostLine label="HOA" value={fmt(d.holding.holdHoa)} sub={`$${fmtNum(d.holding.dailyHoa, 2)}/d`} />
-                <CostLine label="Utilities" value={fmt(d.holding.holdUtilities)} sub={`$${fmtNum(d.holding.dailyUtilities, 2)}/d`} />
-                <div className="border-t border-slate-200 pt-1 mt-1 flex justify-between">
-                  <span className="font-bold text-slate-700">Total</span>
-                  <div>
-                    <span className="font-mono font-bold text-slate-800">{fmt(d.holding.total)}</span>
-                    <span className="ml-1 text-[10px] text-slate-400">${fmtNum(d.holding.dailyTotal, 2)}/d</span>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <p className="text-[10px] text-slate-400">No data</p>
-            )}
-          </div>
-
-          {/* Transaction */}
-          <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm flex-1">
-            <CardTitle>Transaction</CardTitle>
-            {d.transaction ? (
-              <div className="text-[11px] space-y-0.5">
-                <CostLine label="Acq. Title (0.3%)" value={fmt(d.transaction.acquisitionTitle)} />
-                <CostLine label="Disp. Title (0.47%)" value={fmt(d.transaction.dispositionTitle)} />
-                <CostLine label="Commissions (4%)" value={fmt(d.transaction.dispositionCommissions)} />
-                <div className="border-t border-slate-200 pt-1 mt-1 flex justify-between">
-                  <span className="font-bold text-slate-700">Total</span>
-                  <span className="font-mono font-bold text-slate-800">{fmt(d.transaction.total)}</span>
-                </div>
-              </div>
-            ) : (
-              <p className="text-[10px] text-slate-400">No data</p>
-            )}
-          </div>
-        </div>
-
-        {/* ── FINANCING + OVERRIDES stacked ── */}
-        <div className="flex flex-col gap-2">
-          {/* Financing */}
+          {/* ── FINANCING ── */}
           <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
             <CardTitle>Financing</CardTitle>
             {d.financing ? (
@@ -890,15 +635,15 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
             )}
           </div>
 
-          {/* Cash Out of Pocket */}
+          {/* ── CASH REQUIRED ── */}
           {d.cashRequired && (
             <div className="rounded-lg border border-indigo-200 bg-indigo-50/30 p-2.5 shadow-sm">
               <CardTitle>Cash Required <span className="normal-case font-normal tracking-normal text-[9px] text-slate-400">@ Max Offer {fmt(d.cashRequired.purchasePrice)}</span></CardTitle>
               <div className="text-[11px] space-y-0.5">
-                <CostLine label={`Down Pmt (${fmtPct(d.cashRequired.downPaymentRate)} of ${fmt(d.cashRequired.purchasePrice)})`} value={fmt(d.cashRequired.downPayment)} />
+                <CostLine label={`Down Pmt (${fmtPct(d.cashRequired.downPaymentRate)})`} value={fmt(d.cashRequired.downPayment)} />
                 <CostLine label="Acq. Title" value={fmt(d.cashRequired.acquisitionTitle)} />
                 <CostLine label="Origination" value={fmt(d.cashRequired.originationCost)} />
-                <CostLine label="Rehab OOP" value={fmt(d.cashRequired.rehabOutOfPocket)} sub={d.cashRequired.rehabOutOfPocket > 0 ? `of ${fmt(d.cashRequired.rehabTotal)}` : `${fmt(d.cashRequired.rehabTotal)} covered`} />
+                <CostLine label="Rehab OOP" value={fmt(d.cashRequired.rehabOutOfPocket)} sub={d.cashRequired.rehabOutOfPocket > 0 ? `of ${fmt(d.cashRequired.rehabTotal)}` : `covered`} />
                 <CostLine label="Holding" value={fmt(d.cashRequired.holdingTotal)} />
                 <CostLine label="Interest" value={fmt(d.cashRequired.interestCost)} />
                 <div className="border-t border-indigo-200 pt-1 mt-1 flex justify-between">
@@ -907,23 +652,514 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                 </div>
                 <div className="text-[10px] text-slate-400 mt-0.5">
                   <div className="flex justify-between">
-                    <span>Loan funds purchase</span>
+                    <span>Loan &rarr; purchase</span>
                     <span className="font-mono">{fmt(d.cashRequired.loanForPurchase)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Loan funds rehab</span>
+                    <span>Loan &rarr; rehab</span>
                     <span className="font-mono">{fmt(d.cashRequired.rehabFromLoan)}</span>
                   </div>
                 </div>
-                <p className="text-[9px] text-slate-400 mt-1 leading-tight">
-                  Excludes disp. costs (paid from sale proceeds). Down payment is equity returned at sale.
-                </p>
               </div>
             </div>
           )}
 
-          {/* Analyst Overrides (compact) */}
-          <div className="rounded-lg border border-amber-200 bg-amber-50/30 p-2.5 shadow-sm flex-1">
+          {/* ── HOLDING + TRANSACTION (collapsible detail) ── */}
+          <div className="rounded-lg border border-slate-200 bg-white p-2 shadow-sm">
+            <button
+              type="button"
+              onClick={() => setShowHoldTransDetail(!showHoldTransDetail)}
+              className="flex items-center justify-between w-full text-[10px]"
+            >
+              <span className="font-bold uppercase tracking-[0.12em] text-slate-500">Hold &amp; Trans Detail</span>
+              <span className="text-slate-400">{showHoldTransDetail ? "\u25B2" : "\u25BC"}</span>
+            </button>
+            {showHoldTransDetail && (
+              <div className="mt-2 space-y-2">
+                {/* Holding */}
+                {d.holding ? (
+                  <div className="text-[11px] space-y-0.5">
+                    <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-1">Holding &middot; {d.holding.daysHeld} days</div>
+                    <CostLine label="Property Tax" value={fmt(d.holding.holdTax)} sub={`$${fmtNum(d.holding.dailyTax, 2)}/d`} />
+                    <CostLine label="Insurance" value={fmt(d.holding.holdInsurance)} sub={`$${fmtNum(d.holding.dailyInsurance, 2)}/d`} />
+                    <CostLine label="HOA" value={fmt(d.holding.holdHoa)} sub={`$${fmtNum(d.holding.dailyHoa, 2)}/d`} />
+                    <CostLine label="Utilities" value={fmt(d.holding.holdUtilities)} sub={`$${fmtNum(d.holding.dailyUtilities, 2)}/d`} />
+                    <div className="border-t border-slate-200 pt-1 mt-1 flex justify-between">
+                      <span className="font-bold text-slate-700">Total</span>
+                      <div>
+                        <span className="font-mono font-bold text-slate-800">{fmt(d.holding.total)}</span>
+                        <span className="ml-1 text-[10px] text-slate-400">${fmtNum(d.holding.dailyTotal, 2)}/d</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-slate-400">No holding data</p>
+                )}
+                {/* Transaction */}
+                {d.transaction ? (
+                  <div className="text-[11px] space-y-0.5 border-t border-slate-100 pt-2">
+                    <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-1">Transaction</div>
+                    <CostLine label="Acq. Title (0.3%)" value={fmt(d.transaction.acquisitionTitle)} />
+                    <CostLine label="Disp. Title (0.47%)" value={fmt(d.transaction.dispositionTitle)} />
+                    <CostLine label="Commissions (4%)" value={fmt(d.transaction.dispositionCommissions)} />
+                    <div className="border-t border-slate-200 pt-1 mt-1 flex justify-between">
+                      <span className="font-bold text-slate-700">Total</span>
+                      <span className="font-mono font-bold text-slate-800">{fmt(d.transaction.total)}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-slate-400">No transaction data</p>
+                )}
+              </div>
+            )}
+          </div>
+
+        </div>{/* end left column */}
+
+        {/* ================================================================ */}
+        {/* CENTER COLUMN — ARV+Trend row, Comps, Notes                      */}
+        {/* ================================================================ */}
+        <div className="flex flex-col gap-2">
+
+          {/* ── ARV + PRICE TREND side by side ── */}
+          <div className="grid grid-cols-2 gap-2">
+
+            {/* ARV DETAIL CARD */}
+            <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
+              <CardTitle>ARV</CardTitle>
+              {/* 3-tier */}
+              <div className="grid grid-cols-3 gap-1 text-center mb-2">
+                <div className="rounded border border-slate-100 bg-slate-50 px-1 py-1">
+                  <div className="text-[9px] text-slate-400 uppercase">Auto</div>
+                  <div className="text-xs font-medium text-slate-600">{fmt(d.arv.auto)}</div>
+                </div>
+                <div className="rounded border border-blue-100 bg-blue-50 px-1 py-1">
+                  <div className="text-[9px] text-blue-400 uppercase">Selected</div>
+                  <div className="text-xs font-semibold text-blue-700">{fmt(d.arv.selected)}</div>
+                </div>
+                <div className="rounded border border-emerald-100 bg-emerald-50 px-1 py-1">
+                  <div className="text-[9px] text-emerald-400 uppercase">Final</div>
+                  <div className="text-xs font-bold text-emerald-700">{d.arv.final !== null ? fmt(d.arv.final) : <span className="text-slate-300">&mdash;</span>}</div>
+                </div>
+              </div>
+              <div className="rounded border border-slate-100 bg-slate-50 px-2 py-1.5 mb-2">
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-500">Effective ARV</span>
+                  <span className="font-mono font-bold text-emerald-700">{fmt(d.arv.effective)}</span>
+                </div>
+                {d.arv.selectedDetail && (
+                  <div className="flex justify-between text-[10px] text-slate-400">
+                    <span>$/sqft</span>
+                    <span className="font-mono">${fmtNum(d.arv.selectedDetail.arvPerSqft, 2)}</span>
+                  </div>
+                )}
+                {/* Subject PSF from effective ARV */}
+                {(() => {
+                  const bldg = d.physical?.buildingSqft ?? 0;
+                  const ag = d.physical?.aboveGradeSqft ?? 0;
+                  if (d.arv.effective <= 0 || (bldg <= 0 && ag <= 0)) return null;
+                  const psfBldg = bldg > 0 ? d.arv.effective / bldg : null;
+                  const psfAg = ag > 0 ? d.arv.effective / ag : null;
+                  const ls = d.trend?.detailJson?.localStats;
+                  const bldgAboveRange = psfBldg != null && ls?.psfBuildingHigh != null && psfBldg > ls.psfBuildingHigh;
+                  const agAboveRange = psfAg != null && ls?.psfAboveGradeHigh != null && psfAg > ls.psfAboveGradeHigh;
+                  return (
+                    <div className="mt-0.5 space-y-0 text-[10px]">
+                      {psfBldg != null && (
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">PSF Bldg</span>
+                          <span className={`font-mono ${bldgAboveRange ? "text-red-600 font-semibold" : "text-slate-500"}`}>
+                            ${fmtNum(psfBldg, 2)}
+                            {bldgAboveRange && <span className="text-[8px] ml-0.5">&gt; local</span>}
+                          </span>
+                        </div>
+                      )}
+                      {psfAg != null && (
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">PSF AG</span>
+                          <span className={`font-mono ${agAboveRange ? "text-red-600 font-semibold" : "text-slate-500"}`}>
+                            ${fmtNum(psfAg, 2)}
+                            {agAboveRange && <span className="text-[8px] ml-0.5">&gt; local</span>}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+              {/* Per-comp details */}
+              {d.arv.selectedDetail && d.arv.selectedDetail.perCompDetails.length > 0 && (
+                <div className="space-y-0">
+                  <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400 mb-1">Per-Comp ARV</div>
+                  <div className="overflow-auto max-h-[140px]">
+                    <table className="w-full text-[10px]">
+                      <thead>
+                        <tr className="text-left text-[9px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+                          <th className="py-0.5 pr-1">Address</th>
+                          <th className="py-0.5 text-right">Close</th>
+                          <th className="py-0.5 text-right">ARV Adj</th>
+                          <th className="py-0.5 text-right">Wt</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {d.arv.selectedDetail.perCompDetails.map((comp, i) => (
+                          <tr key={i} className="border-b border-slate-50">
+                            <td className="py-0.5 pr-1 text-slate-600 truncate max-w-[120px]">{comp.address}</td>
+                            <td className="py-0.5 text-right font-mono text-slate-600">{fmt(comp.closePrice)}</td>
+                            <td className="py-0.5 text-right font-mono text-slate-700">{fmt(comp.arvTimeAdjusted)}</td>
+                            <td className="py-0.5 text-right font-mono text-slate-400">{comp.decayWeight.toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+              {/* Comp summary stats */}
+              <div className="mt-2 flex gap-2 text-[10px] text-slate-400">
+                <span>{d.compSummary.selectedCount} comps</span>
+                <span>Avg {fmt(d.compSummary.avgSelectedPrice)}</span>
+                <span>${fmtNum(d.compSummary.avgSelectedPsf)}/sf</span>
+              </div>
+            </div>
+
+            {/* PRICE TREND CARD */}
+            <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
+              <CardTitle>Price Trend</CardTitle>
+              {d.trend ? (
+                <div className="space-y-2">
+                  {/* Badges: confidence + direction */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${
+                      d.trend.confidence === "high" ? "bg-emerald-100 text-emerald-700"
+                        : d.trend.confidence === "low" ? "bg-amber-100 text-amber-700"
+                          : "bg-red-100 text-red-700"
+                    }`}>
+                      Confidence: {d.trend.confidence === "high" ? "High" : d.trend.confidence === "low" ? "Low" : "Fallback"}
+                    </span>
+                    <TrendDirectionBadge direction={d.trend.direction} />
+                    {d.trend.isFallback && (
+                      <span className="text-[9px] text-red-500">Fixed rate — insufficient data</span>
+                    )}
+                  </div>
+
+                  {/* Applied rate + blend weight bar */}
+                  <div className="rounded border border-slate-100 bg-slate-50 px-2 py-1.5 space-y-1.5">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-slate-500">Applied Rate</span>
+                      <span className={`font-mono font-bold ${d.trend.blendedAnnualRate >= 0 ? "text-emerald-700" : "text-red-600"}`}>
+                        {d.trend.blendedAnnualRate >= 0 ? "+" : ""}{(d.trend.blendedAnnualRate * 100).toFixed(1)}%/yr
+                      </span>
+                    </div>
+                    {/* Blend weight visualization */}
+                    <div>
+                      <div className="flex items-center gap-1 text-[9px] text-slate-400 mb-0.5">
+                        <span>Local 10%</span>
+                        <span className="flex-1" />
+                        <span>Metro 90%</span>
+                      </div>
+                      <div className="flex h-1.5 rounded-full overflow-hidden">
+                        <div className="bg-blue-400" style={{ width: "10%" }} />
+                        <div className="bg-slate-300" style={{ width: "90%" }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Two-column: Local / Metro */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <TrendTierColumn
+                      label="Local"
+                      radius={d.trend.localRadius}
+                      rate={d.trend.rawLocalRate}
+                      stats={d.trend.detailJson?.localStats ?? null}
+                    />
+                    <TrendTierColumn
+                      label="Metro"
+                      radius={d.trend.metroRadius}
+                      rate={d.trend.rawMetroRate}
+                      stats={d.trend.detailJson?.metroStats ?? null}
+                    />
+                  </div>
+
+                  {/* Summary */}
+                  {d.trend.summary && (
+                    <p className="text-[9px] text-slate-400 leading-tight">{d.trend.summary}</p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-[10px] text-slate-400">No trend data — run screening first.</p>
+              )}
+            </div>
+
+          </div>{/* end ARV + Trend row */}
+
+          {/* ── COMPARABLE SALES — map + table ── */}
+          <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
+              <CardTitle>
+                Comparable Sales ({d.compSummary.selectedCount} selected of {d.compSummary.totalComps})
+              </CardTitle>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleCopyAllMls}
+                  className="rounded-md border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-600 hover:bg-slate-50"
+                >
+                  {copiedAll ? "Copied!" : "Copy All MLS#"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopySelectedMls}
+                  className="rounded-md border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-600 hover:bg-slate-50"
+                >
+                  {copiedSelected ? "Copied!" : "Copy Selected MLS#"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCompModal(true)}
+                  className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  Edit Comps
+                </button>
+              </div>
+            </div>
+            <div className="grid gap-2" style={{ gridTemplateColumns: "280px 1fr" }}>
+              {/* Map */}
+              <div>
+                {showCompModal ? (
+                  <div className="flex h-[250px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-400">
+                    Map open in comp editor
+                  </div>
+                ) : mapPins.length > 1 ? (
+                  <CompMap
+                    pins={mapPins}
+                    height={250}
+                    subjectLat={d.property.latitude}
+                    subjectLng={d.property.longitude}
+                  />
+                ) : (
+                  <div className="flex h-[250px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-400">
+                    No location data
+                  </div>
+                )}
+              </div>
+              {/* Selected comps table */}
+              <div>
+                {selectedComps.length > 0 ? (
+                  <div className="overflow-auto rounded-lg border border-slate-200 max-h-[250px]">
+                    <table className="w-full text-[11px]">
+                      <thead>
+                        <tr className="border-b border-slate-200 bg-slate-50 text-left text-[9px] uppercase tracking-[0.1em] text-slate-500 sticky top-0">
+                          <th className="px-2 py-1">Address</th>
+                          <th className="px-2 py-1 text-right">Close</th>
+                          <th className="px-2 py-1 text-right">PSF</th>
+                          <th className="px-2 py-1 text-right">Sqft</th>
+                          <th className="px-2 py-1 text-right">Dist</th>
+                          <th className="px-2 py-1 text-right">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedComps.map((c) => (
+                          <tr key={c.id} className="border-b border-slate-100 hover:bg-slate-50">
+                            <td className="px-2 py-1 font-medium text-slate-700">{c.address}</td>
+                            <td className="px-2 py-1 text-right font-mono text-slate-700">{fmt(c.closePrice)}</td>
+                            <td className="px-2 py-1 text-right font-mono text-slate-600">${fmtNum(c.ppsf)}</td>
+                            <td className="px-2 py-1 text-right text-slate-600">{fmtNum(c.sqft)}</td>
+                            <td className="px-2 py-1 text-right text-slate-600">{fmtNum(c.distance, 2)} mi</td>
+                            <td className="px-2 py-1 text-right text-slate-500">{c.closeDate ?? "\u2014"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="flex h-[250px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-400">
+                    No comps selected. Click &quot;Edit Comps&quot; to review.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── NOTES ── */}
+          <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm flex-1">
+            <div className="flex items-center justify-between mb-1.5">
+              <CardTitle>Notes ({d.notes.length})</CardTitle>
+              <button
+                type="button"
+                onClick={() => setShowNoteForm(!showNoteForm)}
+                className="text-[10px] text-blue-600 hover:underline"
+              >
+                {showNoteForm ? "Cancel" : "+ Add"}
+              </button>
+            </div>
+
+            {showNoteForm && (
+              <form
+                action={async (formData: FormData) => {
+                  await addAnalysisNoteAction(formData);
+                  setNoteBody("");
+                  setShowNoteForm(false);
+                  router.refresh();
+                }}
+                className="mb-2 space-y-1.5 rounded border border-slate-200 bg-slate-50 p-2"
+              >
+                <input type="hidden" name="analysis_id" value={d.analysisId} />
+                <div className="flex gap-2">
+                  <select
+                    name="note_type"
+                    className="dw-select !py-1 !text-xs"
+                    value={noteCategory}
+                    onChange={(e) => setNoteCategory(e.target.value)}
+                  >
+                    {NOTE_CATEGORIES.map((c) => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
+                    ))}
+                  </select>
+                  <label className="flex items-center gap-1 text-[10px] text-slate-500">
+                    <input type="checkbox" name="is_public" defaultChecked={noteCategory !== "internal"} />
+                    Public
+                  </label>
+                </div>
+                <textarea
+                  name="note_body"
+                  className="dw-textarea !py-1 !text-xs w-full"
+                  rows={2}
+                  placeholder="Enter note..."
+                  value={noteBody}
+                  onChange={(e) => setNoteBody(e.target.value)}
+                  required
+                />
+                <button type="submit" className="dw-button-primary !py-1 !text-[10px]">Save Note</button>
+              </form>
+            )}
+
+            {d.notes.length === 0 && !showNoteForm ? (
+              <p className="py-2 text-center text-[10px] text-slate-400">No notes yet.</p>
+            ) : (
+              <div className="space-y-0.5">
+                {d.notes.map((note) => {
+                  const cat = NOTE_CATEGORIES.find((c) => c.value === note.note_type);
+                  return (
+                    <div key={note.id} className="flex items-start gap-1.5 rounded border border-slate-100 bg-white px-1.5 py-1 text-[11px]">
+                      <span className="shrink-0 rounded bg-slate-100 px-1 py-0.5 text-[9px] font-bold uppercase text-slate-500">
+                        {cat?.icon ?? "?"} {cat?.label ?? note.note_type}
+                      </span>
+                      <span className="flex-1 text-slate-700">{note.note_body}</span>
+                      <span className={`shrink-0 text-[9px] ${note.is_public ? "text-emerald-600" : "text-slate-400"}`}>
+                        {note.is_public ? "Pub" : "Int"}
+                      </span>
+                      <form action={async (formData: FormData) => { await deleteAnalysisNoteAction(formData); router.refresh(); }}>
+                        <input type="hidden" name="note_id" value={note.id} />
+                        <input type="hidden" name="analysis_id" value={d.analysisId} />
+                        <button type="submit" className="text-[10px] text-red-400 hover:text-red-600">x</button>
+                      </form>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+        </div>{/* end center column */}
+
+        {/* ================================================================ */}
+        {/* RIGHT COLUMN — Rehab + Overrides + Pipeline                      */}
+        {/* ================================================================ */}
+        <div className="flex flex-col gap-2">
+
+          {/* ── REHAB DETAIL CARD ── */}
+          <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
+            <CardTitle
+              action={
+                d.rehab.manual !== null ? (
+                  <span className="text-[9px] font-semibold text-emerald-600 uppercase">Override</span>
+                ) : undefined
+              }
+            >
+              Rehab
+            </CardTitle>
+
+            {/* Scope tier selector */}
+            <form
+              action={async (formData: FormData) => {
+                setIsSaving(true);
+                await saveManualAnalysisAction(initialManualAnalysisFormState, formData);
+                setIsSaving(false);
+                router.refresh();
+              }}
+            >
+              <input type="hidden" name="analysis_id" value={d.analysisId} />
+              <input type="hidden" name="property_id" value={d.propertyId} />
+              {/* Preserve existing overrides */}
+              <input type="hidden" name="arv_manual" value={d.manualAnalysis?.arv_manual as string ?? ""} />
+              <input type="hidden" name="rehab_manual" value={d.manualAnalysis?.rehab_manual as string ?? ""} />
+              <input type="hidden" name="days_held_manual" value={d.manualAnalysis?.days_held_manual as string ?? ""} />
+              <input type="hidden" name="target_profit_manual" value={d.manualAnalysis?.target_profit_manual as string ?? ""} />
+              <input type="hidden" name="analyst_condition" value={d.manualAnalysis?.analyst_condition as string ?? ""} />
+              <input type="hidden" name="location_rating" value={d.manualAnalysis?.location_rating as string ?? ""} />
+              <input type="hidden" name="rent_estimate_monthly" value={d.manualAnalysis?.rent_estimate_monthly as string ?? ""} />
+              <input type="hidden" name="financing_rate_manual" value={d.manualAnalysis?.financing_rate_manual ? String(Number(d.manualAnalysis.financing_rate_manual) * 100) : ""} />
+              <input type="hidden" name="financing_points_manual" value={d.manualAnalysis?.financing_points_manual ? String(Number(d.manualAnalysis.financing_points_manual) * 100) : ""} />
+              <input type="hidden" name="financing_ltv_manual" value={d.manualAnalysis?.financing_ltv_manual ? String(Number(d.manualAnalysis.financing_ltv_manual) * 100) : ""} />
+
+              <div className="grid grid-cols-4 gap-1 mb-2">
+                {SCOPE_TIERS.map((tier) => (
+                  <button
+                    key={tier.key}
+                    type="submit"
+                    name="rehab_scope"
+                    value={tier.key}
+                    disabled={isSaving}
+                    className={`rounded-md border px-1 py-1 text-center text-[10px] font-medium transition-colors ${
+                      activeScope === tier.key
+                        ? "border-blue-300 bg-blue-50 text-blue-700 shadow-sm"
+                        : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:bg-slate-50"
+                    }`}
+                  >
+                    <div>{tier.label}</div>
+                    <div className="text-[9px] opacity-70">{tier.short}</div>
+                  </button>
+                ))}
+              </div>
+            </form>
+
+            {d.rehab.detail && (
+              <>
+                {/* Multiplier breakdown — single column for narrow width */}
+                <div className="grid grid-cols-3 gap-x-2 gap-y-0.5 text-[10px] text-slate-400 mb-1.5">
+                  <span>Type: {d.rehab.detail.typeMultiplier}</span>
+                  <span>Cond: {d.rehab.detail.conditionMultiplier}</span>
+                  <span>Price: {d.rehab.detail.priceMultiplier}</span>
+                  <span>Age: {d.rehab.detail.ageMultiplier}</span>
+                  <span>Scope: {d.rehab.scopeMultiplier}</span>
+                  <span className="font-semibold text-slate-600">{(d.rehab.detail.compositeMultiplier * d.rehab.scopeMultiplier).toFixed(3)}</span>
+                </div>
+
+                {/* Line items — single column for tall/thin layout */}
+                <div className="text-[11px] space-y-0.5">
+                  <CostLine label="Above Grade" value={fmt(d.rehab.detail.aboveGrade)} />
+                  <CostLine label="Below Grade (fin)" value={fmt(d.rehab.detail.belowGradeFinished)} />
+                  <CostLine label="Below Grade (unfin)" value={fmt(d.rehab.detail.belowGradeUnfinished)} />
+                  <CostLine label="Exterior" value={fmt(d.rehab.detail.exterior)} />
+                  <CostLine label="Landscaping" value={fmt(d.rehab.detail.landscaping)} />
+                  <CostLine label="Systems" value={fmt(d.rehab.detail.systems)} />
+                </div>
+
+                <div className="border-t border-slate-200 mt-1.5 pt-1.5 flex items-center justify-between text-[11px]">
+                  <span className="font-bold text-slate-700">Total Rehab</span>
+                  <span className="font-mono font-bold text-slate-800">{fmt(d.rehab.detail.total)}</span>
+                </div>
+                <div className="flex justify-between text-[10px] text-slate-400">
+                  <span>${fmtNum(d.rehab.detail.perSqftBuilding, 2)}/sqft bldg</span>
+                  <span>${fmtNum(d.rehab.detail.perSqftAboveGrade, 2)}/sqft ag</span>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* ── OVERRIDES ── */}
+          <div className="rounded-lg border border-amber-200 bg-amber-50/30 p-2.5 shadow-sm">
             <CardTitle>Overrides</CardTitle>
             <form
               action={async (formData: FormData) => {
@@ -986,203 +1222,46 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
               </button>
             </form>
           </div>
-        </div>
-      </div>
 
-      {/* ================================================================== */}
-      {/* COMPARABLE SALES — map + table                                     */}
-      {/* ================================================================== */}
-      <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
-        <div className="flex items-center justify-between mb-2">
-          <CardTitle>
-            Comparable Sales ({d.compSummary.selectedCount} selected of {d.compSummary.totalComps})
-          </CardTitle>
-          <button
-            type="button"
-            onClick={() => setShowCompModal(true)}
-            className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
-          >
-            Edit Comps
-          </button>
-        </div>
-        <div className="grid gap-2" style={{ gridTemplateColumns: "340px 1fr" }}>
-          {/* Map */}
-          <div>
-            {showCompModal ? (
-              <div className="flex h-[340px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-400">
-                Map open in comp editor
-              </div>
-            ) : mapPins.length > 1 ? (
-              <CompMap
-                pins={mapPins}
-                height={340}
-                subjectLat={d.property.latitude}
-                subjectLng={d.property.longitude}
-              />
-            ) : (
-              <div className="flex h-[340px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-400">
-                No location data
-              </div>
-            )}
-          </div>
-          {/* Selected comps table */}
-          <div>
-            {selectedComps.length > 0 ? (
-              <div className="overflow-auto rounded-lg border border-slate-200 max-h-[340px]">
-                <table className="w-full text-[11px]">
-                  <thead>
-                    <tr className="border-b border-slate-200 bg-slate-50 text-left text-[9px] uppercase tracking-[0.1em] text-slate-500 sticky top-0">
-                      <th className="px-2 py-1">Address</th>
-                      <th className="px-2 py-1 text-right">Close</th>
-                      <th className="px-2 py-1 text-right">PSF</th>
-                      <th className="px-2 py-1 text-right">Sqft</th>
-                      <th className="px-2 py-1 text-right">Dist</th>
-                      <th className="px-2 py-1 text-right">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedComps.map((c) => (
-                      <tr key={c.id} className="border-b border-slate-100 hover:bg-slate-50">
-                        <td className="px-2 py-1 font-medium text-slate-700">{c.address}</td>
-                        <td className="px-2 py-1 text-right font-mono text-slate-700">{fmt(c.closePrice)}</td>
-                        <td className="px-2 py-1 text-right font-mono text-slate-600">${fmtNum(c.ppsf)}</td>
-                        <td className="px-2 py-1 text-right text-slate-600">{fmtNum(c.sqft)}</td>
-                        <td className="px-2 py-1 text-right text-slate-600">{fmtNum(c.distance, 2)} mi</td>
-                        <td className="px-2 py-1 text-right text-slate-500">{c.closeDate ?? "\u2014"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="flex h-[340px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-400">
-                No comps selected. Click &quot;Edit Comps&quot; to review.
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ================================================================== */}
-      {/* NOTES + PIPELINE (side by side, compressed)                        */}
-      {/* ================================================================== */}
-      <div className="grid gap-2 xl:grid-cols-[1fr_auto]">
-        {/* Notes */}
-        <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
-          <div className="flex items-center justify-between mb-1.5">
-            <CardTitle>Notes ({d.notes.length})</CardTitle>
-            <button
-              type="button"
-              onClick={() => setShowNoteForm(!showNoteForm)}
-              className="text-[10px] text-blue-600 hover:underline"
-            >
-              {showNoteForm ? "Cancel" : "+ Add"}
-            </button>
-          </div>
-
-          {showNoteForm && (
+          {/* ── PIPELINE ── */}
+          <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
+            <CardTitle>Pipeline</CardTitle>
             <form
               action={async (formData: FormData) => {
-                await addAnalysisNoteAction(formData);
-                setNoteBody("");
-                setShowNoteForm(false);
+                await savePipelineAction(formData);
                 router.refresh();
               }}
-              className="mb-2 space-y-1.5 rounded border border-slate-200 bg-slate-50 p-2"
+              className="space-y-1.5"
             >
               <input type="hidden" name="analysis_id" value={d.analysisId} />
-              <div className="flex gap-2">
-                <select
-                  name="note_type"
-                  className="dw-select !py-1 !text-xs"
-                  value={noteCategory}
-                  onChange={(e) => setNoteCategory(e.target.value)}
-                >
-                  {NOTE_CATEGORIES.map((c) => (
-                    <option key={c.value} value={c.value}>{c.label}</option>
-                  ))}
+              <div>
+                <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Interest</label>
+                <select name="interest_level" className="dw-select !py-1 !text-xs" defaultValue={d.pipeline?.interest_level as string ?? ""}>
+                  <option value="">—</option>
+                  {PIPELINE_INTEREST.map((v) => <option key={v}>{v}</option>)}
                 </select>
-                <label className="flex items-center gap-1 text-[10px] text-slate-500">
-                  <input type="checkbox" name="is_public" defaultChecked={noteCategory !== "internal"} />
-                  Public
-                </label>
               </div>
-              <textarea
-                name="note_body"
-                className="dw-textarea !py-1 !text-xs w-full"
-                rows={2}
-                placeholder="Enter note..."
-                value={noteBody}
-                onChange={(e) => setNoteBody(e.target.value)}
-                required
-              />
-              <button type="submit" className="dw-button-primary !py-1 !text-[10px]">Save Note</button>
+              <div>
+                <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Showing</label>
+                <select name="showing_status" className="dw-select !py-1 !text-xs" defaultValue={d.pipeline?.showing_status as string ?? ""}>
+                  <option value="">—</option>
+                  {PIPELINE_SHOWING.map((v) => <option key={v}>{v}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Offer</label>
+                <select name="offer_status" className="dw-select !py-1 !text-xs" defaultValue={d.pipeline?.offer_status as string ?? ""}>
+                  <option value="">—</option>
+                  {PIPELINE_OFFER.map((v) => <option key={v}>{v}</option>)}
+                </select>
+              </div>
+              <button type="submit" className="dw-button-secondary !py-1 !text-[10px] w-full">Save</button>
             </form>
-          )}
+          </div>
 
-          {d.notes.length === 0 && !showNoteForm ? (
-            <p className="py-2 text-center text-[10px] text-slate-400">No notes yet.</p>
-          ) : (
-            <div className="space-y-0.5">
-              {d.notes.map((note) => {
-                const cat = NOTE_CATEGORIES.find((c) => c.value === note.note_type);
-                return (
-                  <div key={note.id} className="flex items-start gap-1.5 rounded border border-slate-100 bg-white px-1.5 py-1 text-[11px]">
-                    <span className="shrink-0 rounded bg-slate-100 px-1 py-0.5 text-[9px] font-bold uppercase text-slate-500">
-                      {cat?.icon ?? "?"} {cat?.label ?? note.note_type}
-                    </span>
-                    <span className="flex-1 text-slate-700">{note.note_body}</span>
-                    <span className={`shrink-0 text-[9px] ${note.is_public ? "text-emerald-600" : "text-slate-400"}`}>
-                      {note.is_public ? "Pub" : "Int"}
-                    </span>
-                    <form action={async (formData: FormData) => { await deleteAnalysisNoteAction(formData); router.refresh(); }}>
-                      <input type="hidden" name="note_id" value={note.id} />
-                      <input type="hidden" name="analysis_id" value={d.analysisId} />
-                      <button type="submit" className="text-[10px] text-red-400 hover:text-red-600">x</button>
-                    </form>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        </div>{/* end right column */}
 
-        {/* Pipeline */}
-        <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
-          <CardTitle>Pipeline</CardTitle>
-          <form
-            action={async (formData: FormData) => {
-              await savePipelineAction(formData);
-              router.refresh();
-            }}
-            className="space-y-1.5"
-          >
-            <input type="hidden" name="analysis_id" value={d.analysisId} />
-            <div>
-              <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Interest</label>
-              <select name="interest_level" className="dw-select !py-1 !text-xs" defaultValue={d.pipeline?.interest_level as string ?? ""}>
-                <option value="">—</option>
-                {PIPELINE_INTEREST.map((v) => <option key={v}>{v}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Showing</label>
-              <select name="showing_status" className="dw-select !py-1 !text-xs" defaultValue={d.pipeline?.showing_status as string ?? ""}>
-                <option value="">—</option>
-                {PIPELINE_SHOWING.map((v) => <option key={v}>{v}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Offer</label>
-              <select name="offer_status" className="dw-select !py-1 !text-xs" defaultValue={d.pipeline?.offer_status as string ?? ""}>
-                <option value="">—</option>
-                {PIPELINE_OFFER.map((v) => <option key={v}>{v}</option>)}
-              </select>
-            </div>
-            <button type="submit" className="dw-button-secondary !py-1 !text-[10px] w-full">Save</button>
-          </form>
-        </div>
-      </div>
+      </div>{/* end 3-column grid */}
 
       {/* ================================================================== */}
       {/* COMP SELECTION MODAL                                               */}
