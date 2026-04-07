@@ -15,29 +15,42 @@ type SectionConfig = {
 };
 
 const primaryNav = [
+  { href: "/home", label: "Home" },
+  { href: "/intake", label: "Intake" },
+  { href: "/deals", label: "Deals" },
   { href: "/reports", label: "Reports" },
-  { href: "/analysis/properties", label: "Analysis" },
   { href: "/admin", label: "Admin" },
 ];
 
 function getSectionConfig(pathname: string): SectionConfig {
-  if (pathname.startsWith("/analysis")) {
+  if (pathname === "/home") {
     return {
-      title: "Analysis",
+      title: "Home",
+      subtitle: "Daily overview of pipeline, screening, and imports.",
+      tabs: [{ href: "/home", label: "Dashboard", exact: true }],
+    };
+  }
+
+  if (pathname.startsWith("/intake")) {
+    return {
+      title: "Intake",
       subtitle:
-        "Internal intake, underwriting, and report-generation workspace.",
+        "Import data and screen for opportunities.",
       tabs: [
-        { href: "/analysis/dashboard", label: "Dashboard", exact: true },
-        { href: "/analysis/properties", label: "Properties", exact: true },
-        {
-          href: "/analysis/properties/new",
-          label: "Manual Entry",
-          exact: true,
-        },
-        { href: "/analysis/screening", label: "Screening" },
-        { href: "/analysis/queue", label: "Queue" },
-        { href: "/analysis/imports", label: "Imports", exact: true },
-        { href: "/analysis/analyses", label: "Analyses", exact: true },
+        { href: "/intake/imports", label: "Imports", exact: true },
+        { href: "/intake/screening", label: "Screening" },
+      ],
+    };
+  }
+
+  if (pathname.startsWith("/deals")) {
+    return {
+      title: "Deals",
+      subtitle: "Human-promoted deals: evaluation, offers, and closings.",
+      tabs: [
+        { href: "/deals/watchlist", label: "Watch List" },
+        { href: "/deals/pipeline", label: "Pipeline", exact: true },
+        { href: "/deals/closed", label: "Closed", exact: true },
       ],
     };
   }
@@ -53,8 +66,11 @@ function getSectionConfig(pathname: string): SectionConfig {
   if (pathname.startsWith("/admin")) {
     return {
       title: "Admin",
-      subtitle: "Configuration, mappings, and administrative controls.",
-      tabs: [{ href: "/admin", label: "Overview", exact: true }],
+      subtitle: "Configuration, properties browser, and system tools.",
+      tabs: [
+        { href: "/admin", label: "Overview", exact: true },
+        { href: "/admin/properties", label: "Properties" },
+      ],
     };
   }
 
@@ -66,22 +82,29 @@ function getSectionConfig(pathname: string): SectionConfig {
 }
 
 function getPageLabel(pathname: string): string {
-  if (pathname === "/analysis/dashboard") return "Dashboard";
-  if (pathname === "/analysis/properties") return "Properties";
-  if (pathname === "/analysis/properties/new") return "Manual Entry";
-  if (pathname.startsWith("/analysis/properties/")) return "Property Detail";
-  if (pathname === "/analysis/imports") return "Imports";
-  if (pathname === "/analysis/analyses") return "Analyses";
+  if (pathname === "/home") return "Dashboard";
+
+  if (pathname === "/intake/imports") return "Imports";
+  if (pathname.startsWith("/intake/screening")) return "Screening";
+
+  if (pathname === "/deals/watchlist") return "Watch List";
+  if (pathname.startsWith("/deals/watchlist/")) return "Analysis Workstation";
+  if (pathname === "/deals/pipeline") return "Pipeline";
+  if (pathname === "/deals/closed") return "Closed";
 
   if (pathname === "/reports") return "Report Library";
   if (pathname.startsWith("/reports/")) return "Report Detail";
 
   if (pathname === "/admin") return "Admin Overview";
+  if (pathname === "/admin/properties") return "Properties";
+  if (pathname === "/admin/properties/new") return "Manual Entry";
+  if (pathname.startsWith("/admin/properties/")) return "Property Detail";
 
   return "Overview";
 }
 
 function isPrimaryActive(pathname: string, href: string) {
+  if (href === "/home") return pathname === "/home";
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -119,7 +142,7 @@ export function AppChrome({ children }: AppChromeProps) {
         <div className="flex h-[var(--dw-header-height)] items-center justify-between gap-4 px-[var(--dw-page-pad-x)]">
           <div className="flex min-w-0 items-center gap-6">
             <Link
-              href="/analysis/properties"
+              href="/home"
               className="shrink-0 text-sm font-semibold uppercase tracking-[0.22em] text-white"
             >
               DataWise

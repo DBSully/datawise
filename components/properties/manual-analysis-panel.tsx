@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { saveManualAnalysisAction } from "@/app/(workspace)/analysis/properties/actions";
+import { saveManualAnalysisAction } from "@/app/(workspace)/deals/actions";
 import { initialManualAnalysisFormState } from "@/lib/analysis/manual-analysis-state";
 
 type ManualAnalysisPanelProps = {

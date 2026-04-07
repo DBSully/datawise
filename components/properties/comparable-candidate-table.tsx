@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useState, type ReactNode } from "react";
-import { toggleComparableCandidateSelectionAction } from "@/app/(workspace)/analysis/properties/actions";
+import { toggleComparableCandidateSelectionAction } from "@/app/(workspace)/deals/actions";
 
 export type ComparableCandidateViewRow = {
   id: string;

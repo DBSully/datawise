@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { previewImportAction } from "@/app/(workspace)/analysis/imports/actions";
+import { previewImportAction } from "@/app/(workspace)/intake/imports/actions";
 import { initialImportPreviewState } from "@/lib/imports/import-preview-state";
 
 export function ImportUploadPanel() {
@@ -55,11 +55,11 @@ export function ImportUploadPanel() {
             className="dw-button-primary"
             disabled={isPending}
           >
-            {isPending ? "Uploading and validating..." : "Upload and preview"}
+            {isPending ? "Importing, processing, and screening..." : "Import"}
           </button>
           <span className="text-xs text-slate-500">
-            This step stages the raw rows and validates the upload. Processing
-            into core tables comes next.
+            Uploads, validates, processes into core tables, and auto-screens
+            in one step.
           </span>
         </div>
       </form>

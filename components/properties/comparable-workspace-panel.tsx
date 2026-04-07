@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
-import { runComparableSearchAction } from "@/app/(workspace)/analysis/properties/actions";
+import { runComparableSearchAction } from "@/app/(workspace)/deals/actions";
 import { ComparableCandidateTable } from "@/components/properties/comparable-candidate-table";
 
 type ComparableWorkspacePanelProps = {

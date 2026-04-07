@@ -18,6 +18,7 @@ export type QueueResultRow = {
   subject_property_type: string | null;
   subject_list_price: number | null;
   mls_status: string | null;
+  mls_major_change_type: string | null;
   listing_contract_date: string | null;
   arv_aggregate: number | null;
   trend_annual_rate: number | null;
@@ -32,6 +33,7 @@ export type QueueResultRow = {
   offer_pct: number | null;
   promoted_analysis_id: string | null;
   comp_search_run_id: string | null;
+  review_action: string | null;
 };
 
 type QueueResultsTableProps = {
@@ -99,17 +101,42 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
   return (
     <>
       <div className="dw-table-wrap">
-        <table className="dw-table-compact min-w-[1500px]">
+        <table className="dw-table-compact min-w-[1500px]" style={{ tableLayout: "fixed" }}>
+          <colgroup>
+            {/* Map   Status  Star */}
+            <col style={{ width: 38 }} />
+            <col style={{ width: 68 }} />
+            <col style={{ width: 20 }} />
+            {/* Address  City  Type  ChangeType  ListDate */}
+            <col style={{ width: 220 }} />
+            <col style={{ width: 100 }} />
+            <col style={{ width: 68 }} />
+            <col style={{ width: 105 }} />
+            <col style={{ width: 78 }} />
+            {/* ListPrice  ARV  Trend  Spread  Gap  Comps */}
+            <col style={{ width: 76 }} />
+            <col style={{ width: 76 }} />
+            <col style={{ width: 58 }} />
+            <col style={{ width: 76 }} />
+            <col style={{ width: 58 }} />
+            <col style={{ width: 44 }} />
+            {/* Rehab  Hold  MaxOffer  Offer%  Detail */}
+            <col style={{ width: 70 }} />
+            <col style={{ width: 66 }} />
+            <col style={{ width: 76 }} />
+            <col style={{ width: 50 }} />
+            <col style={{ width: 40 }} />
+          </colgroup>
           <thead>
             <tr>
-              <th style={{ width: 40 }}></th>
-              <th style={{ width: 72 }}></th>
-              <th style={{ width: 20 }}></th>
-              <th>Address</th>
-              <th>City</th>
-              <th>Type</th>
-              <th>MLS Status</th>
-              <th>Contract</th>
+              <th className="text-left"></th>
+              <th className="text-left"></th>
+              <th className="text-left"></th>
+              <th className="text-left">Address</th>
+              <th className="text-left">City</th>
+              <th className="text-left">Type</th>
+              <th className="text-left">Change Type</th>
+              <th className="text-left">List Date</th>
               <th className="text-right">List Price</th>
               <th className="text-right">ARV</th>
               <th className="text-right">Trend</th>
@@ -120,14 +147,14 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
               <th className="text-right">Hold</th>
               <th className="text-right">Max Offer</th>
               <th className="text-right">Offer%</th>
-              <th></th>
+              <th className="text-left"></th>
             </tr>
           </thead>
           <tbody>
             {results.length === 0 ? (
               <tr>
                 <td colSpan={19} className="py-8 text-center text-sm text-slate-400">
-                  No screened properties found. Run a screening batch first.
+                  No screened properties found.
                 </td>
               </tr>
             ) : (
@@ -151,11 +178,15 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
                   <td>
                     {r.promoted_analysis_id ? (
                       <Link
-                        href={`/analysis/properties/${r.real_property_id}/analyses/${r.promoted_analysis_id}`}
+                        href={`/deals/watchlist/${r.promoted_analysis_id}`}
                         className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800"
                       >
-                        In Analysis
+                        Watch List
                       </Link>
+                    ) : r.review_action === "passed" ? (
+                      <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
+                        Passed
+                      </span>
                     ) : (
                       <span className="text-[10px] text-slate-400">Ready</span>
                     )}
@@ -165,17 +196,17 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
                       <span title="Prime Candidate" className="text-emerald-600">★</span>
                     ) : null}
                   </td>
-                  <td className="font-medium">
+                  <td className="truncate font-medium">
                     <Link
-                      href={`/analysis/screening/${r.screening_batch_id}/${r.id}`}
+                      href={`/intake/screening/${r.screening_batch_id}/${r.id}`}
                       className="text-blue-700 hover:underline"
                     >
                       {r.subject_address}
                     </Link>
                   </td>
-                  <td className="text-slate-500">{r.subject_city}</td>
+                  <td className="truncate text-slate-500">{r.subject_city}</td>
                   <td className="text-slate-500">{r.subject_property_type ?? "—"}</td>
-                  <td className="text-slate-600">{r.mls_status ?? "—"}</td>
+                  <td className="truncate text-slate-600">{r.mls_major_change_type ?? r.mls_status ?? "—"}</td>
                   <td className="text-slate-500">
                     {r.listing_contract_date ? r.listing_contract_date.slice(0, 10) : "—"}
                   </td>
@@ -226,7 +257,7 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
                   </td>
                   <td>
                     <Link
-                      href={`/analysis/screening/${r.screening_batch_id}/${r.id}`}
+                      href={`/intake/screening/${r.screening_batch_id}/${r.id}`}
                       className="text-xs text-blue-600 hover:underline"
                     >
                       Detail

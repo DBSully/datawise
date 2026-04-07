@@ -8,8 +8,9 @@ import {
   loadScreeningCompDataAction,
   toggleScreeningCompSelectionAction,
   promoteToAnalysisAction,
+  passOnScreeningResultAction,
   type ScreeningCompData,
-} from "@/app/(workspace)/analysis/screening/actions";
+} from "@/app/(workspace)/intake/screening/actions";
 
 const CompMap = dynamic(
   () => import("@/components/properties/comp-map").then((m) => m.CompMap),
@@ -40,10 +41,27 @@ function fmtNum(v: number | null | undefined, d = 0) {
   });
 }
 
-function fmtDate(v: unknown) {
-  if (!v || typeof v !== "string") return "—";
-  return new Date(v).toLocaleDateString();
+function fmtPct(v: number | null | undefined) {
+  if (v == null) return "—";
+  return `${(v * 100).toFixed(1)}%`;
 }
+
+const PASS_REASONS = [
+  "Comps too weak",
+  "Rehab too heavy",
+  "Price too high / offer% too low",
+  "Location concern",
+  "Already analyzed / duplicate",
+  "Other",
+] as const;
+
+const INTEREST_LEVELS = [
+  { value: "hot", label: "Hot", icon: "🔴", desc: "Act immediately" },
+  { value: "warm", label: "Warm", icon: "🟡", desc: "Review soon" },
+  { value: "watch", label: "Watch", icon: "🟢", desc: "Monitor for now" },
+] as const;
+
+type ModalMode = "view" | "promote" | "pass";
 
 // ---------------------------------------------------------------------------
 // Component
@@ -52,7 +70,6 @@ function fmtDate(v: unknown) {
 type ScreeningCompModalProps = {
   resultId: string;
   batchId: string;
-  /** If already promoted, link to the existing analysis instead of showing promote button */
   promotedAnalysisId?: string | null;
   realPropertyId?: string | null;
   onClose: () => void;
@@ -68,7 +85,16 @@ export function ScreeningCompModal({
   const router = useRouter();
   const [data, setData] = useState<ScreeningCompData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [promoting, setPromoting] = useState(false);
+  const [mode, setMode] = useState<ModalMode>("view");
+  const [submitting, setSubmitting] = useState(false);
+
+  // Promote form state
+  const [interestLevel, setInterestLevel] = useState<string>("warm");
+  const [watchListNote, setWatchListNote] = useState("");
+
+  // Pass form state
+  const [passReason, setPassReason] = useState("");
+  const [passOtherText, setPassOtherText] = useState("");
 
   // Load data on mount
   useEffect(() => {
@@ -94,7 +120,6 @@ export function ScreeningCompModal({
       fd.set("batch_id", batchId);
       await toggleScreeningCompSelectionAction(fd);
 
-      // Optimistic local update
       setData((prev) => {
         if (!prev) return prev;
         return {
@@ -110,7 +135,6 @@ export function ScreeningCompModal({
     [batchId],
   );
 
-  // Map pin click handler
   const handleMapPinToggle = useCallback(
     (pinId: string, currentType: "selected" | "candidate") => {
       handleToggle(pinId, currentType);
@@ -186,68 +210,131 @@ export function ScreeningCompModal({
   // Close on Escape
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        if (mode !== "view") {
+          setMode("view");
+        } else {
+          onClose();
+        }
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
+  }, [onClose, mode]);
 
-  const selectedCount = data?.candidates.filter((c) => c.selected_yn).length ?? 0;
+  const selectedCount =
+    data?.candidates.filter((c) => c.selected_yn).length ?? 0;
+
+  // Comp quality stats
+  const compStats = useMemo(() => {
+    if (!data || data.candidates.length === 0)
+      return { count: 0, avgDist: null, avgScore: null };
+    const selected = data.candidates.filter((c) => c.selected_yn);
+    const pool = selected.length > 0 ? selected : data.candidates;
+    const dists = pool
+      .map((c) => c.distance_miles)
+      .filter((d): d is number => d != null);
+    const scores = pool
+      .map((c) => c.raw_score)
+      .filter((s): s is number => s != null);
+    return {
+      count: pool.length,
+      avgDist: dists.length > 0 ? dists.reduce((a, b) => a + b, 0) / dists.length : null,
+      avgScore: scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null,
+    };
+  }, [data]);
 
   // Promote handler
-  const handlePromote = useCallback(async () => {
-    setPromoting(true);
+  const handlePromote = useCallback(
+    async (openWorkstation: boolean) => {
+      setSubmitting(true);
+      const fd = new FormData();
+      fd.set("result_id", resultId);
+      fd.set("interest_level", interestLevel);
+      if (watchListNote) fd.set("watch_list_note", watchListNote);
+      fd.set("open_workstation", openWorkstation ? "true" : "false");
+
+      try {
+        await promoteToAnalysisAction(fd);
+        // If openWorkstation=true, the action calls redirect() and this won't execute.
+        // If openWorkstation=false, we reach here — close modal and refresh.
+        router.refresh();
+        onClose();
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [resultId, interestLevel, watchListNote, router, onClose],
+  );
+
+  // Pass handler
+  const handlePass = useCallback(async () => {
+    const reason =
+      passReason === "Other" ? passOtherText.trim() : passReason;
+    if (!reason) return;
+
+    setSubmitting(true);
     const fd = new FormData();
     fd.set("result_id", resultId);
-    await promoteToAnalysisAction(fd);
-    // promoteToAnalysisAction redirects, but just in case:
-    setPromoting(false);
-  }, [resultId]);
+    fd.set("pass_reason", reason);
+
+    try {
+      await passOnScreeningResultAction(fd);
+      router.refresh();
+      onClose();
+    } finally {
+      setSubmitting(false);
+    }
+  }, [resultId, passReason, passOtherText, router, onClose]);
+
+  // Already reviewed?
+  const isReviewed = data?.reviewAction != null;
+  const isAlreadyPromoted = !!promotedAnalysisId || data?.reviewAction === "promoted";
+  const isAlreadyPassed = data?.reviewAction === "passed";
 
   return (
-    // Backdrop
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      {/* Modal */}
-      <div
-        className="flex max-h-[90vh] w-[1060px] max-w-[95vw] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
-      >
+      <div className="flex max-h-[90vh] w-[1060px] max-w-[95vw] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2.5">
           <div className="min-w-0">
-            <h2 className="truncate text-sm font-bold text-slate-900">
-              {data?.subjectAddress ?? "Loading..."}
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="truncate text-sm font-bold text-slate-900">
+                {data?.subjectAddress ?? "Loading..."}
+              </h2>
+              {data?.isPrimeCandidate && (
+                <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                  Prime
+                </span>
+              )}
+              {isAlreadyPassed && (
+                <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-700">
+                  Passed
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-3 text-xs text-slate-500">
               {data && (
                 <>
                   <span>{data.subjectCity}</span>
                   <span>List: {$f(data.subjectListPrice)}</span>
                   <span>{fmtNum(data.subjectBuildingSqft)} sqft</span>
-                  <span>
-                    {selectedCount} picked
-                  </span>
                 </>
               )}
             </div>
           </div>
           <div className="flex items-center gap-2">
             <p className="text-[10px] text-slate-400">
-              <span
-                className="mr-1 inline-block h-2 w-2 rounded-full bg-emerald-500"
-              />
+              <span className="mr-1 inline-block h-2 w-2 rounded-full bg-emerald-500" />
               Picked
-              <span
-                className="ml-2 mr-1 inline-block h-2 w-2 rounded-full bg-slate-400"
-              />
+              <span className="ml-2 mr-1 inline-block h-2 w-2 rounded-full bg-slate-400" />
               Candidate
-              <span
-                className="ml-2 mr-1 inline-block h-2 w-2 rounded-full bg-red-600"
-              />
+              <span className="ml-2 mr-1 inline-block h-2 w-2 rounded-full bg-red-600" />
               Subject
             </p>
             <button
@@ -259,6 +346,39 @@ export function ScreeningCompModal({
             </button>
           </div>
         </div>
+
+        {/* Deal math summary strip */}
+        {!loading && data && (
+          <div className="flex items-center gap-4 border-b border-slate-100 bg-slate-50 px-4 py-2">
+            <DealStat label="ARV" value={$f(data.arvAggregate)} highlight />
+            <DealStat label="Max Offer" value={$f(data.maxOffer)} highlight />
+            <DealStat
+              label="Gap/sqft"
+              value={
+                data.estGapPerSqft != null
+                  ? `$${fmtNum(data.estGapPerSqft)}`
+                  : "—"
+              }
+            />
+            <DealStat label="Offer%" value={fmtPct(data.offerPct)} />
+            <DealStat label="Rehab" value={$f(data.rehabTotal)} />
+            {data.trendAnnualRate != null && (
+              <DealStat
+                label="Trend"
+                value={`${data.trendAnnualRate >= 0 ? "+" : ""}${(data.trendAnnualRate * 100).toFixed(1)}%`}
+              />
+            )}
+            <div className="ml-auto text-xs text-slate-400">
+              {compStats.count} comps
+              {compStats.avgDist != null && (
+                <> · {fmtNum(compStats.avgDist, 2)} mi avg</>
+              )}
+              {compStats.avgScore != null && (
+                <> · {fmtNum(compStats.avgScore, 1)} avg score</>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Body */}
         {loading ? (
@@ -288,7 +408,9 @@ export function ScreeningCompModal({
               <table className="w-full text-xs">
                 <thead>
                   <tr className="sticky top-0 z-10 bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
-                    <th className="px-2 py-1.5 text-left" style={{ width: 52 }}>Pick</th>
+                    <th className="px-2 py-1.5 text-left" style={{ width: 52 }}>
+                      Pick
+                    </th>
                     <th className="px-2 py-1.5 text-left">Address</th>
                     <th className="px-2 py-1.5 text-right">Price</th>
                     <th className="px-2 py-1.5 text-right">Dist</th>
@@ -340,9 +462,7 @@ export function ScreeningCompModal({
                           {c.days_since_close ?? "—"}
                         </td>
                         <td className="px-2 py-1 text-right">
-                          {fmtNum(
-                            m.building_area_total_sqft as number | null,
-                          )}
+                          {fmtNum(m.building_area_total_sqft as number | null)}
                         </td>
                         <td className="px-2 py-1 text-right">
                           {m.ppsf ? `$${fmtNum(m.ppsf as number)}` : "—"}
@@ -359,32 +479,223 @@ export function ScreeningCompModal({
           </div>
         )}
 
-        {/* Footer — promote to analysis */}
+        {/* Footer — action area */}
         {!loading && data && data.candidates.length > 0 && (
-          <div className="flex items-center justify-between border-t border-slate-200 px-4 py-2.5">
-            <div className="text-xs text-slate-500">
-              {selectedCount} comp{selectedCount !== 1 ? "s" : ""} picked
-            </div>
-            {promotedAnalysisId && realPropertyId ? (
-              <a
-                href={`/analysis/properties/${realPropertyId}/analyses/${promotedAnalysisId}`}
-                className="rounded bg-blue-100 px-3 py-1.5 text-xs font-semibold text-blue-800 hover:bg-blue-200"
-              >
-                Open Analysis →
-              </a>
-            ) : (
-              <button
-                type="button"
-                onClick={handlePromote}
-                disabled={promoting}
-                className="rounded bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
-              >
-                {promoting ? "Creating..." : "Begin Analysis →"}
-              </button>
+          <div className="border-t border-slate-200">
+            {/* Already promoted — show link */}
+            {isAlreadyPromoted && promotedAnalysisId && (
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <div className="text-xs text-slate-500">
+                  {selectedCount} comp{selectedCount !== 1 ? "s" : ""} picked
+                </div>
+                <a
+                  href={`/deals/watchlist/${promotedAnalysisId}`}
+                  className="rounded bg-blue-100 px-3 py-1.5 text-xs font-semibold text-blue-800 hover:bg-blue-200"
+                >
+                  Open Analysis →
+                </a>
+              </div>
+            )}
+
+            {/* Already passed — show status */}
+            {isAlreadyPassed && !isAlreadyPromoted && (
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <div className="text-xs text-slate-500">
+                  Passed: {data.passReason}
+                </div>
+              </div>
+            )}
+
+            {/* Not yet reviewed — show Promote/Pass buttons */}
+            {!isReviewed && mode === "view" && (
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <div className="text-xs text-slate-500">
+                  {selectedCount} comp{selectedCount !== 1 ? "s" : ""} picked
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMode("pass")}
+                    className="rounded border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
+                  >
+                    Pass on This Property
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode("promote")}
+                    className="rounded bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700"
+                  >
+                    Add to Watch List
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Promote form */}
+            {!isReviewed && mode === "promote" && (
+              <div className="space-y-3 px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-700">
+                    Interest Level
+                  </span>
+                  <span className="text-[10px] text-slate-400">(required)</span>
+                </div>
+                <div className="flex gap-2">
+                  {INTEREST_LEVELS.map((level) => (
+                    <button
+                      key={level.value}
+                      type="button"
+                      onClick={() => setInterestLevel(level.value)}
+                      className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition-colors ${
+                        interestLevel === level.value
+                          ? "border-slate-800 bg-slate-900 text-white"
+                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      <span>{level.icon}</span>
+                      <span className="font-semibold">{level.label}</span>
+                      <span
+                        className={
+                          interestLevel === level.value
+                            ? "text-slate-300"
+                            : "text-slate-400"
+                        }
+                      >
+                        — {level.desc}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500" htmlFor="wl-note">
+                    Note (optional)
+                  </label>
+                  <input
+                    id="wl-note"
+                    type="text"
+                    value={watchListNote}
+                    onChange={(e) => setWatchListNote(e.target.value)}
+                    placeholder="e.g. great comps, check basement finish"
+                    className="mt-1 w-full rounded border border-slate-200 px-3 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  />
+                </div>
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setMode("view")}
+                    className="text-xs text-slate-500 hover:text-slate-700"
+                  >
+                    ← Back
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handlePromote(false)}
+                      disabled={submitting}
+                      className="rounded border border-emerald-300 bg-emerald-50 px-4 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                    >
+                      {submitting ? "Saving..." : "Save to Watch List"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handlePromote(true)}
+                      disabled={submitting}
+                      className="rounded bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      {submitting ? "Saving..." : "Save + Open Analysis →"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Pass form */}
+            {!isReviewed && mode === "pass" && (
+              <div className="space-y-3 px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-700">
+                    Pass Reason
+                  </span>
+                  <span className="text-[10px] text-slate-400">(required)</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {PASS_REASONS.map((reason) => (
+                    <button
+                      key={reason}
+                      type="button"
+                      onClick={() => setPassReason(reason)}
+                      className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+                        passReason === reason
+                          ? "border-red-400 bg-red-50 font-semibold text-red-800"
+                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      {reason}
+                    </button>
+                  ))}
+                </div>
+                {passReason === "Other" && (
+                  <input
+                    type="text"
+                    value={passOtherText}
+                    onChange={(e) => setPassOtherText(e.target.value)}
+                    placeholder="Describe the reason..."
+                    className="w-full rounded border border-slate-200 px-3 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-red-400 focus:outline-none focus:ring-1 focus:ring-red-400"
+                  />
+                )}
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setMode("view")}
+                    className="text-xs text-slate-500 hover:text-slate-700"
+                  >
+                    ← Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handlePass}
+                    disabled={
+                      submitting ||
+                      !passReason ||
+                      (passReason === "Other" && !passOtherText.trim())
+                    }
+                    className="rounded bg-red-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {submitting ? "Saving..." : "Confirm Pass"}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
+
+function DealStat({
+  label,
+  value,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[10px] uppercase tracking-wider text-slate-400">
+        {label}
+      </span>
+      <span
+        className={`text-xs font-semibold ${highlight ? "text-emerald-700" : "text-slate-900"}`}
+      >
+        {value}
+      </span>
     </div>
   );
 }

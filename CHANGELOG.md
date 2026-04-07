@@ -1,3 +1,118 @@
+## 2026-04-07 — Funnel Redesign: Navigation, Promote/Pass, Watch List, Pipeline, Dashboard
+
+### Summary
+
+Complete navigation and workflow redesign implementing the approved Funnel Redesign plan (REDESIGN.md). Separates the application into a Screener side (automated, pre-human) and an Analyst side (curated, human-promoted). Adds a deliberate Promote/Pass gate at the screening stage, a working Watch List for deal management, a Pipeline for active deal-making, and a morning-briefing dashboard.
+
+### Phase 1: Route Restructure
+
+Reorganized the entire URL structure from a single "Analysis" mega-section into five top-level sections.
+
+**New navigation:** Home | Intake | Deals | Reports | Admin
+
+| Old route | New route |
+|---|---|
+| `/analysis/dashboard` | `/home` |
+| `/analysis/imports` | `/intake/imports` |
+| `/analysis/queue` | `/intake/screening` |
+| `/analysis/screening/[batchId]` | `/intake/screening/[batchId]` |
+| `/analysis/screening` (batch mgmt) | Folded into `/intake/imports` |
+| `/analysis/analyses` | `/deals/watchlist` |
+| `/analysis/properties/[id]/analyses/[analysisId]` | `/deals/watchlist/[analysisId]` |
+| `/analysis/properties` | `/admin/properties` |
+
+- Workstation URL simplified from two dynamic segments (`[id]/analyses/[analysisId]`) to one (`[analysisId]`) — propertyId derived from analysis record
+- Screening batch management (dataset overview, screen buttons, batch table) merged into imports page
+- All old `/analysis/...` URLs redirect to new locations
+- All component imports and hardcoded hrefs updated across ~40 files
+- Public home page at `/` updated with DataWise logo placeholder
+
+### Phase 2: Promote/Pass Flow
+
+**Database migration** `20260407100000_screening_review_and_promotion.sql`:
+- `screening_results`: added `reviewed_at`, `reviewed_by_user_id`, `review_action` (constrained to `promoted`/`passed`), `pass_reason`
+- `analysis_pipeline`: added `promoted_at`, `promoted_from_screening_result_id`, `watch_list_note`
+- Backfilled existing promoted results; updated `analysis_queue_v` with review columns
+
+**Redesigned screening comp modal** replaces "Begin Analysis" with a two-choice gate:
+- **Add to Watch List**: interest level selector (Hot/Warm/Watch), optional note, two confirm buttons ("Save to Watch List" returns to queue, "Save + Open Analysis" opens workstation)
+- **Pass on This Property**: required reason from 6 options (Comps too weak, Rehab too heavy, Price too high, Location concern, Already analyzed, Other with free text)
+- Deal math summary strip added (ARV, Max Offer, Gap/sqft, Offer%, Rehab, Trend, comp quality stats)
+- Already-reviewed results show status instead of action buttons
+
+**Screening queue** defaults to hiding reviewed results with "Unreviewed Only" / "Show All" toggle. Status badges (Watch List/Passed/Ready) on each row.
+
+### Phase 3: Watch List
+
+**Database migration** `20260407110000_watch_list_view.sql`: `watch_list_v` view joining analyses, pipeline, properties, physicals, screening results, and MLS listings with computed `days_on_watch_list`.
+
+**Watch List page** (`/deals/watchlist`) — full working management table:
+- Interest level indicator (clickable inline change)
+- Address, City, Type, List Price, ARV, Max Offer, Gap/sqft, Comps
+- Days on Watch List, Status dropdown (inline), Note (click-to-edit inline)
+- Actions: Open workstation, Move to Pipeline, Pass (with reason)
+- Default sort: interest level (Hot first), then Gap/sqft descending
+
+**Server actions**: `updateInterestLevelAction`, `updateShowingStatusAction`, `updateWatchListNoteAction`, `passFromWatchListAction`, `moveToPipelineAction`
+
+### Phase 4: Home Dashboard
+
+Rewrote `/home` from old metrics dashboard into four-section morning briefing:
+
+1. **Today at a Glance** — four clickable stat cards: Imported Today, Unreviewed Primes, Watch List count, Pipeline count (red accent when items need action)
+2. **Unreviewed Prime Candidates** — top 10 by gap/sqft with inline Review button opening the Promote/Pass modal (client component, no page navigation)
+3. **Watch List — Needs Attention** — deals with no activity in 3+ days, Hot interest level, or showings scheduled
+4. **Pipeline — Action Required** — offers submitted 3+ days without response, deadlines within 24 hours
+
+### Phase 5: Pipeline + Closed
+
+**Database migration** `20260407120000_pipeline_and_closed_views.sql`:
+- `pipeline_v`: active deals in showing/offer/under_contract stages with offer dates and `days_since_update`
+- `closed_deals_v`: deals with passed/closed disposition for won/lost tracking
+
+**Pipeline page** (`/deals/pipeline`):
+- Stage badges (Showing/Offer/Under Contract), interest level, deal math
+- Offer status dropdown (inline: Drafting → Submitted → Accepted → Rejected/Expired)
+- Date tracking (submitted, deadline), days idle (amber at 3+)
+- Actions: advance stage (→ Offer, → Contract), Close (won/lost with reason), ← Watch List
+
+**Closed page** (`/deals/closed`):
+- Won/Lost outcome badges, deal math columns, close date, reason for lost deals
+- Won/lost count summary
+
+**Server actions**: `advancePipelineStageAction`, `updateOfferStatusAction`, `closeDealAction`, `moveToWatchListAction`
+
+### Phase 6: Auto-Screening on Import
+
+`previewImportAction` now runs the full pipeline in one step: upload → validate → stage → process into canonical tables → auto-screen. Button changed from "Upload and preview" to "Import" with pending text "Importing, processing, and screening..."
+
+Screening failure is non-fatal — import still succeeds with a note. Success banner shows "Import complete. Processed into core tables. Auto-screened." with "View Prime Candidates →" link. Manual screening buttons retained for ad-hoc re-screening.
+
+### Table Unification and Column Alignment
+
+- Batch results page (`/intake/screening/[batchId]`) and Screening Queue (`/intake/screening`) now use the same `QueueResultsTable` component and identical filter/sort layout
+- Columns matched: Map, Status, Prime, Address, City, Type, Change Type, List Date, List Price, ARV, Trend, Spread, Gap/sqft, Comps, Rehab, Hold, Max Offer, Offer%, Detail
+- `mls_status` column replaced with `mls_major_change_type` (more detail); MLS Status filter added (broader category)
+- "Contract" renamed to "List Date"
+- Fixed column alignment: `table-layout: fixed` with explicit `<colgroup>` widths; removed CSS `text-align: left` override on `.dw-table-compact thead th`
+- MLS status filter fixed (was querying wrong view)
+- 60-day import chart fixed (percentage height not resolving against flex parent)
+
+### Database migrations
+
+- `20260407100000_screening_review_and_promotion.sql`
+- `20260407110000_watch_list_view.sql`
+- `20260407120000_pipeline_and_closed_views.sql`
+- `20260407130000_add_mls_change_type_to_views.sql`
+
+### Full deal lifecycle now operational
+
+```
+Import (auto-screen) → Screening Queue (Promote/Pass) → Watch List → Pipeline (Showing → Offer → Contract) → Closed (Won/Lost)
+```
+
+---
+
 ## 2026-04-06 — Dual Comp Selection: ARV Comparables + As-Is Comparables
 
 ### Summary

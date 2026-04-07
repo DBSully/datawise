@@ -16,18 +16,24 @@ export type BatchResultRow = {
   subject_city: string;
   subject_property_type: string | null;
   subject_list_price: number | null;
+  mls_status: string | null;
+  mls_major_change_type: string | null;
+  listing_contract_date: string | null;
   arv_aggregate: number | null;
+  trend_annual_rate: number | null;
+  trend_confidence: string | null;
+  trend_detail_json: Record<string, unknown> | null;
   spread: number | null;
   est_gap_per_sqft: number | null;
   arv_comp_count: number | null;
   rehab_total: number | null;
   hold_total: number | null;
-  transaction_total: number | null;
-  financing_total: number | null;
   max_offer: number | null;
   offer_pct: number | null;
   screening_status: string;
   comp_search_run_id: string | null;
+  review_action: string | null;
+  promoted_analysis_id: string | null;
 };
 
 type BatchResultsTableProps = {
@@ -61,6 +67,28 @@ function formatPercent(value: number | null | undefined) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+function classifyDirection(rate: number): string {
+  if (rate >= 0.05) return "strong_appreciation";
+  if (rate >= 0.02) return "appreciating";
+  if (rate >= -0.02) return "flat";
+  if (rate >= -0.05) return "softening";
+  if (rate >= -0.10) return "declining";
+  return "sharp_decline";
+}
+
+function trendColor(rate: number, detailJson: Record<string, unknown> | null): string {
+  const direction = (detailJson?.direction as string) ?? classifyDirection(rate);
+  switch (direction) {
+    case "strong_appreciation": return "bg-emerald-100 text-emerald-800";
+    case "appreciating": return "bg-emerald-50 text-emerald-700";
+    case "flat": return "bg-slate-100 text-slate-600";
+    case "softening": return "bg-amber-100 text-amber-800";
+    case "declining": return "bg-red-100 text-red-700";
+    case "sharp_decline": return "bg-red-200 text-red-800";
+    default: return "bg-slate-100 text-slate-600";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -74,29 +102,31 @@ export function BatchResultsTable({ batchId, results }: BatchResultsTableProps) 
         <table className="dw-table-compact min-w-[1500px]">
           <thead>
             <tr>
-              <th style={{ width: 40 }}></th>
-              <th style={{ width: 28 }}></th>
-              <th>Address</th>
-              <th>City</th>
-              <th>Type</th>
+              <th className="text-center" style={{ width: 40 }}></th>
+              <th className="text-center" style={{ width: 72 }}></th>
+              <th className="text-center" style={{ width: 20 }}></th>
+              <th className="text-center">Address</th>
+              <th className="text-center">City</th>
+              <th className="text-center">Type</th>
+              <th className="text-center">Change Type</th>
+              <th className="text-center">List Date</th>
               <th className="text-right">List Price</th>
               <th className="text-right">ARV</th>
+              <th className="text-right">Trend</th>
               <th className="text-right">Spread</th>
               <th className="text-right">Gap/sqft</th>
               <th className="text-right">Comps</th>
               <th className="text-right">Rehab</th>
               <th className="text-right">Hold</th>
-              <th className="text-right">Trans.</th>
-              <th className="text-right">Fin.</th>
               <th className="text-right">Max Offer</th>
               <th className="text-right">Offer%</th>
-              <th></th>
+              <th className="text-center"></th>
             </tr>
           </thead>
           <tbody>
             {results.length === 0 ? (
               <tr>
-                <td colSpan={17} className="py-8 text-center text-sm text-slate-400">
+                <td colSpan={19} className="py-8 text-center text-sm text-slate-400">
                   No results found.
                 </td>
               </tr>
@@ -118,6 +148,22 @@ export function BatchResultsTable({ batchId, results }: BatchResultsTableProps) 
                       </button>
                     ) : null}
                   </td>
+                  <td>
+                    {r.review_action === "promoted" && r.promoted_analysis_id ? (
+                      <Link
+                        href={`/deals/watchlist/${r.promoted_analysis_id}`}
+                        className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800"
+                      >
+                        Watch List
+                      </Link>
+                    ) : r.review_action === "passed" ? (
+                      <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
+                        Passed
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-slate-400">Ready</span>
+                    )}
+                  </td>
                   <td className="text-center">
                     {r.is_prime_candidate ? (
                       <span title="Prime Candidate" className="text-emerald-600">
@@ -127,7 +173,7 @@ export function BatchResultsTable({ batchId, results }: BatchResultsTableProps) 
                   </td>
                   <td className="font-medium">
                     <Link
-                      href={`/analysis/screening/${batchId}/${r.id}`}
+                      href={`/intake/screening/${batchId}/${r.id}`}
                       className="text-blue-700 hover:underline"
                     >
                       {r.subject_address}
@@ -137,11 +183,29 @@ export function BatchResultsTable({ batchId, results }: BatchResultsTableProps) 
                   <td className="text-xs text-slate-500">
                     {r.subject_property_type ?? "—"}
                   </td>
+                  <td className="text-slate-600">
+                    {r.mls_major_change_type ?? r.mls_status ?? "—"}
+                  </td>
+                  <td className="text-slate-500">
+                    {r.listing_contract_date ? r.listing_contract_date.slice(0, 10) : "—"}
+                  </td>
                   <td className="text-right">
                     {formatCurrency(r.subject_list_price)}
                   </td>
                   <td className="text-right font-medium">
                     {formatCurrency(r.arv_aggregate)}
+                  </td>
+                  <td className="text-right">
+                    {r.trend_annual_rate != null ? (
+                      <span
+                        className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${trendColor(r.trend_annual_rate, r.trend_detail_json)}`}
+                      >
+                        {r.trend_annual_rate >= 0 ? "+" : ""}
+                        {(r.trend_annual_rate * 100).toFixed(1)}%
+                      </span>
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
                   </td>
                   <td
                     className={`text-right font-medium ${
@@ -174,12 +238,6 @@ export function BatchResultsTable({ batchId, results }: BatchResultsTableProps) 
                   <td className="text-right">
                     {formatCurrency(r.hold_total)}
                   </td>
-                  <td className="text-right">
-                    {formatCurrency(r.transaction_total)}
-                  </td>
-                  <td className="text-right">
-                    {formatCurrency(r.financing_total)}
-                  </td>
                   <td className="text-right font-medium">
                     {formatCurrency(r.max_offer)}
                   </td>
@@ -188,7 +246,7 @@ export function BatchResultsTable({ batchId, results }: BatchResultsTableProps) 
                   </td>
                   <td>
                     <Link
-                      href={`/analysis/screening/${batchId}/${r.id}`}
+                      href={`/intake/screening/${batchId}/${r.id}`}
                       className="text-xs text-blue-600 hover:underline"
                     >
                       Detail
@@ -202,14 +260,18 @@ export function BatchResultsTable({ batchId, results }: BatchResultsTableProps) 
       </div>
 
       {/* Quick Comps Modal */}
-      {activeResultId && (
-        <ScreeningCompModal
-          resultId={activeResultId}
-          batchId={batchId}
-          realPropertyId={results.find((r) => r.id === activeResultId)?.real_property_id}
-          onClose={() => setActiveResultId(null)}
-        />
-      )}
+      {activeResultId && (() => {
+        const activeRow = results.find((r) => r.id === activeResultId);
+        return (
+          <ScreeningCompModal
+            resultId={activeResultId}
+            batchId={batchId}
+            promotedAnalysisId={activeRow?.promoted_analysis_id}
+            realPropertyId={activeRow?.real_property_id}
+            onClose={() => setActiveResultId(null)}
+          />
+        );
+      })()}
     </>
   );
 }
