@@ -84,6 +84,7 @@ function parseComparablePurpose(value: unknown): ComparablePurpose | null {
 
   if (["flip", "arv"].includes(normalized)) return "flip";
   if (normalized === "rental" || normalized === "rent") return "rental";
+  if (normalized === "as_is" || normalized === "as-is" || normalized === "asis") return "as_is";
   if (
     normalized === "scrape" ||
     normalized === "land" ||

@@ -507,6 +507,60 @@ export async function toggleComparableCandidateSelectionAction(
 }
 
 // ---------------------------------------------------------------------------
+// Toggle As-Is comparable candidate selection
+// ---------------------------------------------------------------------------
+
+export async function toggleAsIsComparableCandidateSelectionAction(
+  formData: FormData,
+) {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/auth/sign-in");
+  }
+
+  const candidateId =
+    typeof formData.get("candidate_id") === "string"
+      ? (formData.get("candidate_id") as string).trim()
+      : "";
+  const propertyId =
+    typeof formData.get("property_id") === "string"
+      ? (formData.get("property_id") as string).trim()
+      : "";
+  const analysisId =
+    typeof formData.get("analysis_id") === "string"
+      ? (formData.get("analysis_id") as string).trim()
+      : "";
+  const nextSelected =
+    typeof formData.get("next_selected") === "string"
+      ? formData.get("next_selected") === "true"
+      : false;
+
+  if (!candidateId || !propertyId || !analysisId) {
+    throw new Error("Candidate ID, property ID, and analysis ID are required.");
+  }
+
+  const { error } = await supabase
+    .from("comparable_search_candidates")
+    .update({ selected_as_is_yn: nextSelected })
+    .eq("id", candidateId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath(`/analysis/properties/${propertyId}`);
+  revalidatePath(`/analysis/properties/${propertyId}/analyses/${analysisId}`);
+  revalidatePath(
+    `/analysis/properties/${propertyId}/analyses/${analysisId}/comparables`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Add analysis note
 // ---------------------------------------------------------------------------
 

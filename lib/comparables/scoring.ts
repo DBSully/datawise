@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 
 export type SizeBasis = "building_area_total" | "lot_size";
-export type ComparablePurpose = "standard" | "rental" | "flip" | "scrape";
+export type ComparablePurpose = "standard" | "rental" | "flip" | "scrape" | "as_is";
 export type SnapshotMode = "auto" | "current" | "custom";
 export type SnapshotDateSource =
   | "listing_contract_date"

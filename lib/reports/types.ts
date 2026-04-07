@@ -230,6 +230,13 @@ export type WorkstationData = {
     } | null;
     compCandidates: Array<Record<string, unknown>>;
   };
+  asIsCompSummary: {
+    totalComps: number;
+    selectedCount: number;
+    avgSelectedPrice: number | null;
+    avgSelectedPsf: number | null;
+    avgSelectedDist: number | null;
+  };
   subjectContext: Record<string, unknown>;
   scopeMultipliers: Record<RehabScopeTier, number>;
   cashRequired: {

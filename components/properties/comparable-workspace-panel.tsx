@@ -54,7 +54,7 @@ type ComparableWorkspacePanelProps = {
   };
 };
 
-type UiPurpose = "standard" | "flip" | "rental" | "scrape";
+type UiPurpose = "standard" | "flip" | "rental" | "scrape" | "as_is";
 type SnapshotMode = "auto" | "current" | "custom";
 type SizeBasis = "building_area_total" | "lot_size";
 type SubjectFamily =
@@ -277,6 +277,8 @@ function purposeLabel(purpose: UiPurpose) {
       return "Rental";
     case "scrape":
       return "Scrape / Land";
+    case "as_is":
+      return "As-Is";
   }
 }
 
@@ -285,6 +287,7 @@ function strategyToDefaultPurpose(strategyType: string | null): UiPurpose {
 
   if (normalized === "flip") return "flip";
   if (normalized === "rental") return "rental";
+  if (normalized === "as_is" || normalized === "as-is" || normalized === "asis") return "as_is";
   if (
     normalized === "new_build" ||
     normalized === "new build" ||
@@ -305,6 +308,7 @@ function uiPurposeFromSummary(
   if (normalized === "flip") return "flip";
   if (normalized === "rental") return "rental";
   if (normalized === "scrape") return "scrape";
+  if (normalized === "as_is" || normalized === "as-is" || normalized === "asis") return "as_is";
   if (
     normalized === "standard" ||
     normalized === "listing" ||
@@ -1094,7 +1098,7 @@ export function ComparableWorkspacePanel({
               Purpose
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
-              {(["standard", "flip", "rental", "scrape"] as UiPurpose[]).map(
+              {(["standard", "flip", "rental", "scrape", "as_is"] as UiPurpose[]).map(
                 (purpose) => (
                   <SegmentedButton
                     key={purpose}

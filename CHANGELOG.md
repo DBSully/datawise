@@ -1,3 +1,39 @@
+## 2026-04-06 — Dual Comp Selection: ARV Comparables + As-Is Comparables
+
+### Summary
+
+Split the single "Comparable Sales" tile into two independent selection buckets — **ARV Comparables** and **As-Is Comparables** — on the analysis workstation. Both tiles draw from the same candidate pool (same comp search run), but each maintains its own selection state. ARV comps support after-repair valuation; As-Is comps support current-condition valuation. Click-to-select on map pins works identically in both tiles.
+
+### Architecture
+
+- **Single candidate pool, dual selection flags.** Rather than running separate comp searches, both tiles share the same `comparable_search_candidates` rows from the latest search run. ARV selection uses `selected_yn` (existing); As-Is selection uses the new `selected_as_is_yn` column. This keeps the data model simple — comps are just "buckets" the analyst sorts candidates into.
+- **Independent map pin state.** Each tile builds its own map pin array where selected/candidate coloring reflects that tile's selection flag. Clicking a pin in the ARV tile toggles `selected_yn`; clicking in the As-Is tile toggles `selected_as_is_yn`.
+- **Separate server actions.** `toggleComparableCandidateSelectionAction` (existing) handles ARV; new `toggleAsIsComparableCandidateSelectionAction` handles As-Is.
+
+### Features
+
+- **Renamed tile:** "Comparable Sales" → "ARV Comparables" with count display
+- **New tile:** "As-Is Comparables" placed directly below ARV Comparables with identical layout — map + selected comps table + Copy Selected MLS# button
+- **Click-to-select on both maps:** pin click adds/removes comps from the respective bucket
+- **As-Is Edit Comps modal:** shows the full candidate list with As-Is checkboxes and ARV selection indicator dots, plus the map with click-to-select. No separate search controls — candidates come from the ARV comp search.
+- **`as_is` purpose type** added to `ComparablePurpose` and UI purpose selector for future use
+
+### Database
+
+- Migration `20260406160000_add_selected_as_is_yn.sql` — adds `selected_as_is_yn boolean not null default false` + index to `comparable_search_candidates`
+
+### Modified files
+
+- `app/(workspace)/analysis/properties/[id]/analyses/[analysisId]/analysis-workstation.tsx` — renamed tile, added As-Is tile + modal, dual map pin arrays, As-Is copy/toggle handlers
+- `app/(workspace)/analysis/properties/actions.ts` — new `toggleAsIsComparableCandidateSelectionAction`
+- `lib/analysis/load-workstation-data.ts` — fetches `selected_as_is_yn`, computes `asIsCompSummary`
+- `lib/reports/types.ts` — added `asIsCompSummary` to `WorkstationData`
+- `lib/comparables/scoring.ts` — added `"as_is"` to `ComparablePurpose` type
+- `lib/comparables/engine.ts` — `parseComparablePurpose` handles `"as_is"`
+- `components/properties/comparable-workspace-panel.tsx` — added `"as_is"` to `UiPurpose`, purpose labels, presets
+
+---
+
 ## 2026-04-06 — Reports Feature: PDF-Ready Analysis Reports with Comp Map
 
 ### Summary

@@ -143,12 +143,12 @@ export async function loadWorkstationData(
     .limit(1)
     .maybeSingle();
 
-  // Load comp candidates
+  // Load comp candidates (shared pool for both ARV and As-Is selection)
   let compCandidates: Array<Record<string, unknown>> = [];
   if (latestRun?.id) {
     const { data: rawCandidates } = await supabase
       .from("comparable_search_candidates")
-      .select("id, comp_listing_row_id, comp_real_property_id, distance_miles, days_since_close, sqft_delta_pct, raw_score, selected_yn, metrics_json, score_breakdown_json")
+      .select("id, comp_listing_row_id, comp_real_property_id, distance_miles, days_since_close, sqft_delta_pct, raw_score, selected_yn, selected_as_is_yn, metrics_json, score_breakdown_json")
       .eq("comparable_search_run_id", latestRun.id)
       .order("raw_score", { ascending: false });
 
@@ -460,7 +460,7 @@ export async function loadWorkstationData(
     };
   }
 
-  // Comp summary stats
+  // Comp summary stats (ARV)
   const totalComps = compCandidates.length;
   const selectedCount = selectedComps.length;
   const avgSelectedPrice = selectedCount > 0
@@ -471,6 +471,20 @@ export async function loadWorkstationData(
     : null;
   const avgSelectedDist = selectedCount > 0
     ? Math.round(selectedComps.reduce((sum: number, c: any) => sum + toNum(c.distance_miles), 0) / selectedCount * 100) / 100
+    : null;
+
+  // Comp summary stats (As-Is) — same candidate pool, different selection flag
+  const asIsSelectedComps = compCandidates.filter((c: any) => c.selected_as_is_yn);
+  const asIsTotalComps = compCandidates.length;
+  const asIsSelectedCount = asIsSelectedComps.length;
+  const asIsAvgSelectedPrice = asIsSelectedCount > 0
+    ? Math.round(asIsSelectedComps.reduce((sum: number, c: any) => sum + toNum((c.metrics_json as any)?.close_price), 0) / asIsSelectedCount)
+    : null;
+  const asIsAvgSelectedPsf = asIsSelectedCount > 0
+    ? Math.round(asIsSelectedComps.reduce((sum: number, c: any) => sum + toNum((c.metrics_json as any)?.ppsf), 0) / asIsSelectedCount)
+    : null;
+  const asIsAvgSelectedDist = asIsSelectedCount > 0
+    ? Math.round(asIsSelectedComps.reduce((sum: number, c: any) => sum + toNum(c.distance_miles), 0) / asIsSelectedCount * 100) / 100
     : null;
 
   // Build the data payload
@@ -566,6 +580,13 @@ export async function loadWorkstationData(
         summary_json: latestRun.summary_json as Record<string, unknown> | null,
       } : null,
       compCandidates,
+    },
+    asIsCompSummary: {
+      totalComps: asIsTotalComps,
+      selectedCount: asIsSelectedCount,
+      avgSelectedPrice: asIsAvgSelectedPrice,
+      avgSelectedPsf: asIsAvgSelectedPsf,
+      avgSelectedDist: asIsAvgSelectedDist,
     },
     subjectContext: {
       propertyType: physical?.property_type ?? null,

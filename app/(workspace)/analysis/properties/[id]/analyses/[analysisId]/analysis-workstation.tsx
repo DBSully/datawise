@@ -16,6 +16,7 @@ import {
   deleteAnalysisNoteAction,
   savePipelineAction,
   toggleComparableCandidateSelectionAction,
+  toggleAsIsComparableCandidateSelectionAction,
 } from "@/app/(workspace)/analysis/properties/actions";
 import { initialManualAnalysisFormState } from "@/lib/analysis/manual-analysis-state";
 import { ComparableWorkspacePanel } from "@/components/properties/comparable-workspace-panel";
@@ -161,6 +162,7 @@ const SCOPE_TIERS: { key: RehabScopeTier; label: string; short: string }[] = [
 export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
   const router = useRouter();
   const [showCompModal, setShowCompModal] = useState(false);
+  const [showAsIsCompModal, setShowAsIsCompModal] = useState(false);
   const [showNoteForm, setShowNoteForm] = useState(false);
   const [showHoldTransDetail, setShowHoldTransDetail] = useState(false);
   const [showReportDialog, setShowReportDialog] = useState(false);
@@ -171,6 +173,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
   const [isSaving, setIsSaving] = useState(false);
   const [copiedAll, setCopiedAll] = useState(false);
   const [copiedSelected, setCopiedSelected] = useState(false);
+  const [copiedSelectedAsIs, setCopiedSelectedAsIs] = useState(false);
 
   const d = data;
   const p = d.physical;
@@ -195,6 +198,24 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
   const selectedComps = useMemo(() => {
     return d.compModalData.compCandidates
       .filter((c) => Boolean(c.selected_yn))
+      .map((c) => {
+        const m = (c.metrics_json ?? {}) as Record<string, unknown>;
+        return {
+          id: String(c.id),
+          address: String(m.address ?? "\u2014"),
+          closePrice: m.close_price as number | null,
+          ppsf: m.ppsf as number | null,
+          sqft: m.building_area_total_sqft as number | null,
+          distance: c.distance_miles as number | null,
+          closeDate: m.close_date ? String(m.close_date).slice(0, 10) : null,
+        };
+      });
+  }, [d]);
+
+  // Build selected As-Is comps list — same candidate pool, different selection flag
+  const selectedAsIsComps = useMemo(() => {
+    return d.compModalData.compCandidates
+      .filter((c) => Boolean(c.selected_as_is_yn))
       .map((c) => {
         const m = (c.metrics_json ?? {}) as Record<string, unknown>;
         return {
@@ -249,6 +270,29 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
       await navigator.clipboard.writeText(selectedMlsText);
       setCopiedSelected(true);
       window.setTimeout(() => setCopiedSelected(false), 1800);
+    } catch { /* noop */ }
+  }
+
+  // As-Is MLS number clipboard helpers — same pool, filtered by selected_as_is_yn
+  const selectedAsIsMlsText = useMemo(() => {
+    const nums = [
+      d.compModalData.subjectListingMlsNumber,
+      ...d.compModalData.compCandidates
+        .filter((c) => Boolean(c.selected_as_is_yn))
+        .map((c) => {
+          const m = (c.metrics_json ?? {}) as Record<string, unknown>;
+          return c.listing_id ?? m.listing_id ?? m.mls_number ?? m.mlsNumber ?? null;
+        }),
+    ].filter((v): v is string => typeof v === "string" && v.length > 0);
+    return [...new Set(nums)].join(", ");
+  }, [d]);
+
+  async function handleCopySelectedAsIsMls() {
+    if (!selectedAsIsMlsText) return;
+    try {
+      await navigator.clipboard.writeText(selectedAsIsMlsText);
+      setCopiedSelectedAsIs(true);
+      window.setTimeout(() => setCopiedSelectedAsIs(false), 1800);
     } catch { /* noop */ }
   }
 
@@ -312,6 +356,78 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
 
     return pins;
   }, [d, subjectSqft, subjectListPrice]);
+
+  // As-Is map pins — same candidates, but selected/candidate reflects selected_as_is_yn
+  const asIsMapPins = useMemo<MapPin[]>(() => {
+    const pins: MapPin[] = [];
+
+    if (d.property.latitude && d.property.longitude) {
+      pins.push({
+        id: "subject",
+        lat: d.property.latitude,
+        lng: d.property.longitude,
+        label: d.property.address,
+        tooltipData: {
+          listPrice: subjectListPrice || null,
+          sqft: subjectSqft || null,
+          gapPerSqft: d.dealMath?.estGapPerSqft ?? null,
+        },
+        type: "subject",
+      });
+    }
+
+    for (const c of d.compModalData.compCandidates) {
+      const m = (c.metrics_json ?? {}) as Record<string, unknown>;
+      const lat = Number(m.latitude);
+      const lng = Number(m.longitude);
+      if (!lat || !lng || !Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+      const compSqft = Number(m.building_area_total_sqft) || null;
+      const sqftDelta = compSqft && subjectSqft ? subjectSqft - compSqft : null;
+      const sqftDeltaPct = compSqft && subjectSqft ? (subjectSqft - compSqft) / subjectSqft : null;
+
+      const compClosePrice = Number(m.close_price) || 0;
+      const perCompGapPerSqft =
+        subjectSqft > 0 && compClosePrice > 0 && subjectListPrice > 0
+          ? Math.round((compClosePrice - subjectListPrice) / subjectSqft)
+          : null;
+
+      const isSelected = Boolean(c.selected_as_is_yn);
+      pins.push({
+        id: String(c.id),
+        lat,
+        lng,
+        label: String(m.address ?? "\u2014"),
+        tooltipData: {
+          closePrice: (m.close_price as number) ?? null,
+          closeDate: m.close_date ? String(m.close_date).slice(0, 10) : null,
+          sqft: compSqft,
+          sqftDelta,
+          sqftDeltaPct,
+          ppsf: (m.ppsf as number) ?? null,
+          distance: (c.distance_miles as number) ?? null,
+          gapPerSqft: perCompGapPerSqft,
+        },
+        type: isSelected ? "selected" : "candidate",
+      });
+    }
+
+    return pins;
+  }, [d, subjectSqft, subjectListPrice]);
+
+  // Toggle As-Is selection from map pin click
+  const handleAsIsMapPinToggle = useCallback(
+    async (pinId: string, currentType: "selected" | "candidate") => {
+      const fd = new FormData();
+      fd.set("candidate_id", pinId);
+      fd.set("property_id", d.propertyId);
+      fd.set("analysis_id", d.analysisId);
+      fd.set("next_selected", currentType === "candidate" ? "true" : "false");
+      await toggleAsIsComparableCandidateSelectionAction(fd);
+      router.refresh();
+    },
+    [d.propertyId, d.analysisId, router],
+  );
 
   // Active scope for display
   const activeScope: RehabScopeTier = d.rehab.scope ?? "moderate";
@@ -725,11 +841,11 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
 
           </div>{/* end ARV + Trend row */}
 
-          {/* ── COMPARABLE SALES — map + table ── */}
+          {/* ── ARV COMPARABLES — map + table ── */}
           <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
             <div className="flex items-center justify-between mb-2">
               <CardTitle>
-                Comparable Sales ({d.compSummary.selectedCount} selected of {d.compSummary.totalComps})
+                ARV Comparables ({d.compSummary.selectedCount} selected of {d.compSummary.totalComps})
               </CardTitle>
               <div className="flex items-center gap-1.5">
                 <button
@@ -768,6 +884,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                     height={250}
                     subjectLat={d.property.latitude}
                     subjectLng={d.property.longitude}
+                    onPinClick={handleMapPinToggle}
                   />
                 ) : (
                   <div className="flex h-[250px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-400">
@@ -792,6 +909,88 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                       </thead>
                       <tbody>
                         {selectedComps.map((c) => (
+                          <tr key={c.id} className="border-b border-slate-100 hover:bg-slate-50">
+                            <td className="px-2 py-1 font-medium text-slate-700">{c.address}</td>
+                            <td className="px-2 py-1 text-right font-mono text-slate-700">{fmt(c.closePrice)}</td>
+                            <td className="px-2 py-1 text-right font-mono text-slate-600">${fmtNum(c.ppsf)}</td>
+                            <td className="px-2 py-1 text-right text-slate-600">{fmtNum(c.sqft)}</td>
+                            <td className="px-2 py-1 text-right text-slate-600">{fmtNum(c.distance, 2)} mi</td>
+                            <td className="px-2 py-1 text-right text-slate-500">{c.closeDate ?? "\u2014"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="flex h-[250px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-400">
+                    No comps selected. Click &quot;Edit Comps&quot; to review.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── AS-IS COMPARABLES — map + table ── */}
+          <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
+              <CardTitle>
+                As-Is Comparables ({d.asIsCompSummary.selectedCount} selected of {d.asIsCompSummary.totalComps})
+              </CardTitle>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleCopySelectedAsIsMls}
+                  className="rounded-md border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-600 hover:bg-slate-50"
+                >
+                  {copiedSelectedAsIs ? "Copied!" : "Copy Selected MLS#"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAsIsCompModal(true)}
+                  className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  Edit Comps
+                </button>
+              </div>
+            </div>
+            <div className="grid gap-2" style={{ gridTemplateColumns: "280px 1fr" }}>
+              {/* Map */}
+              <div>
+                {showAsIsCompModal ? (
+                  <div className="flex h-[250px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-400">
+                    Map open in comp editor
+                  </div>
+                ) : asIsMapPins.length > 1 ? (
+                  <CompMap
+                    pins={asIsMapPins}
+                    height={250}
+                    subjectLat={d.property.latitude}
+                    subjectLng={d.property.longitude}
+                    onPinClick={handleAsIsMapPinToggle}
+                  />
+                ) : (
+                  <div className="flex h-[250px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-400">
+                    No location data
+                  </div>
+                )}
+              </div>
+              {/* Selected comps table */}
+              <div>
+                {selectedAsIsComps.length > 0 ? (
+                  <div className="overflow-auto rounded-lg border border-slate-200 max-h-[250px]">
+                    <table className="w-full text-[11px]">
+                      <thead>
+                        <tr className="border-b border-slate-200 bg-slate-50 text-left text-[9px] uppercase tracking-[0.1em] text-slate-500 sticky top-0">
+                          <th className="px-2 py-1">Address</th>
+                          <th className="px-2 py-1 text-right">Close</th>
+                          <th className="px-2 py-1 text-right">PSF</th>
+                          <th className="px-2 py-1 text-right">Sqft</th>
+                          <th className="px-2 py-1 text-right">Dist</th>
+                          <th className="px-2 py-1 text-right">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedAsIsComps.map((c) => (
                           <tr key={c.id} className="border-b border-slate-100 hover:bg-slate-50">
                             <td className="px-2 py-1 font-medium text-slate-700">{c.address}</td>
                             <td className="px-2 py-1 text-right font-mono text-slate-700">{fmt(c.closePrice)}</td>
@@ -1148,6 +1347,114 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                   compErrorMessage={null}
                   subjectContext={d.subjectContext as any}
                 />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================== */}
+      {/* AS-IS COMP SELECTION MODAL                                        */}
+      {/* ================================================================== */}
+      {showAsIsCompModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="relative flex h-[90vh] w-[92vw] flex-col overflow-hidden rounded-xl border border-slate-300 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
+              <h2 className="text-sm font-semibold text-slate-800">As-Is Comparable Selection &mdash; {d.property.address}</h2>
+              <div className="flex items-center gap-3">
+                <p className="text-[10px] text-slate-400">
+                  Select comps that represent the property in its current condition &middot;
+                  <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 mx-0.5 align-middle" /> Selected
+                  <span className="inline-block h-2 w-2 rounded-full bg-slate-400 mx-0.5 align-middle" /> Candidate
+                  <span className="inline-block h-2 w-2 rounded-full bg-red-600 mx-0.5 align-middle" /> Subject
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { setShowAsIsCompModal(false); router.refresh(); }}
+                  className="rounded px-3 py-1 text-sm font-medium text-slate-600 hover:bg-slate-100"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="flex flex-1 overflow-hidden">
+              {/* Left: Map */}
+              {asIsMapPins.length > 1 && (
+                <div className="shrink-0 border-r border-slate-200 p-3" style={{ width: 480 }}>
+                  <CompMap
+                    pins={asIsMapPins}
+                    height={480}
+                    subjectLat={d.property.latitude}
+                    subjectLng={d.property.longitude}
+                    onPinClick={handleAsIsMapPinToggle}
+                  />
+                </div>
+              )}
+              {/* Right: Candidate list with As-Is checkboxes */}
+              <div className="flex-1 overflow-auto p-3">
+                {d.compModalData.compCandidates.length === 0 ? (
+                  <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                    No candidates available. Run a comp search from the ARV Comparables panel first.
+                  </div>
+                ) : (
+                  <div className="overflow-auto rounded-lg border border-slate-200">
+                    <table className="w-full text-[11px]">
+                      <thead>
+                        <tr className="border-b border-slate-200 bg-slate-50 text-left text-[9px] uppercase tracking-[0.1em] text-slate-500 sticky top-0">
+                          <th className="px-2 py-1.5 text-center">As-Is</th>
+                          <th className="px-2 py-1.5 text-center">ARV</th>
+                          <th className="px-2 py-1.5">Address</th>
+                          <th className="px-2 py-1.5 text-right">Close</th>
+                          <th className="px-2 py-1.5 text-right">PSF</th>
+                          <th className="px-2 py-1.5 text-right">Sqft</th>
+                          <th className="px-2 py-1.5 text-right">Dist</th>
+                          <th className="px-2 py-1.5 text-right">Score</th>
+                          <th className="px-2 py-1.5 text-right">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {d.compModalData.compCandidates.map((c) => {
+                          const m = (c.metrics_json ?? {}) as Record<string, unknown>;
+                          const isAsIs = Boolean(c.selected_as_is_yn);
+                          const isArv = Boolean(c.selected_yn);
+                          return (
+                            <tr
+                              key={String(c.id)}
+                              className={`border-b border-slate-100 hover:bg-slate-50 ${isAsIs ? "bg-emerald-50/50" : ""}`}
+                            >
+                              <td className="px-2 py-1 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={isAsIs}
+                                  onChange={async () => {
+                                    const fd = new FormData();
+                                    fd.set("candidate_id", String(c.id));
+                                    fd.set("property_id", d.propertyId);
+                                    fd.set("analysis_id", d.analysisId);
+                                    fd.set("next_selected", isAsIs ? "false" : "true");
+                                    await toggleAsIsComparableCandidateSelectionAction(fd);
+                                    router.refresh();
+                                  }}
+                                  className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                />
+                              </td>
+                              <td className="px-2 py-1 text-center">
+                                <span className={`inline-block h-2 w-2 rounded-full ${isArv ? "bg-emerald-500" : "bg-slate-300"}`} />
+                              </td>
+                              <td className="px-2 py-1 font-medium text-slate-700">{String(m.address ?? "\u2014")}</td>
+                              <td className="px-2 py-1 text-right font-mono text-slate-700">{fmt(m.close_price as number | null)}</td>
+                              <td className="px-2 py-1 text-right font-mono text-slate-600">${fmtNum(m.ppsf as number | null)}</td>
+                              <td className="px-2 py-1 text-right text-slate-600">{fmtNum(m.building_area_total_sqft as number | null)}</td>
+                              <td className="px-2 py-1 text-right text-slate-600">{fmtNum(c.distance_miles as number | null, 2)} mi</td>
+                              <td className="px-2 py-1 text-right font-mono text-slate-500">{fmtNum(c.raw_score as number | null, 1)}</td>
+                              <td className="px-2 py-1 text-right text-slate-500">{m.close_date ? String(m.close_date).slice(0, 10) : "\u2014"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           </div>
