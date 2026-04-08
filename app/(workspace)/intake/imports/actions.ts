@@ -26,6 +26,37 @@ function chunkArray<T>(items: T[], chunkSize: number) {
   return chunks;
 }
 
+/** Paginated RPC call to avoid PostgREST 1,000-row default cap. */
+async function fetchImportBatchPropertyIds(
+  supabase: any,
+  importBatchId: string,
+): Promise<string[]> {
+  const PAGE_SIZE = 1000;
+  const ids = new Set<string>();
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data: page, error } = await supabase
+      .rpc("get_import_batch_property_ids", { p_import_batch_id: importBatchId })
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (error) throw new Error(error.message);
+
+    for (const row of page ?? []) {
+      ids.add((row as { real_property_id: string }).real_property_id);
+    }
+
+    if (!page || page.length < PAGE_SIZE) {
+      hasMore = false;
+    } else {
+      offset += PAGE_SIZE;
+    }
+  }
+
+  return Array.from(ids);
+}
+
 function isoStartOfUtcDay(date: Date) {
   const start = new Date(date);
   start.setUTCHours(0, 0, 0, 0);
@@ -309,15 +340,9 @@ export async function previewImportAction(
 
     // Auto-screen imported properties
     try {
-      const { data: importPropertyRows, error: rpcErr } = await supabase.rpc(
-        "get_import_batch_property_ids",
-        { p_import_batch_id: batch.id },
-      );
+      const propertyIds = await fetchImportBatchPropertyIds(supabase, batch.id);
 
-      if (!rpcErr && importPropertyRows && importPropertyRows.length > 0) {
-        const propertyIds = importPropertyRows.map(
-          (r: { real_property_id: string }) => r.real_property_id,
-        );
+      if (propertyIds.length > 0) {
         const profile = DENVER_FLIP_V1;
 
         const { data: screeningBatch, error: sbErr } = await supabase
@@ -417,15 +442,9 @@ export async function processImportBatchAction(formData: FormData) {
 
     // Step 2: Auto-screen the imported properties
     try {
-      const { data: importRows, error: rpcError } = await supabase.rpc(
-        "get_import_batch_property_ids",
-        { p_import_batch_id: batchId },
-      );
+      const propertyIds = await fetchImportBatchPropertyIds(supabase, batchId);
 
-      if (!rpcError && importRows && importRows.length > 0) {
-        const propertyIds = importRows.map(
-          (r: { real_property_id: string }) => r.real_property_id,
-        );
+      if (propertyIds.length > 0) {
 
         const profile = DENVER_FLIP_V1;
 
