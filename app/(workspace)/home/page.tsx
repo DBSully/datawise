@@ -246,7 +246,7 @@ export default async function DashboardPage() {
                   return (
                     <Link
                       key={status}
-                      href={`/intake/screening?prime=true&mls_status=${encodeURIComponent(status)}`}
+                      href={`/intake/screening?prime=true&mlsStatus=${encodeURIComponent(status)}`}
                       className="text-xs text-emerald-700 hover:underline"
                     >
                       {status}: {count}
@@ -262,7 +262,7 @@ export default async function DashboardPage() {
                 .map(([status, count]) => (
                   <Link
                     key={status}
-                    href={`/intake/screening?prime=true&mls_status=${encodeURIComponent(status)}`}
+                    href={`/intake/screening?prime=true&mlsStatus=${encodeURIComponent(status)}`}
                     className="text-xs text-emerald-700 hover:underline"
                   >
                     {status}: {count}
