@@ -1,3 +1,56 @@
+## 2026-04-08e — Per-Category Rehab Scoping and Custom Items
+
+### Per-Category Scope Multipliers
+
+Replaced the single global rehab scope selector (Cosmetic/Moderate/Heavy/Gut) with per-category scope controls. Each of the 6 automated rehab categories (Above Grade, Below Grade Finished, Below Grade Unfinished, Exterior, Landscaping, Systems) now has its own 5-tier multiplier:
+
+| Tier | Multiplier | Meaning |
+|------|-----------|---------|
+| None | 0.0 | No work needed |
+| Light | 0.5 | Minor touch-ups |
+| Moderate | 1.0 | Standard rehab (default) |
+| Heavy | 1.5 | Significant work |
+| Gut | 2.0 | Full tear-out and rebuild |
+
+Each category also accepts a **Custom $** direct cost override — enter a dollar amount to replace the computed value entirely.
+
+### Custom Rehab Line Items
+
+Users can now add up to 7 custom rehab line items (e.g. Roof, Sewer, Structural, Garage) with a label and dollar amount. These appear in a collapsible section below the automated categories.
+
+- Custom items are stored separately from automated categories
+- Custom item costs are added on top of the base rehab total
+- Custom items flow through to Deal Math, Cash Required, and all downstream calculations
+- Custom items are included in report snapshots for partner-facing reports
+
+### Instant Client-Side Recalculation
+
+All rehab numbers update instantly when the user clicks a tier button, enters a custom cost, or adds/modifies a custom item — no save or page refresh needed. The server pre-computes base (pre-scope) costs per category and sends them to the client, which applies multipliers locally.
+
+The Save button shows dirty state and only activates when changes are pending.
+
+### Architecture
+
+- **Strategy profile**: Added `categoryScopeMultipliers` to `RehabConfig` (configurable per-market)
+- **Database**: Two new JSONB columns on `manual_analysis`: `rehab_category_scopes` (per-category tier/cost overrides) and `rehab_custom_items` (custom line item array)
+- **Types**: `CategoryScopeTier`, `RehabCategoryKey`, `CategoryScopeValue` (tier string or `{ cost: number }`), `RehabCustomItem`
+- **Data loader**: Resolves per-category multipliers independently, handles cost overrides, sums custom items into `effectiveRehab`
+- **UI**: Extracted `RehabCard` component with `useMemo`-based instant recalc; right column widened from 330px to 420px
+
+### Files Changed
+
+- `supabase/migrations/20260407160000_add_rehab_category_scopes.sql`
+- `supabase/migrations/20260407170000_add_rehab_custom_items.sql`
+- `lib/screening/types.ts` — new per-category scope types
+- `lib/screening/strategy-profiles.ts` — `categoryScopeMultipliers` added to config and profile
+- `lib/reports/types.ts` — `RehabCustomItem`, `RehabCategoryScopeDetail`, updated `WorkstationData` and `ReportContentJson`
+- `lib/analysis/load-workstation-data.ts` — per-category multiplier resolution, custom items in `effectiveRehab`
+- `lib/reports/snapshot.ts` — passes `categoryScopes` and `customItems` to reports
+- `app/(workspace)/deals/actions.ts` — saves both JSONB fields
+- `app/(workspace)/deals/watchlist/[analysisId]/analysis-workstation.tsx` — new `RehabCard` component with per-category UI and custom items
+
+---
+
 ## 2026-04-08d — Complete Screening Pagination Fix
 
 - Fixed three additional unpaginated `get_import_batch_property_ids` RPC calls that were still capping at 1,000 rows: auto-screen in `previewImportAction`, `processImportBatchAction`, and legacy `analysis/screening` action

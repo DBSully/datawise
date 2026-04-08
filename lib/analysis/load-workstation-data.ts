@@ -13,8 +13,9 @@ import {
   DENVER_FLIP_V1,
   resolvePropertyTypeKey,
 } from "@/lib/screening/strategy-profiles";
-import type { RehabScopeTier } from "@/lib/screening/types";
-import type { WorkstationData, TrendTierStats } from "@/lib/reports/types";
+import type { RehabScopeTier, RehabCategoryKey, CategoryScopeTier, CategoryScopeValue, RehabCategoryScopes } from "@/lib/screening/types";
+import type { WorkstationData, TrendTierStats, RehabDetail, RehabCategoryScopeDetail } from "@/lib/reports/types";
+import type { RehabConfig } from "@/lib/screening/strategy-profiles";
 
 type TrendDetailJsonShape = {
   localStats?: TrendTierStats;
@@ -27,6 +28,31 @@ function defaultComparableProfileSlug(propertyType: string | null) {
   if (normalized === "condo") return "denver_condo_standard_v1";
   if (normalized === "townhome") return "denver_townhome_standard_v1";
   return "denver_detached_standard_v1";
+}
+
+const REHAB_CATEGORY_KEYS: RehabCategoryKey[] = [
+  "aboveGrade", "belowGradeFinished", "belowGradeUnfinished",
+  "exterior", "landscaping", "systems",
+];
+
+/** Resolve a single category scope value to a tier label and numeric multiplier.
+ *  For { cost } overrides, multiplier is set to -1 as a sentinel — the caller
+ *  uses the cost value directly instead. */
+function resolveCategoryScope(
+  value: CategoryScopeValue | undefined,
+  config: RehabConfig,
+): RehabCategoryScopeDetail & { costOverride?: number } {
+  if (value === undefined || value === null) {
+    return { tier: "moderate", multiplier: config.categoryScopeMultipliers.moderate };
+  }
+  if (typeof value === "string") {
+    const mult = config.categoryScopeMultipliers[value];
+    return { tier: value, multiplier: mult ?? config.categoryScopeMultipliers.moderate };
+  }
+  if (typeof value === "object" && "cost" in value && typeof value.cost === "number") {
+    return { tier: "custom", multiplier: 1, costOverride: value.cost };
+  }
+  return { tier: "moderate", multiplier: config.categoryScopeMultipliers.moderate };
 }
 
 function toNum(v: unknown): number {
@@ -323,6 +349,10 @@ export async function loadWorkstationData(
   const rehabScope = (manualAnalysis?.rehab_scope as RehabScopeTier | null) ?? null;
   const scopeMultiplier = rehabScope ? profile.rehab.scopeMultipliers[rehabScope] : profile.rehab.scopeMultipliers.moderate;
 
+  // Per-category scopes (new system) — takes precedence over global scope when present
+  const rawCategoryScopes = manualAnalysis?.rehab_category_scopes as RehabCategoryScopes | null;
+  const hasCategoryScopes = rawCategoryScopes != null && Object.keys(rawCategoryScopes).length > 0;
+
   let computedRehabResult: {
     compositeMultiplier: number;
     typeMultiplier: number;
@@ -340,7 +370,11 @@ export async function loadWorkstationData(
     total: number;
     perSqftBuilding: number;
     perSqftAboveGrade: number;
+    categoryScopes?: Record<RehabCategoryKey, RehabCategoryScopeDetail>;
   } | null = null;
+
+  // Pre-scope base costs per category (sent to client for instant recalc)
+  let rehabBaseDetail: Pick<RehabDetail, RehabCategoryKey> | null = null;
 
   if (buildingSqft > 0) {
     const rehabResult = calculateRehab({
@@ -354,25 +388,81 @@ export async function loadWorkstationData(
       condition: listing?.property_condition_source ? String(listing.property_condition_source) : null,
       config: profile.rehab,
     });
-    // Apply scope multiplier to all line items
+
+    // Store pre-scope base costs for client-side instant recalc
+    rehabBaseDetail = {
+      aboveGrade: rehabResult.aboveGrade,
+      belowGradeFinished: rehabResult.belowGradeFinished,
+      belowGradeUnfinished: rehabResult.belowGradeUnfinished,
+      exterior: rehabResult.exterior,
+      landscaping: rehabResult.landscaping,
+      systems: rehabResult.systems,
+    };
+
+    // Resolve per-category multipliers (with optional cost overrides)
+    const catScopes: Record<RehabCategoryKey, RehabCategoryScopeDetail> = {} as any;
+    const costOverrides: Partial<Record<RehabCategoryKey, number>> = {};
+    for (const key of REHAB_CATEGORY_KEYS) {
+      if (hasCategoryScopes) {
+        const resolved = resolveCategoryScope(rawCategoryScopes?.[key], profile.rehab);
+        catScopes[key] = { tier: resolved.tier, multiplier: resolved.multiplier };
+        if (resolved.costOverride !== undefined) {
+          costOverrides[key] = resolved.costOverride;
+        }
+      } else {
+        // Fall back to global scope multiplier — map legacy tier name to category tier
+        const legacyToCategory: Record<string, CategoryScopeTier> = {
+          cosmetic: "light", moderate: "moderate", heavy: "heavy", gut: "gut",
+        };
+        const fallbackTier = legacyToCategory[rehabScope ?? "moderate"] ?? "moderate";
+        catScopes[key] = { tier: fallbackTier, multiplier: scopeMultiplier };
+      }
+    }
+
+    // Apply multipliers (or direct cost overrides) per category
+    function applyCat(key: RehabCategoryKey, baseVal: number): number {
+      if (costOverrides[key] !== undefined) return Math.round(costOverrides[key]!);
+      return Math.round(baseVal * catScopes[key].multiplier);
+    }
+
+    const aboveGrade = applyCat("aboveGrade", rehabResult.aboveGrade);
+    const belowGradeFinished = applyCat("belowGradeFinished", rehabResult.belowGradeFinished);
+    const belowGradeUnfinished = applyCat("belowGradeUnfinished", rehabResult.belowGradeUnfinished);
+    const belowGradeTotal = belowGradeFinished + belowGradeUnfinished;
+    const interior = aboveGrade + belowGradeTotal;
+    const exterior = applyCat("exterior", rehabResult.exterior);
+    const landscaping = applyCat("landscaping", rehabResult.landscaping);
+    const systems = applyCat("systems", rehabResult.systems);
+    const total = interior + exterior + landscaping + systems;
+
     computedRehabResult = {
       ...rehabResult,
-      aboveGrade: Math.round(rehabResult.aboveGrade * scopeMultiplier),
-      belowGradeFinished: Math.round(rehabResult.belowGradeFinished * scopeMultiplier),
-      belowGradeUnfinished: Math.round(rehabResult.belowGradeUnfinished * scopeMultiplier),
-      belowGradeTotal: Math.round(rehabResult.belowGradeTotal * scopeMultiplier),
-      interior: Math.round(rehabResult.interior * scopeMultiplier),
-      exterior: Math.round(rehabResult.exterior * scopeMultiplier),
-      landscaping: Math.round(rehabResult.landscaping * scopeMultiplier),
-      systems: Math.round(rehabResult.systems * scopeMultiplier),
-      total: Math.round(rehabResult.total * scopeMultiplier),
-      perSqftBuilding: buildingSqft > 0 ? Math.round(rehabResult.total * scopeMultiplier / buildingSqft * 100) / 100 : 0,
-      perSqftAboveGrade: aboveGradeSqft > 0 ? Math.round(rehabResult.total * scopeMultiplier / aboveGradeSqft * 100) / 100 : 0,
+      aboveGrade,
+      belowGradeFinished,
+      belowGradeUnfinished,
+      belowGradeTotal,
+      interior,
+      exterior,
+      landscaping,
+      systems,
+      total,
+      perSqftBuilding: buildingSqft > 0 ? Math.round(total / buildingSqft * 100) / 100 : 0,
+      perSqftAboveGrade: aboveGradeSqft > 0 ? Math.round(total / aboveGradeSqft * 100) / 100 : 0,
+      categoryScopes: catScopes,
     };
   }
 
   const computedRehab = computedRehabResult?.total ?? null;
-  const effectiveRehab = manualRehab ?? computedRehab ?? autoRehab ?? 0;
+
+  // Custom rehab items — always added on top of the base rehab
+  const rawCustomItems = Array.isArray(manualAnalysis?.rehab_custom_items)
+    ? (manualAnalysis.rehab_custom_items as Array<{ label: string; cost: number }>).filter(
+        (item) => item && typeof item.cost === "number",
+      )
+    : [];
+  const customItemsTotal = rawCustomItems.reduce((sum, item) => sum + item.cost, 0);
+
+  const effectiveRehab = (manualRehab ?? computedRehab ?? autoRehab ?? 0) + customItemsTotal;
 
   // Holding — full result
   const holdResult = buildingSqft > 0 ? calculateHolding({
@@ -551,6 +641,13 @@ export async function loadWorkstationData(
       scope: rehabScope,
       scopeMultiplier,
       detail: computedRehabResult,
+      baseDetail: rehabBaseDetail,
+      categoryScopes: rawCategoryScopes ?? null,
+      customItems: Array.isArray(manualAnalysis?.rehab_custom_items)
+        ? (manualAnalysis.rehab_custom_items as Array<{ label: string; cost: number }>).filter(
+            (item) => item && typeof item.label === "string" && typeof item.cost === "number",
+          )
+        : [],
     },
     holding: holdResult,
     transaction: transResult,

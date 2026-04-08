@@ -303,6 +303,16 @@ export async function saveManualAnalysisAction(
     design_rating: nullableText(formData, "design_rating"),
     location_rating: nullableText(formData, "location_rating"),
     rehab_scope: nullableText(formData, "rehab_scope"),
+    rehab_category_scopes: (() => {
+      const raw = formData.get("rehab_category_scopes");
+      if (typeof raw !== "string" || raw === "") return null;
+      try { return JSON.parse(raw); } catch { return null; }
+    })(),
+    rehab_custom_items: (() => {
+      const raw = formData.get("rehab_custom_items");
+      if (typeof raw !== "string" || raw === "") return null;
+      try { return JSON.parse(raw); } catch { return null; }
+    })(),
   });
 
   if (manualError) {

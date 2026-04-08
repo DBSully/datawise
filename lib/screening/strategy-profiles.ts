@@ -6,7 +6,7 @@
 // contain no hardcoded constants. To adjust behaviour, edit the profile.
 // ---------------------------------------------------------------------------
 
-import type { PropertyTypeKey, RehabScopeTier } from "./types";
+import type { PropertyTypeKey, RehabScopeTier, CategoryScopeTier } from "./types";
 
 // ---------------------------------------------------------------------------
 // ARV configuration
@@ -85,8 +85,10 @@ export type RehabMultiplierConfig = {
 export type RehabConfig = {
   ratesByPropertyType: Record<PropertyTypeKey, RehabRates>;
   multipliers: RehabMultiplierConfig;
-  /** Scope tier multipliers applied on top of composite multiplier. */
+  /** Scope tier multipliers applied on top of composite multiplier (legacy global). */
   scopeMultipliers: Record<RehabScopeTier, number>;
+  /** Per-category scope tier multipliers (none/light/moderate/heavy/gut). */
+  categoryScopeMultipliers: Record<CategoryScopeTier, number>;
 };
 
 // ---------------------------------------------------------------------------
@@ -340,6 +342,13 @@ export const DENVER_FLIP_V1: FlipStrategyProfile = {
       cosmetic: 0.6,
       moderate: 1.0,
       heavy: 1.4,
+      gut: 2.0,
+    },
+    categoryScopeMultipliers: {
+      none: 0,
+      light: 0.5,
+      moderate: 1.0,
+      heavy: 1.5,
       gut: 2.0,
     },
   },

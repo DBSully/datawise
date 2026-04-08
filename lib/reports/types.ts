@@ -8,6 +8,32 @@
 
 export type RehabScopeTier = "cosmetic" | "moderate" | "heavy" | "gut";
 
+export type CategoryScopeTier = "none" | "light" | "moderate" | "heavy" | "gut";
+
+export type RehabCategoryKey =
+  | "aboveGrade"
+  | "belowGradeFinished"
+  | "belowGradeUnfinished"
+  | "exterior"
+  | "landscaping"
+  | "systems";
+
+export type CategoryScopeValue = CategoryScopeTier | { cost: number };
+
+export type RehabCategoryScopes = Partial<Record<RehabCategoryKey, CategoryScopeValue>>;
+
+/** A user-defined custom rehab line item (e.g. Roof, Sewer, Structural). */
+export type RehabCustomItem = {
+  label: string;
+  cost: number;
+};
+
+/** Per-category scope label + multiplier for display and reports. */
+export type RehabCategoryScopeDetail = {
+  tier: CategoryScopeTier | "custom";
+  multiplier: number;
+};
+
 export type RehabDetail = {
   compositeMultiplier: number;
   typeMultiplier: number;
@@ -25,6 +51,8 @@ export type RehabDetail = {
   total: number;
   perSqftBuilding: number;
   perSqftAboveGrade: number;
+  /** Per-category scope tiers and multipliers, when per-category scoping is active. */
+  categoryScopes?: Record<RehabCategoryKey, RehabCategoryScopeDetail>;
 };
 
 export type HoldingDetail = {
@@ -183,6 +211,12 @@ export type WorkstationData = {
     scope: RehabScopeTier | null;
     scopeMultiplier: number;
     detail: RehabDetail | null;
+    /** Pre-scope base costs per category (for client-side instant recalc). */
+    baseDetail: Pick<RehabDetail, RehabCategoryKey> | null;
+    /** Per-category scope overrides from manual_analysis. */
+    categoryScopes: RehabCategoryScopes | null;
+    /** User-defined custom rehab line items. */
+    customItems: RehabCustomItem[];
   };
   holding: HoldingDetail | null;
   transaction: TransactionDetail | null;
@@ -324,6 +358,8 @@ export type ReportContentJson = {
     scope: RehabScopeTier | null;
     scopeMultiplier: number;
     detail: RehabDetail | null;
+    categoryScopes: RehabCategoryScopes | null;
+    customItems: RehabCustomItem[];
   };
 
   holding: HoldingDetail | null;

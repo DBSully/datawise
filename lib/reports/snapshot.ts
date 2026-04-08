@@ -75,6 +75,8 @@ export function buildReportSnapshot(data: WorkstationData): ReportContentJson {
       scope: data.rehab.scope,
       scopeMultiplier: data.rehab.scopeMultiplier,
       detail: data.rehab.detail,
+      categoryScopes: data.rehab.categoryScopes,
+      customItems: data.rehab.customItems,
     },
 
     holding: data.holding,

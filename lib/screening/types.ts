@@ -5,8 +5,29 @@
 /** Canonical property-type key used to look up strategy-profile parameters. */
 export type PropertyTypeKey = "detached" | "condo" | "townhome";
 
-/** Rehab scope tiers — analyst-selectable renovation depth. */
+/** Rehab scope tiers — analyst-selectable renovation depth (legacy global). */
 export type RehabScopeTier = "cosmetic" | "moderate" | "heavy" | "gut";
+
+/** Per-category rehab scope tiers — finer-grained control per line item. */
+export type CategoryScopeTier = "none" | "light" | "moderate" | "heavy" | "gut";
+
+/** Rehab category keys matching the line-item breakdown. */
+export type RehabCategoryKey =
+  | "aboveGrade"
+  | "belowGradeFinished"
+  | "belowGradeUnfinished"
+  | "exterior"
+  | "landscaping"
+  | "systems";
+
+/**
+ * Per-category scope value: a preset tier name, or { custom: number } for
+ * a manual multiplier override.
+ */
+export type CategoryScopeValue = CategoryScopeTier | { cost: number };
+
+/** Map of per-category scope overrides. Missing keys default to "moderate". */
+export type RehabCategoryScopes = Partial<Record<RehabCategoryKey, CategoryScopeValue>>;
 
 // ---------------------------------------------------------------------------
 // ARV
