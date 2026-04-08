@@ -39,6 +39,7 @@ function getSectionConfig(pathname: string): SectionConfig {
       tabs: [
         { href: "/intake/imports", label: "Imports", exact: true },
         { href: "/intake/screening", label: "Screening" },
+        { href: "/intake/manual", label: "Manual Entry", exact: true },
       ],
     };
   }
@@ -86,6 +87,7 @@ function getPageLabel(pathname: string): string {
 
   if (pathname === "/intake/imports") return "Imports";
   if (pathname.startsWith("/intake/screening")) return "Screening";
+  if (pathname === "/intake/manual") return "Manual Entry";
 
   if (pathname === "/deals/watchlist") return "Watch List";
   if (pathname.startsWith("/deals/watchlist/")) return "Analysis Workstation";
