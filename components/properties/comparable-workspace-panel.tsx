@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
-import { runComparableSearchAction } from "@/app/(workspace)/deals/actions";
+import { runComparableSearchAction, addManualCompAction } from "@/app/(workspace)/deals/actions";
 import { ComparableCandidateTable } from "@/components/properties/comparable-candidate-table";
 
 type ComparableWorkspacePanelProps = {
@@ -1029,6 +1029,27 @@ export function ComparableWorkspacePanel({
         )}
       </div>
 
+      {/* ── Add Comp by MLS # ── */}
+      {latestRun && (
+        <form action={addManualCompAction} className="flex items-end gap-2">
+          <input type="hidden" name="property_id" value={propertyId} />
+          <input type="hidden" name="analysis_id" value={analysisId} />
+          <input type="hidden" name="comp_search_run_id" value={latestRun.id} />
+          <div>
+            <label className="dw-label">Add comp by MLS #</label>
+            <input
+              name="mls_number"
+              className="dw-input"
+              placeholder="e.g. 4839210"
+              style={{ width: 160 }}
+            />
+          </div>
+          <button type="submit" className="dw-button-secondary text-xs">
+            Add
+          </button>
+        </form>
+      )}
+
       {/* ── Candidate List ── */}
       <ComparableCandidateTable
         propertyId={propertyId}
@@ -1046,12 +1067,7 @@ export function ComparableWorkspacePanel({
             type="submit"
             form="comp-search-form"
             className="dw-button-primary ml-auto text-[11px]"
-            disabled={!subjectListingRowId}
-            title={
-              subjectListingRowId
-                ? "Run comparable search"
-                : "A linked subject listing is required"
-            }
+            title="Run comparable search"
           >
             Run Comp Search
           </button>

@@ -365,14 +365,6 @@ export async function runComparableSearchAction(formData: FormData) {
     redirect("/admin/properties");
   }
 
-  if (!subjectListingRowId) {
-    redirect(
-      `/deals/watchlist/${analysisId}/comparables?comp_error=${encodeURIComponent(
-        "A linked subject listing is required before running comparable search.",
-      )}`,
-    );
-  }
-
   try {
     await getUserOwnedAnalysis({
       supabase,
@@ -402,7 +394,7 @@ export async function runComparableSearchAction(formData: FormData) {
 
   if (snapshotMode === "custom" && !isIsoDateString(customSnapshotDate)) {
     redirect(
-      `/deals/watchlist/${analysisId}/comparables?comp_error=${encodeURIComponent(
+      `/deals/watchlist/${analysisId}?comp_error=${encodeURIComponent(
         "A valid custom snapshot date is required.",
       )}`,
     );
@@ -412,7 +404,7 @@ export async function runComparableSearchAction(formData: FormData) {
     await runComparableSearch({
       analysisId,
       subjectRealPropertyId: propertyId,
-      subjectListingRowId,
+      subjectListingRowId: subjectListingRowId || null,
       profileSlug,
       purpose: requestedPurpose,
       snapshotMode,
@@ -439,7 +431,7 @@ export async function runComparableSearchAction(formData: FormData) {
     });
   } catch (error) {
     redirect(
-      `/deals/watchlist/${analysisId}/comparables?comp_error=${encodeURIComponent(
+      `/deals/watchlist/${analysisId}?comp_error=${encodeURIComponent(
         error instanceof Error ? error.message : "Comp search failed.",
       )}`,
     );
@@ -447,12 +439,9 @@ export async function runComparableSearchAction(formData: FormData) {
 
   revalidatePath(`/admin/properties/${propertyId}`);
   revalidatePath(`/deals/watchlist/${analysisId}`);
-  revalidatePath(
-    `/deals/watchlist/${analysisId}/comparables`,
-  );
 
   redirect(
-    `/deals/watchlist/${analysisId}/comparables?comp_run=${encodeURIComponent(
+    `/deals/watchlist/${analysisId}?comp_run=${encodeURIComponent(
       "Comparable search saved successfully.",
     )}`,
   );
@@ -503,7 +492,7 @@ export async function toggleComparableCandidateSelectionAction(
   revalidatePath(`/admin/properties/${propertyId}`);
   revalidatePath(`/deals/watchlist/${analysisId}`);
   revalidatePath(
-    `/deals/watchlist/${analysisId}/comparables`,
+    `/deals/watchlist/${analysisId}`,
   );
 }
 
@@ -557,8 +546,195 @@ export async function toggleAsIsComparableCandidateSelectionAction(
   revalidatePath(`/admin/properties/${propertyId}`);
   revalidatePath(`/deals/watchlist/${analysisId}`);
   revalidatePath(
-    `/deals/watchlist/${analysisId}/comparables`,
+    `/deals/watchlist/${analysisId}`,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Add a comp manually by MLS number
+// ---------------------------------------------------------------------------
+
+export async function addManualCompAction(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/auth/sign-in");
+  }
+
+  const propertyId = textValue(formData, "property_id");
+  const analysisId = textValue(formData, "analysis_id");
+  const compSearchRunId = textValue(formData, "comp_search_run_id");
+  const mlsNumber = textValue(formData, "mls_number");
+
+  if (!propertyId || !analysisId || !compSearchRunId || !mlsNumber) {
+    redirect(
+      `/deals/watchlist/${analysisId}?comp_error=${encodeURIComponent(
+        "MLS number is required.",
+      )}`,
+    );
+  }
+
+  // Look up the listing by MLS number (listing_id)
+  const { data: compListing, error: listingError } = await supabase
+    .from("mls_listings")
+    .select("id, real_property_id, close_price, close_date, listing_id")
+    .eq("listing_id", mlsNumber)
+    .maybeSingle();
+
+  if (listingError) {
+    redirect(
+      `/deals/watchlist/${analysisId}?comp_error=${encodeURIComponent(
+        listingError.message,
+      )}`,
+    );
+  }
+
+  if (!compListing) {
+    redirect(
+      `/deals/watchlist/${analysisId}?comp_error=${encodeURIComponent(
+        `No listing found for MLS# ${mlsNumber}. The listing must exist in the database.`,
+      )}`,
+    );
+  }
+
+  // Check for duplicate
+  const { data: existing } = await supabase
+    .from("comparable_search_candidates")
+    .select("id")
+    .eq("comparable_search_run_id", compSearchRunId)
+    .eq("comp_listing_row_id", compListing.id)
+    .maybeSingle();
+
+  if (existing) {
+    redirect(
+      `/deals/watchlist/${analysisId}?comp_error=${encodeURIComponent(
+        `MLS# ${mlsNumber} is already in the candidate list.`,
+      )}`,
+    );
+  }
+
+  // Load subject property for delta calculations
+  const [
+    { data: subjectProperty },
+    { data: subjectPhysical },
+    { data: compProperty },
+    { data: compPhysical },
+  ] = await Promise.all([
+    supabase
+      .from("real_properties")
+      .select("latitude, longitude")
+      .eq("id", propertyId)
+      .maybeSingle(),
+    supabase
+      .from("property_physical")
+      .select("building_area_total_sqft, above_grade_finished_area_sqft, lot_size_sqft, year_built, bedrooms_total, bathrooms_total")
+      .eq("real_property_id", propertyId)
+      .maybeSingle(),
+    supabase
+      .from("real_properties")
+      .select("latitude, longitude, lot_size_sqft")
+      .eq("id", compListing.real_property_id)
+      .maybeSingle(),
+    supabase
+      .from("property_physical")
+      .select("building_area_total_sqft, above_grade_finished_area_sqft, year_built, bedrooms_total, bathrooms_total")
+      .eq("real_property_id", compListing.real_property_id)
+      .maybeSingle(),
+  ]);
+
+  // Calculate deltas where possible
+  let distanceMiles: number | null = null;
+  if (
+    subjectProperty?.latitude && subjectProperty?.longitude &&
+    compProperty?.latitude && compProperty?.longitude
+  ) {
+    distanceMiles = haversine(
+      Number(subjectProperty.latitude), Number(subjectProperty.longitude),
+      Number(compProperty.latitude), Number(compProperty.longitude),
+    );
+  }
+
+  let daysSinceClose: number | null = null;
+  if (compListing.close_date) {
+    daysSinceClose = Math.round(
+      (Date.now() - new Date(compListing.close_date).getTime()) / 86_400_000,
+    );
+  }
+
+  const subjectSqft = Number(subjectPhysical?.building_area_total_sqft ?? subjectPhysical?.above_grade_finished_area_sqft ?? 0);
+  const compSqft = Number(compPhysical?.building_area_total_sqft ?? compPhysical?.above_grade_finished_area_sqft ?? 0);
+  const sqftDeltaPct = subjectSqft > 0 && compSqft > 0
+    ? Math.round(((compSqft - subjectSqft) / subjectSqft) * 10000) / 100
+    : null;
+
+  const yearBuiltDelta =
+    subjectPhysical?.year_built && compPhysical?.year_built
+      ? Number(compPhysical.year_built) - Number(subjectPhysical.year_built)
+      : null;
+
+  const bedDelta =
+    subjectPhysical?.bedrooms_total != null && compPhysical?.bedrooms_total != null
+      ? Number(compPhysical.bedrooms_total) - Number(subjectPhysical.bedrooms_total)
+      : null;
+
+  const bathDelta =
+    subjectPhysical?.bathrooms_total != null && compPhysical?.bathrooms_total != null
+      ? Number(compPhysical.bathrooms_total) - Number(subjectPhysical.bathrooms_total)
+      : null;
+
+  const { error: insertError } = await supabase
+    .from("comparable_search_candidates")
+    .insert({
+      comparable_search_run_id: compSearchRunId,
+      comp_listing_row_id: compListing.id,
+      comp_real_property_id: compListing.real_property_id,
+      distance_miles: distanceMiles != null ? Math.round(distanceMiles * 1000) / 1000 : null,
+      days_since_close: daysSinceClose,
+      sqft_delta_pct: sqftDeltaPct,
+      year_built_delta: yearBuiltDelta,
+      bed_delta: bedDelta,
+      bath_delta: bathDelta,
+      raw_score: null,
+      selected_yn: true,
+      metrics_json: {
+        source: "manual",
+        listing_id: compListing.listing_id,
+        close_price: compListing.close_price,
+        close_date: compListing.close_date,
+      },
+      score_breakdown_json: { source: "manual" },
+    });
+
+  if (insertError) {
+    redirect(
+      `/deals/watchlist/${analysisId}?comp_error=${encodeURIComponent(
+        insertError.message,
+      )}`,
+    );
+  }
+
+  revalidatePath(`/admin/properties/${propertyId}`);
+  revalidatePath(`/deals/watchlist/${analysisId}`);
+
+  redirect(
+    `/deals/watchlist/${analysisId}?comp_run=${encodeURIComponent(
+      `MLS# ${mlsNumber} added as a comp.`,
+    )}`,
+  );
+}
+
+function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 3958.8;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 // ---------------------------------------------------------------------------

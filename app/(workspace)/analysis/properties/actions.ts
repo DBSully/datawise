@@ -364,14 +364,6 @@ export async function runComparableSearchAction(formData: FormData) {
     redirect("/analysis/properties");
   }
 
-  if (!subjectListingRowId) {
-    redirect(
-      `/analysis/properties/${propertyId}/analyses/${analysisId}/comparables?comp_error=${encodeURIComponent(
-        "A linked subject listing is required before running comparable search.",
-      )}`,
-    );
-  }
-
   try {
     await getUserOwnedAnalysis({
       supabase,
@@ -411,7 +403,7 @@ export async function runComparableSearchAction(formData: FormData) {
     await runComparableSearch({
       analysisId,
       subjectRealPropertyId: propertyId,
-      subjectListingRowId,
+      subjectListingRowId: subjectListingRowId || null,
       profileSlug,
       purpose: requestedPurpose,
       snapshotMode,

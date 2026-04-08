@@ -25,7 +25,7 @@ import {
 export type RunComparableSearchInput = {
   analysisId: string;
   subjectRealPropertyId: string;
-  subjectListingRowId: string;
+  subjectListingRowId: string | null;
   profileSlug: string;
   purpose?: ComparablePurpose | null;
   snapshotMode?: SnapshotMode | null;
@@ -812,12 +812,18 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
     input.overrides,
   );
 
-  const [
-    { data: subjectListing, error: subjectListingError },
-    { data: subjectProperty, error: subjectPropertyError },
-    { data: subjectPhysical, error: subjectPhysicalError },
-  ] = await Promise.all([
-    supabase
+  // Load subject listing (optional for off-market / manual properties)
+  let subjectListing: {
+    id: string;
+    listing_id: string;
+    source_system: string;
+    real_property_id: string;
+    property_condition_source: string | null;
+    listing_contract_date: string | null;
+  } | null = null;
+
+  if (input.subjectListingRowId) {
+    const { data, error } = await supabase
       .from("mls_listings")
       .select(
         `
@@ -830,8 +836,16 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
         `,
       )
       .eq("id", input.subjectListingRowId)
-      .maybeSingle(),
+      .maybeSingle();
 
+    if (error) throw new Error(error.message);
+    subjectListing = data;
+  }
+
+  const [
+    { data: subjectProperty, error: subjectPropertyError },
+    { data: subjectPhysical, error: subjectPhysicalError },
+  ] = await Promise.all([
     supabase
       .from("real_properties")
       .select(
@@ -875,15 +889,17 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
       .maybeSingle(),
   ]);
 
-  if (subjectListingError) throw new Error(subjectListingError.message);
   if (subjectPropertyError) throw new Error(subjectPropertyError.message);
   if (subjectPhysicalError) throw new Error(subjectPhysicalError.message);
 
-  if (!subjectListing || !subjectProperty || !subjectPhysical) {
+  if (!subjectProperty || !subjectPhysical) {
     throw new Error("Subject property is missing required imported facts.");
   }
 
-  const sourceSystem = normalizeText(subjectListing.source_system);
+  // For off-market properties, default to "recolorado" (primary comp pool)
+  const sourceSystem = subjectListing
+    ? normalizeText(subjectListing.source_system)
+    : "recolorado";
   if (!sourceSystem) {
     throw new Error("Subject listing is missing source_system.");
   }
@@ -911,9 +927,9 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
   });
 
   const requestedSnapshotMode = parseSnapshotMode(input.snapshotMode) ?? "auto";
-  const subjectListingContractDate = normalizeText(
-    subjectListing.listing_contract_date,
-  );
+  const subjectListingContractDate = subjectListing
+    ? normalizeText(subjectListing.listing_contract_date)
+    : null;
   const snapshotDates = resolveSnapshotDates({
     requestedSnapshotMode,
     customSnapshotDate: normalizeText(input.customSnapshotDate),
@@ -926,9 +942,9 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
   const subjectYearBuilt = toNumber(subjectPhysical.year_built);
   const subjectBeds = toNumber(subjectPhysical.bedrooms_total);
   const subjectBaths = toNumber(subjectPhysical.bathrooms_total);
-  const subjectCondition = normalizeText(
-    subjectListing.property_condition_source,
-  );
+  const subjectCondition = subjectListing
+    ? normalizeText(subjectListing.property_condition_source)
+    : null;
   const subjectBuildingForm = normalizeText(
     subjectPhysical.building_form_standardized,
   );
@@ -950,7 +966,7 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
 
   const initialSummary = {
     sourceSystem,
-    subjectListingId: subjectListing.listing_id,
+    subjectListingId: subjectListing?.listing_id ?? null,
     subjectListingContractDate,
     subjectPropertyType,
     subjectPropertyTypeFamily,

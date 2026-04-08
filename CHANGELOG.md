@@ -1,3 +1,71 @@
+## 2026-04-08 — Manual Intake, Off-Market Analysis, and Screening Fixes
+
+### Manual Property Entry Redesign
+
+- Restructured manual entry form (`components/intake/manual-entry-form.tsx`) into two-column layout: left column (500px) with Location, Property Details, and Notes panels; right column (460px) with self-contained Pin Location map panel
+- Added three new fields required for comparable search: **Level Class** dropdown (One Story, Two Story, Three+ Story, Bi-Level, Multi-Level), **Building Form** dropdown (House, High Rise, Mid Rise, etc.), and **Attached** (Yes/No)
+- All three fields persist to `property_physical` via server action
+
+### Manual Properties Enter the Deal Flow
+
+- Removed `source_system = "recolorado"` filter from Recent Import Batches queries — all sources (MLS, manual) now appear in the batches table
+- **Migration** `20260407140000`: Added `last_import_batch_id` column to `real_properties`; updated `get_import_batch_property_ids` RPC to union results from both `mls_listings` and `real_properties`, so manual entries are discoverable for screening
+- Manual entry action now sets `last_import_batch_id` on the property record
+- **Migration** `20260407150000`: Added `data_source` column to `real_properties`, backfilled all existing records with `'mls'`; new manual entries get `data_source: 'manual'`
+
+### Duplicate Property Handling
+
+- Manual entry now checks for existing property by `normalized_address_key` before inserting
+- If property exists (e.g., from prior MLS import): updates `last_import_batch_id` only, preserves all existing data
+- If new: inserts with `data_source: 'manual'`
+
+### Off-Market / No List Price Analysis
+
+Removed the hard requirement for list price throughout the screening pipeline, enabling analysis of off-market and manually entered properties:
+
+- **`bulk-runner.ts`**: Removed `if (listPrice <= 0) return skipResult(...)` gate; added `costAnchor` fallback (uses ARV when no list price) for downstream cost engines
+- **`deal-math.ts`**: `listPrice` now nullable; `maxOffer` always computes (`ARV - costs - profit`); `spread`, `offerPct`, `estGapPerSqft` return `null` when no list price
+- **`rehab-engine.ts`** / **`holding-engine.ts`**: Renamed `listPrice` param to `priceAnchor` — accepts list price or ARV fallback for price tier and insurance calculations
+- **`qualification-engine.ts`**: Uses `maxOffer` as price anchor when no list price; qualification messages reference "list price" or "max offer" accordingly
+- **`types.ts`** / **`lib/reports/types.ts`**: Updated `DealMathResult` and `WorkstationData` types for nullable fields
+- **`load-workstation-data.ts`**: Analysis workstation uses same `costAnchor` fallback pattern
+- UI formatters (`formatCurrency`, `formatPercent`, `fmtNum`) already handle null → displays "—"
+
+### Comp Search Without MLS Listing
+
+Removed the requirement for a linked MLS listing to run comparable search, enabling comp search on manually entered properties:
+
+- **`lib/comparables/engine.ts`**: `subjectListingRowId` now nullable; listing query skipped when null; defaults to `sourceSystem: "recolorado"` (primary comp pool), reference date falls through to current mode, condition scores at default
+- **Server actions** (both `deals/actions.ts` and `analysis/properties/actions.ts`): Removed listing ID validation gate; passes `null` to engine when no listing linked
+- **UI**: Removed `disabled={!subjectListingRowId}` from "Run Comp Search" button
+- Fixed redirect from non-existent `/deals/watchlist/${analysisId}/comparables` to `/deals/watchlist/${analysisId}`
+
+### Add Comp by MLS Number
+
+- New server action `addManualCompAction`: looks up listing by MLS number, validates it exists and isn't a duplicate, calculates delta metrics (distance, sqft, days, beds, baths, year) relative to subject, inserts as `selected_yn: true` with `source: "manual"` tag
+- Input box added to comparable workspace panel above the candidate table (visible when a comp search run exists)
+
+### Closed Listings Retain List Price in Screening
+
+- Bulk runner subject listing query expanded from `Active/Coming Soon/Pending` only to **all statuses**
+- Status priority ensures active/pending listings are preferred over closed when both exist
+- Closed sales now have their list price available for spread/gap calculations, enabling historical accuracy analysis
+
+### Screening Pagination Fix
+
+- `runImportScreeningAction` RPC call now paginated with `.range()` loop (was hitting PostgREST 1,000-row default cap)
+- All properties in large import batches (e.g., 2,346) now screened completely
+
+### Re-Screen Button
+
+- Import batches with existing screening results now show a "Re-screen" button alongside the results link, allowing re-screening after fixes or new data
+
+### Success Banner Link
+
+- Manual entry success message now includes "View Import Batches →" link to `/intake/imports`
+
+---
+
 ## 2026-04-07 — Funnel Redesign: Navigation, Promote/Pass, Watch List, Pipeline, Dashboard
 
 ### Summary

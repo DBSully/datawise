@@ -10,14 +10,15 @@ import type { HoldingResult } from "./types";
 
 type CalculateHoldingInput = {
   buildingSqft: number;
-  listPrice: number;
+  /** List price or price anchor (ARV) when off-market. */
+  priceAnchor: number;
   annualTax: number | null;
   annualHoa: number | null;
   config: HoldingConfig;
 };
 
 export function calculateHolding(input: CalculateHoldingInput): HoldingResult {
-  const { buildingSqft, listPrice, annualTax, annualHoa, config } = input;
+  const { buildingSqft, priceAnchor, annualTax, annualHoa, config } = input;
 
   // Days held: base + sqft adjustment, floored at minimum
   const rawDays =
@@ -27,7 +28,7 @@ export function calculateHolding(input: CalculateHoldingInput): HoldingResult {
 
   // Daily costs
   const dailyTax = (annualTax ?? 0) / 365;
-  const dailyInsurance = (listPrice * config.insuranceAnnualRate) / 365;
+  const dailyInsurance = (priceAnchor * config.insuranceAnnualRate) / 365;
   const dailyHoa = (annualHoa ?? 0) / 365;
   const dailyUtilities = (buildingSqft * config.utilityPerSqftMonthly) / 30;
   const dailyTotal = dailyTax + dailyInsurance + dailyHoa + dailyUtilities;

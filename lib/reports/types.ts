@@ -189,7 +189,7 @@ export type WorkstationData = {
   financing: FinancingDetail | null;
   dealMath: {
     arv: number;
-    listPrice: number;
+    listPrice: number | null;
     rehabTotal: number;
     holdTotal: number;
     transactionTotal: number;
@@ -197,9 +197,9 @@ export type WorkstationData = {
     targetProfit: number;
     totalCosts: number;
     maxOffer: number;
-    offerPct: number;
-    spread: number;
-    estGapPerSqft: number;
+    offerPct: number | null;
+    spread: number | null;
+    estGapPerSqft: number | null;
   } | null;
   compSummary: {
     totalComps: number;
@@ -332,7 +332,7 @@ export type ReportContentJson = {
 
   dealMath: {
     arv: number;
-    listPrice: number;
+    listPrice: number | null;
     rehabTotal: number;
     holdTotal: number;
     transactionTotal: number;
@@ -340,9 +340,9 @@ export type ReportContentJson = {
     targetProfit: number;
     totalCosts: number;
     maxOffer: number;
-    offerPct: number;
-    spread: number;
-    estGapPerSqft: number;
+    offerPct: number | null;
+    spread: number | null;
+    estGapPerSqft: number | null;
   } | null;
 
   cashRequired: {

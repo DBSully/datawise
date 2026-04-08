@@ -204,6 +204,7 @@ export async function loadWorkstationData(
   const belowGradeTotalSqft = toNum(physical?.below_grade_total_sqft);
   const belowGradeUnfinishedSqft = Math.max(0, belowGradeTotalSqft - belowGradeFinishedSqft);
   const listPrice = toNum(listing?.list_price);
+  // For off-market properties use ARV (computed later) as the cost anchor
 
   // Trend data from screening (if promoted)
   const trendDetailJson = screeningResult?.trend_detail_json as Record<string, unknown> | null;
@@ -314,6 +315,9 @@ export async function loadWorkstationData(
   // Effective ARV = Final ?? Selected ?? Auto
   const effectiveArv = finalArv ?? selectedArv ?? autoArv ?? 0;
 
+  // Price anchor for cost engines: list price when available, else ARV
+  const costAnchor = listPrice > 0 ? listPrice : effectiveArv;
+
   // Rehab — compute full result for detail card
   const manualRehab = manualAnalysis?.rehab_manual ? toNum(manualAnalysis.rehab_manual) : null;
   const rehabScope = (manualAnalysis?.rehab_scope as RehabScopeTier | null) ?? null;
@@ -345,7 +349,7 @@ export async function loadWorkstationData(
       belowGradeFinishedSqft,
       belowGradeUnfinishedSqft,
       buildingSqft,
-      listPrice,
+      priceAnchor: costAnchor,
       yearBuilt: physical?.year_built ?? null,
       condition: listing?.property_condition_source ? String(listing.property_condition_source) : null,
       config: profile.rehab,
@@ -373,7 +377,7 @@ export async function loadWorkstationData(
   // Holding — full result
   const holdResult = buildingSqft > 0 ? calculateHolding({
     buildingSqft,
-    listPrice,
+    priceAnchor: costAnchor,
     annualTax: financials?.annual_property_tax ? toNum(financials.annual_property_tax) : null,
     annualHoa: financials?.annual_hoa_dues ? toNum(financials.annual_hoa_dues) : null,
     config: profile.holding,
@@ -381,7 +385,7 @@ export async function loadWorkstationData(
 
   // Transaction — full result
   const transResult = effectiveArv > 0 ? calculateTransaction({
-    acquisitionPrice: listPrice,
+    acquisitionPrice: costAnchor,
     arvPrice: effectiveArv,
     config: profile.transaction,
   }) : null;
@@ -408,7 +412,7 @@ export async function loadWorkstationData(
   // Deal math
   const dealMath = effectiveArv > 0 ? calculateDealMath({
     arv: effectiveArv,
-    listPrice,
+    listPrice: listPrice > 0 ? listPrice : null,
     buildingSqft,
     rehabTotal: effectiveRehab,
     holdTotal: holdResult?.total ?? 0,

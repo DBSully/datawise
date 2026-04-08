@@ -91,7 +91,6 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
           import_notes
         `,
       )
-      .eq("source_system", "recolorado")
       .gte("created_at", sixtyDayStart)
       .order("created_at", { ascending: false }),
 
@@ -117,7 +116,6 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
           processed_pct
         `,
       )
-      .eq("source_system", "recolorado")
       .order("created_at", { ascending: false })
       .limit(25),
   ]);
@@ -514,14 +512,29 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
                           const linked = screeningByImport.get(batch.id);
                           if (linked) {
                             return (
-                              <Link
-                                href={`/intake/screening/${linked.id}`}
-                                className="text-xs text-blue-600 hover:underline"
-                              >
-                                {linked.status === "complete"
-                                  ? `${linked.screenedCount} screened · ${linked.primeCount} prime`
-                                  : linked.status}
-                              </Link>
+                              <div className="flex items-center gap-2">
+                                <Link
+                                  href={`/intake/screening/${linked.id}`}
+                                  className="text-xs text-blue-600 hover:underline"
+                                >
+                                  {linked.status === "complete"
+                                    ? `${linked.screenedCount} screened · ${linked.primeCount} prime`
+                                    : linked.status}
+                                </Link>
+                                <form action={runImportScreeningAction}>
+                                  <input
+                                    type="hidden"
+                                    name="import_batch_id"
+                                    value={batch.id}
+                                  />
+                                  <button
+                                    type="submit"
+                                    className="text-[10px] font-medium text-slate-500 hover:text-blue-700 hover:underline"
+                                  >
+                                    Re-screen
+                                  </button>
+                                </form>
+                              </div>
                             );
                           }
                           if (batch.status === "complete") {

@@ -1,12 +1,15 @@
 // ---------------------------------------------------------------------------
 // Deal Math — max offer, spread, and gap calculations
+//
+// When list price is null (off-market), maxOffer is still computed from
+// ARV minus costs. Spread, offerPct, and estGapPerSqft are null.
 // ---------------------------------------------------------------------------
 
 import type { DealMathResult } from "./types";
 
 type CalculateDealMathInput = {
   arv: number;
-  listPrice: number;
+  listPrice: number | null;
   buildingSqft: number;
   rehabTotal: number;
   holdTotal: number;
@@ -29,10 +32,15 @@ export function calculateDealMath(input: CalculateDealMathInput): DealMathResult
 
   const totalCosts = rehabTotal + holdTotal + transactionTotal + financingTotal;
   const maxOffer = Math.round(arv - totalCosts - targetProfit);
-  const spread = Math.round(arv - listPrice);
-  const offerPct = listPrice > 0 ? roundTo(maxOffer / listPrice, 4) : 0;
+
+  // Spread-based metrics require a list price
+  const hasListPrice = listPrice !== null && listPrice > 0;
+  const spread = hasListPrice ? Math.round(arv - listPrice) : null;
+  const offerPct = hasListPrice ? roundTo(maxOffer / listPrice, 4) : null;
   const estGapPerSqft =
-    buildingSqft > 0 ? Math.round(spread / buildingSqft) : 0;
+    hasListPrice && buildingSqft > 0
+      ? Math.round((arv - listPrice) / buildingSqft)
+      : null;
 
   return {
     arv,

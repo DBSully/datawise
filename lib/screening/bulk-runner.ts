@@ -309,7 +309,9 @@ async function loadSubjects(
   }
   const financialsMap = new Map(financials.map((f) => [f.real_property_id, f]));
 
-  const activeListings: PoolListing[] = [];
+  // Fetch all listings for subject properties (any status) so closed sales
+  // still have their list price available for screening analysis.
+  const allSubjectListings: PoolListing[] = [];
   for (const chunk of idChunks) {
     const rows = await fetchAllRows<PoolListing>(
       supabase,
@@ -318,16 +320,26 @@ async function loadSubjects(
       (q: any) =>
         q
           .in("real_property_id", chunk)
-          .in("mls_status", ["Active", "Coming Soon", "Pending"])
           .order("listing_contract_date", { ascending: false, nullsFirst: true }),
     );
-    activeListings.push(...rows);
+    allSubjectListings.push(...rows);
   }
 
+  // Pick the best listing per property: prefer active/pending over closed
+  const STATUS_PRIORITY: Record<string, number> = {
+    "Active": 0, "Coming Soon": 1, "Pending": 2, "Closed": 3,
+  };
   const latestListingByProperty = new Map<string, PoolListing>();
-  for (const listing of activeListings) {
-    if (!latestListingByProperty.has(listing.real_property_id)) {
+  for (const listing of allSubjectListings) {
+    const existing = latestListingByProperty.get(listing.real_property_id);
+    if (!existing) {
       latestListingByProperty.set(listing.real_property_id, listing);
+    } else {
+      const existingPri = STATUS_PRIORITY[existing.mls_status ?? ""] ?? 99;
+      const newPri = STATUS_PRIORITY[listing.mls_status ?? ""] ?? 99;
+      if (newPri < existingPri) {
+        latestListingByProperty.set(listing.real_property_id, listing);
+      }
     }
   }
 
@@ -614,7 +626,6 @@ function screenSubject(
   });
 
   if (buildingSqft <= 0) return skipResult("Missing building square footage");
-  if (listPrice <= 0) return skipResult("Missing list price");
 
   // Score comps using shared scoring
   const scored = scoreCompsForSubject(subject, pool, SCREENING_RULES, referenceDate);
@@ -674,25 +685,29 @@ function screenSubject(
     };
   }
 
+  // For off-market properties (no list price), use ARV as the price anchor
+  // for rehab tier selection, insurance calc, and acquisition cost estimates.
+  const costAnchor = listPrice > 0 ? listPrice : arv.arvAggregate;
+
   const rehab = calculateRehab({
     propertyType, aboveGradeSqft,
     belowGradeFinishedSqft: belowGradeFinished(subject.physical),
     belowGradeUnfinishedSqft: belowGradeUnfinished(subject.physical),
-    buildingSqft, listPrice,
+    buildingSqft, priceAnchor: costAnchor,
     yearBuilt: subject.physical.year_built,
     condition: subject.listing?.property_condition_source ?? null,
     config: profile.rehab,
   });
 
   const holding = calculateHolding({
-    buildingSqft, listPrice,
+    buildingSqft, priceAnchor: costAnchor,
     annualTax: subject.financials?.annual_property_tax ?? null,
     annualHoa: subject.financials?.annual_hoa_dues ?? null,
     config: profile.holding,
   });
 
   const transaction = calculateTransaction({
-    acquisitionPrice: listPrice,
+    acquisitionPrice: costAnchor,
     arvPrice: arv.arvAggregate,
     config: profile.transaction,
   });
@@ -706,7 +721,9 @@ function screenSubject(
     : null;
 
   const dealMath = calculateDealMath({
-    arv: arv.arvAggregate, listPrice, buildingSqft,
+    arv: arv.arvAggregate,
+    listPrice: listPrice > 0 ? listPrice : null,
+    buildingSqft,
     rehabTotal: rehab.total, holdTotal: holding.total,
     transactionTotal: transaction.total,
     financingTotal: financing?.total ?? 0,
@@ -715,7 +732,9 @@ function screenSubject(
 
   const qualification = evaluateQualification({
     comps: arv.perCompDetails, config: profile.qualification,
-    listPrice, buildingSqft, arv: arv.arvAggregate,
+    listPrice: listPrice > 0 ? listPrice : null,
+    buildingSqft, arv: arv.arvAggregate,
+    maxOffer: dealMath.maxOffer,
   });
 
   return {

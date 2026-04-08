@@ -148,19 +148,33 @@ export async function runImportScreeningAction(
     throw new Error("Missing import_batch_id");
   }
 
-  // Get property IDs from this import batch
-  const { data: importRows, error: rpcError } = await supabase.rpc(
-    "get_import_batch_property_ids",
-    { p_import_batch_id: importBatchId },
-  );
+  // Get property IDs from this import batch (paginated to avoid PostgREST cap)
+  const PAGE_SIZE = 1000;
+  const propertyIdSet = new Set<string>();
+  let offset = 0;
+  let hasMore = true;
 
-  if (rpcError) {
-    throw new Error(rpcError.message);
+  while (hasMore) {
+    const { data: page, error: rpcError } = await supabase
+      .rpc("get_import_batch_property_ids", { p_import_batch_id: importBatchId })
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (rpcError) {
+      throw new Error(rpcError.message);
+    }
+
+    for (const row of page ?? []) {
+      propertyIdSet.add((row as { real_property_id: string }).real_property_id);
+    }
+
+    if (!page || page.length < PAGE_SIZE) {
+      hasMore = false;
+    } else {
+      offset += PAGE_SIZE;
+    }
   }
 
-  const propertyIds = (importRows ?? []).map(
-    (r: { real_property_id: string }) => r.real_property_id,
-  );
+  const propertyIds = Array.from(propertyIdSet);
 
   if (propertyIds.length === 0) {
     revalidatePath("/intake/imports");

@@ -16,7 +16,8 @@ type CalculateRehabInput = {
   belowGradeFinishedSqft: number;
   belowGradeUnfinishedSqft: number;
   buildingSqft: number;
-  listPrice: number;
+  /** List price or price anchor (ARV) when off-market. */
+  priceAnchor: number;
   yearBuilt: number | null;
   condition: string | null;
   config: RehabConfig;
@@ -93,7 +94,7 @@ export function calculateRehab(input: CalculateRehabInput): RehabResult {
     belowGradeFinishedSqft,
     belowGradeUnfinishedSqft,
     buildingSqft,
-    listPrice,
+    priceAnchor,
     yearBuilt,
     condition,
     config,
@@ -105,7 +106,7 @@ export function calculateRehab(input: CalculateRehabInput): RehabResult {
   // Individual multipliers
   const typeMultiplier = multipliers.type[propertyType];
   const conditionMultiplier = resolveConditionMultiplier(condition, multipliers);
-  const priceMultiplier = resolvePriceMultiplier(listPrice, multipliers);
+  const priceMultiplier = resolvePriceMultiplier(priceAnchor, multipliers);
   const ageMultiplier = resolveAgeMultiplier(yearBuilt, multipliers);
 
   const compositeMultiplier =

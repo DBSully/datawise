@@ -2,7 +2,11 @@
 // Qualification Engine — Prime Candidate identification
 //
 // Ports the legacy "Bangers" logic: properties with enough nearby, recent
-// comps showing a strong ARV-vs-list-price gap earn Prime Candidate status.
+// comps showing a strong ARV-vs-price gap earn Prime Candidate status.
+//
+// When list price is null (off-market), qualification uses maxOffer as the
+// price anchor. The question shifts from "is the gap big enough?" to
+// "does the ARV support a profitable deal?"
 // ---------------------------------------------------------------------------
 
 import type { QualificationConfig } from "./strategy-profiles";
@@ -11,13 +15,16 @@ import type { CompArvDetail, QualificationResult } from "./types";
 type QualifyInput = {
   comps: CompArvDetail[];
   config: QualificationConfig;
-  listPrice: number;
+  /** List price when available, null for off-market. */
+  listPrice: number | null;
   buildingSqft: number;
   arv: number;
+  /** Max offer from deal math — used as price anchor when no list price. */
+  maxOffer: number;
 };
 
 export function evaluateQualification(input: QualifyInput): QualificationResult {
-  const { comps, config, listPrice, buildingSqft, arv } = input;
+  const { comps, config, listPrice, buildingSqft, arv, maxOffer } = input;
 
   if (comps.length === 0) {
     return {
@@ -28,17 +35,30 @@ export function evaluateQualification(input: QualifyInput): QualificationResult 
     };
   }
 
-  if (buildingSqft <= 0 || listPrice <= 0) {
+  if (buildingSqft <= 0) {
     return {
       isPrimeCandidate: false,
       qualifyingCompCount: 0,
       reasons: [],
-      disqualifiers: ["Missing building sqft or list price"],
+      disqualifiers: ["Missing building sqft"],
+    };
+  }
+
+  // Use list price when available, otherwise use maxOffer as the price anchor
+  const hasListPrice = listPrice !== null && listPrice > 0;
+  const priceAnchor = hasListPrice ? listPrice : maxOffer;
+
+  if (priceAnchor <= 0) {
+    return {
+      isPrimeCandidate: false,
+      qualifyingCompCount: 0,
+      reasons: [],
+      disqualifiers: ["No viable price anchor (list price or max offer)"],
     };
   }
 
   // Overall gap check
-  const overallGap = buildingSqft > 0 ? (arv - listPrice) / buildingSqft : 0;
+  const overallGap = (arv - priceAnchor) / buildingSqft;
 
   // Per-comp qualification: each comp must individually pass distance, recency,
   // and contribute to a per-comp gap that meets the threshold.
@@ -52,11 +72,8 @@ export function evaluateQualification(input: QualifyInput): QualificationResult 
     const compPassesRecency =
       comp.daysSinceClose <= config.maxCompAgeDays;
 
-    // Per-comp gap: how much does THIS comp's adjusted ARV exceed list price?
-    const compGap =
-      buildingSqft > 0
-        ? (comp.arvTimeAdjusted - listPrice) / buildingSqft
-        : 0;
+    // Per-comp gap: how much does THIS comp's adjusted ARV exceed the price anchor?
+    const compGap = (comp.arvTimeAdjusted - priceAnchor) / buildingSqft;
     const compPassesGap = compGap >= config.minEstGapPerSqft;
 
     if (compPassesDistance && compPassesRecency && compPassesGap) {
@@ -68,6 +85,8 @@ export function evaluateQualification(input: QualifyInput): QualificationResult 
     qualifyingCount >= config.minQualifyingComps;
 
   // Build human-readable reasons
+  const anchorLabel = hasListPrice ? "list price" : "max offer";
+
   if (isPrimeCandidate) {
     reasons.push(
       `${qualifyingCount} comp(s) within ${config.maxCompDistanceMiles}mi, ` +
@@ -75,7 +94,7 @@ export function evaluateQualification(input: QualifyInput): QualificationResult 
         `with gap ≥ $${config.minEstGapPerSqft}/sqft`,
     );
     reasons.push(
-      `Overall ARV gap: $${Math.round(overallGap)}/sqft ($${Math.round(arv - listPrice)} total)`,
+      `Overall ARV gap vs ${anchorLabel}: $${Math.round(overallGap)}/sqft ($${Math.round(arv - priceAnchor)} total)`,
     );
   } else {
     if (qualifyingCount === 0) {

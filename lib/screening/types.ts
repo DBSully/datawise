@@ -157,7 +157,7 @@ export type CashRequiredResult = {
 
 export type DealMathResult = {
   arv: number;
-  listPrice: number;
+  listPrice: number | null;
   rehabTotal: number;
   holdTotal: number;
   transactionTotal: number;
@@ -165,9 +165,12 @@ export type DealMathResult = {
   targetProfit: number;
   totalCosts: number;
   maxOffer: number;
-  offerPct: number;
-  spread: number;
-  estGapPerSqft: number;
+  /** null when no list price (off-market). */
+  offerPct: number | null;
+  /** null when no list price (off-market). */
+  spread: number | null;
+  /** null when no list price (off-market). */
+  estGapPerSqft: number | null;
 };
 
 // ---------------------------------------------------------------------------
