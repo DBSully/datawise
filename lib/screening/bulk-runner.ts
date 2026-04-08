@@ -46,11 +46,10 @@ import {
 } from "@/lib/comparables/scoring";
 
 // ---------------------------------------------------------------------------
-// Screening-specific search rules (wider net than analysis defaults)
+// Screening-specific search rules (per property type)
 // ---------------------------------------------------------------------------
 
-const SCREENING_RULES: ComparableSearchRules = {
-  maxDistanceMiles: 0.75,
+const SCREENING_RULES_BASE: Omit<ComparableSearchRules, "maxDistanceMiles"> = {
   maxDaysSinceClose: 365,
   sqftTolerancePct: 30,
   lotSizeTolerancePct: 30,
@@ -63,6 +62,16 @@ const SCREENING_RULES: ComparableSearchRules = {
   requireSameBuildingForm: true,
   preferredSizeBasis: "building_area_total",
 };
+
+const SCREENING_RULES_BY_TYPE: Record<PropertyTypeKey, ComparableSearchRules> = {
+  detached: { ...SCREENING_RULES_BASE, maxDistanceMiles: 0.75 },
+  townhome: { ...SCREENING_RULES_BASE, maxDistanceMiles: 0.6 },
+  condo:    { ...SCREENING_RULES_BASE, maxDistanceMiles: 0.1 },
+};
+
+function screeningRulesForType(propertyType: PropertyTypeKey): ComparableSearchRules {
+  return SCREENING_RULES_BY_TYPE[propertyType];
+}
 
 // ---------------------------------------------------------------------------
 // In-memory pool types (loaded once per batch)
@@ -665,8 +674,9 @@ function screenSubject(
 
   if (buildingSqft <= 0) return skipResult("Missing building square footage");
 
-  // Score comps using shared scoring
-  const scored = scoreCompsForSubject(subject, pool, SCREENING_RULES, referenceDate);
+  // Score comps using property-type-specific search rules
+  const rules = screeningRulesForType(propertyType);
+  const scored = scoreCompsForSubject(subject, pool, rules, referenceDate);
   const comps = scored.map((s) => s.compArvInput);
   const candidateRows = scored.map((s) => s.candidateRow);
 
@@ -770,6 +780,7 @@ function screenSubject(
 
   const qualification = evaluateQualification({
     comps: arv.perCompDetails, config: profile.qualification,
+    propertyType,
     listPrice: listPrice > 0 ? listPrice : null,
     buildingSqft, arv: arv.arvAggregate,
     maxOffer: dealMath.maxOffer,
@@ -794,6 +805,7 @@ async function writeCompRuns(
     subjectPropertyId: string;
     subjectListingId: string | null;
     candidateRows: Record<string, unknown>[];
+    propertyTypeKey: PropertyTypeKey;
   }>,
   profileId: string | null,
 ): Promise<Map<string, string>> {
@@ -812,7 +824,7 @@ async function writeCompRuns(
       purpose: "flip",
       run_type: "screening",
       status: "complete",
-      parameters_json: SCREENING_RULES,
+      parameters_json: screeningRulesForType(r.propertyTypeKey),
       summary_json: { candidateCount: r.candidateRows.length, source: "screening_batch" },
     }));
 
@@ -998,6 +1010,7 @@ export async function runScreeningBatch(
       subjectPropertyId: string;
       subjectListingId: string | null;
       candidateRows: Record<string, unknown>[];
+      propertyTypeKey: PropertyTypeKey;
     }> = [];
 
     for (const propertyId of subjectPropertyIds) {
@@ -1013,10 +1026,12 @@ export async function runScreeningBatch(
         const { result, candidateRows } = screenSubject(subject, pool, profile, referenceDate, trendSalesPool);
         results.push(result);
         if (candidateRows.length > 0) {
+          const ptKey = resolvePropertyTypeKey(subject.physical.property_type);
           compRunData.push({
             subjectPropertyId: propertyId,
             subjectListingId: subject.listing?.id ?? null,
             candidateRows,
+            propertyTypeKey: ptKey,
           });
         }
       } catch (err) {

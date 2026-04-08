@@ -31,8 +31,8 @@ export type ConfidenceTier = {
 export type ArvConfig = {
   /** Annual market adjustment rate applied per-comp (e.g. -0.05 = -5%/year). */
   timeAdjustmentAnnualRate: number;
-  /** Distance-based confidence tiers, ordered ascending by maxDistanceMiles. */
-  confidenceTiers: ConfidenceTier[];
+  /** Distance-based confidence tiers per property type, ordered ascending by maxDistanceMiles. */
+  confidenceTiersByType: Record<PropertyTypeKey, ConfidenceTier[]>;
   /** ARV blending weights per property type. */
   blendByPropertyType: Record<PropertyTypeKey, ArvBlendConfig>;
 };
@@ -182,8 +182,8 @@ export type TrendConfig = {
 // ---------------------------------------------------------------------------
 
 export type QualificationConfig = {
-  /** Max comp distance to qualify as a "prime" comp. */
-  maxCompDistanceMiles: number;
+  /** Max comp distance to qualify as a "prime" comp, per property type. */
+  maxCompDistanceMilesByType: Record<PropertyTypeKey, number>;
   /** Min est_gap ($/sqft) for a comp to be considered "prime". */
   minEstGapPerSqft: number;
   /** Max comp age in days. */
@@ -234,13 +234,29 @@ export const DENVER_FLIP_V1: FlipStrategyProfile = {
   // -- ARV ------------------------------------------------------------------
   arv: {
     timeAdjustmentAnnualRate: -0.05,
-    confidenceTiers: [
-      { maxDistanceMiles: 0.3, confidence: 1.0 },
-      { maxDistanceMiles: 0.5, confidence: 0.8 },
-      { maxDistanceMiles: 0.6, confidence: 0.6 },
-      { maxDistanceMiles: 0.75, confidence: 0.4 },
-      { maxDistanceMiles: Infinity, confidence: 0.2 },
-    ],
+    confidenceTiersByType: {
+      detached: [
+        { maxDistanceMiles: 0.3, confidence: 1.0 },
+        { maxDistanceMiles: 0.5, confidence: 0.8 },
+        { maxDistanceMiles: 0.6, confidence: 0.6 },
+        { maxDistanceMiles: 0.75, confidence: 0.4 },
+        { maxDistanceMiles: Infinity, confidence: 0.2 },
+      ],
+      townhome: [
+        { maxDistanceMiles: 0.2, confidence: 1.0 },
+        { maxDistanceMiles: 0.35, confidence: 0.8 },
+        { maxDistanceMiles: 0.5, confidence: 0.6 },
+        { maxDistanceMiles: 0.6, confidence: 0.4 },
+        { maxDistanceMiles: Infinity, confidence: 0.2 },
+      ],
+      condo: [
+        { maxDistanceMiles: 0.02, confidence: 1.0 },
+        { maxDistanceMiles: 0.05, confidence: 0.8 },
+        { maxDistanceMiles: 0.08, confidence: 0.6 },
+        { maxDistanceMiles: 0.1, confidence: 0.4 },
+        { maxDistanceMiles: Infinity, confidence: 0.2 },
+      ],
+    },
     blendByPropertyType: {
       detached: {
         buildingTotalWeight: 0.4,
@@ -381,7 +397,11 @@ export const DENVER_FLIP_V1: FlipStrategyProfile = {
 
   // -- Qualification (Prime Candidates) -------------------------------------
   qualification: {
-    maxCompDistanceMiles: 0.4,
+    maxCompDistanceMilesByType: {
+      detached: 0.4,
+      townhome: 0.4,
+      condo: 0.08,
+    },
     minEstGapPerSqft: 60,
     maxCompAgeDays: 213, // ~7 months
     minQualifyingComps: 2,

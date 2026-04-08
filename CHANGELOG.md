@@ -1,3 +1,30 @@
+## 2026-04-08f — Property-Type-Specific Comp Search Radii
+
+### What changed
+
+Comp search distance, ARV confidence tiers, and Prime Candidate qualification distances are now configured per property type instead of using a single 0.75mi radius for all types.
+
+| | Detached | Townhome | Condo |
+|---|---|---|---|
+| **Search radius** | 0.75 mi | 0.6 mi | 0.1 mi |
+| **Full confidence** | ≤0.3 mi | ≤0.2 mi | ≤0.02 mi |
+| **Qualification dist** | 0.4 mi | 0.4 mi | 0.08 mi |
+
+The tight condo radius (0.1mi) produced a substantial improvement in condo screening results by eliminating irrelevant comps from distant complexes. Without building/complex name data, geographic proximity is the only way to approximate same-building matches.
+
+### Still needed: Townhome logic
+
+Townhome search radius is intentionally wider (0.6mi) because MLS agents use the "townhome" property type inconsistently — some attached products that behave more like detached homes get categorized as townhomes. Until we import `building_name` / complex data and can match on it, the wider radius prevents losing valid comps. This should be tightened once building name is captured in the import pipeline.
+
+### Files changed
+
+- `lib/screening/bulk-runner.ts` — per-type `SCREENING_RULES_BY_TYPE` replaces single `SCREENING_RULES`
+- `lib/screening/strategy-profiles.ts` — `confidenceTiersByType` replaces `confidenceTiers`; `maxCompDistanceMilesByType` replaces `maxCompDistanceMiles` in qualification config
+- `lib/screening/arv-engine.ts` — uses property-type-specific confidence tiers
+- `lib/screening/qualification-engine.ts` — accepts `propertyType`, uses per-type qualification distance
+
+---
+
 ## 2026-04-08e — Per-Category Rehab Scoping and Custom Items
 
 ### Per-Category Scope Multipliers

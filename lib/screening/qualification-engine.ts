@@ -10,11 +10,12 @@
 // ---------------------------------------------------------------------------
 
 import type { QualificationConfig } from "./strategy-profiles";
-import type { CompArvDetail, QualificationResult } from "./types";
+import type { CompArvDetail, QualificationResult, PropertyTypeKey } from "./types";
 
 type QualifyInput = {
   comps: CompArvDetail[];
   config: QualificationConfig;
+  propertyType: PropertyTypeKey;
   /** List price when available, null for off-market. */
   listPrice: number | null;
   buildingSqft: number;
@@ -24,7 +25,7 @@ type QualifyInput = {
 };
 
 export function evaluateQualification(input: QualifyInput): QualificationResult {
-  const { comps, config, listPrice, buildingSqft, arv, maxOffer } = input;
+  const { comps, config, propertyType, listPrice, buildingSqft, arv, maxOffer } = input;
 
   if (comps.length === 0) {
     return {
@@ -67,8 +68,9 @@ export function evaluateQualification(input: QualifyInput): QualificationResult 
   const disqualifiers: string[] = [];
 
   for (const comp of comps) {
+    const maxCompDist = config.maxCompDistanceMilesByType[propertyType];
     const compPassesDistance =
-      comp.distanceMiles <= config.maxCompDistanceMiles;
+      comp.distanceMiles <= maxCompDist;
     const compPassesRecency =
       comp.daysSinceClose <= config.maxCompAgeDays;
 
@@ -89,7 +91,7 @@ export function evaluateQualification(input: QualifyInput): QualificationResult 
 
   if (isPrimeCandidate) {
     reasons.push(
-      `${qualifyingCount} comp(s) within ${config.maxCompDistanceMiles}mi, ` +
+      `${qualifyingCount} comp(s) within ${config.maxCompDistanceMilesByType[propertyType]}mi, ` +
         `closed in last ${config.maxCompAgeDays} days, ` +
         `with gap ≥ $${config.minEstGapPerSqft}/sqft`,
     );

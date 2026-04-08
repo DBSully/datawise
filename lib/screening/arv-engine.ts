@@ -106,7 +106,7 @@ export function calculateArv(input: CalculateArvInput): ArvResult | null {
     const arvTimeAdjusted = arvBlended * timeMultiplier;
 
     // Confidence and decay weight
-    const confidence = lookupConfidence(comp.distanceMiles, config.confidenceTiers);
+    const confidence = lookupConfidence(comp.distanceMiles, config.confidenceTiersByType[propertyType]);
     const decayWeight = Math.exp(-(daysSinceClose / 365));
 
     details.push({
