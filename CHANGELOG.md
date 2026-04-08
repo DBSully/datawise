@@ -1,3 +1,11 @@
+## 2026-04-08d — Complete Screening Pagination Fix
+
+- Fixed three additional unpaginated `get_import_batch_property_ids` RPC calls that were still capping at 1,000 rows: auto-screen in `previewImportAction`, `processImportBatchAction`, and legacy `analysis/screening` action
+- Extracted shared `fetchImportBatchPropertyIds()` helper in imports actions with `.range()` pagination loop
+- All code paths that trigger screening from an import batch are now paginated
+
+---
+
 ## 2026-04-08c — Dashboard: Unreviewed Primes Breakdown and Import Count Fix
 
 ### Unreviewed Primes Tile Redesign
