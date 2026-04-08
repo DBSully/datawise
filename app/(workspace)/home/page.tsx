@@ -28,13 +28,16 @@ export default async function DashboardPage() {
 
   // --- Section 1: Today at a Glance ---
 
-  const todayStart = new Date();
+  // Use Denver local midnight (UTC-6 standard / UTC-7 daylight) for "today"
+  const nowLocal = new Date();
+  const denverOffsetMs = nowLocal.getTimezoneOffset() * 60_000;
+  const todayStart = new Date(nowLocal.getTime() - denverOffsetMs);
   todayStart.setUTCHours(0, 0, 0, 0);
-  const todayIso = todayStart.toISOString();
+  const todayIso = new Date(todayStart.getTime() + denverOffsetMs).toISOString();
 
   const [
     { data: todayImports },
-    { count: unreviewedPrimeCount },
+    { data: unreviewedPrimeRows },
     { count: watchListCount },
     { data: pipelineRows },
   ] = await Promise.all([
@@ -44,10 +47,10 @@ export default async function DashboardPage() {
       .select("unique_listing_count")
       .gte("created_at", todayIso)
       .eq("status", "complete"),
-    // Unreviewed prime candidates
+    // Unreviewed prime candidates by MLS status
     supabase
       .from("analysis_queue_v")
-      .select("id", { count: "exact", head: true })
+      .select("id, mls_status")
       .eq("is_prime_candidate", true)
       .is("review_action", null),
     // Active watch list
@@ -68,6 +71,16 @@ export default async function DashboardPage() {
     0,
   );
   const pipelineCount = pipelineRows?.length ?? 0;
+
+  // Break down unreviewed primes by MLS status (exclude Closed)
+  const primeStatusCounts: Record<string, number> = {};
+  let unreviewedPrimeTotal = 0;
+  for (const r of unreviewedPrimeRows ?? []) {
+    const status = (r as { mls_status: string | null }).mls_status ?? "Unknown";
+    if (status === "Closed") continue;
+    primeStatusCounts[status] = (primeStatusCounts[status] ?? 0) + 1;
+    unreviewedPrimeTotal++;
+  }
 
   // --- Section 2: Unreviewed Prime Candidates (top 10) ---
 
@@ -207,13 +220,59 @@ export default async function DashboardPage() {
           sublabel="listings"
           href="/intake/imports"
         />
-        <GlanceCard
-          label="Unreviewed Primes"
-          value={formatNumber(unreviewedPrimeCount ?? 0)}
-          sublabel="candidates"
-          href="/intake/screening?prime=true"
-          accent={(unreviewedPrimeCount ?? 0) > 0 ? "emerald" : undefined}
-        />
+        <div
+          className={`rounded-lg border px-4 py-3 shadow-sm ${
+            unreviewedPrimeTotal > 0
+              ? "border-emerald-200 bg-emerald-50"
+              : "border-slate-200 bg-white"
+          }`}
+        >
+          <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500">
+            Unreviewed Primes
+          </div>
+          <div
+            className={`mt-1 text-2xl font-semibold ${
+              unreviewedPrimeTotal > 0 ? "text-emerald-800" : "text-slate-900"
+            }`}
+          >
+            {formatNumber(unreviewedPrimeTotal)}
+          </div>
+          {unreviewedPrimeTotal > 0 ? (
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+              {["Active", "Coming Soon", "Expired", "Withdrawn"].map(
+                (status) => {
+                  const count = primeStatusCounts[status];
+                  if (!count) return null;
+                  return (
+                    <Link
+                      key={status}
+                      href={`/intake/screening?prime=true&mls_status=${encodeURIComponent(status)}`}
+                      className="text-xs text-emerald-700 hover:underline"
+                    >
+                      {status}: {count}
+                    </Link>
+                  );
+                },
+              )}
+              {Object.entries(primeStatusCounts)
+                .filter(
+                  ([s]) =>
+                    !["Active", "Coming Soon", "Expired", "Withdrawn"].includes(s),
+                )
+                .map(([status, count]) => (
+                  <Link
+                    key={status}
+                    href={`/intake/screening?prime=true&mls_status=${encodeURIComponent(status)}`}
+                    className="text-xs text-emerald-700 hover:underline"
+                  >
+                    {status}: {count}
+                  </Link>
+                ))}
+            </div>
+          ) : (
+            <div className="mt-0.5 text-xs text-slate-500">candidates</div>
+          )}
+        </div>
         <GlanceCard
           label="Watch List"
           value={formatNumber(watchListCount ?? 0)}
@@ -236,7 +295,7 @@ export default async function DashboardPage() {
       {/* Section 2: Unreviewed Prime Candidates */}
       <UnreviewedPrimes
         rows={primeRows}
-        totalCount={unreviewedPrimeCount ?? 0}
+        totalCount={unreviewedPrimeTotal}
       />
 
       {/* Section 3: Watch List — Needs Attention */}

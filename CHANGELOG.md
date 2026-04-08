@@ -1,3 +1,19 @@
+## 2026-04-08c — Dashboard: Unreviewed Primes Breakdown and Import Count Fix
+
+### Unreviewed Primes Tile Redesign
+
+- Tile now excludes Closed sales from the unreviewed prime count
+- Displays breakdown by MLS status (Active, Coming Soon, Expired, Withdrawn) inside the tile
+- Each status line is a clickable link to the screening queue filtered by that status (`/intake/screening?prime=true&mls_status=...`)
+- Query changed from `count` to full row fetch with `mls_status` for grouping
+
+### Imported Today Fix
+
+- Fixed "Imported Today" showing 0: was using UTC midnight (`setUTCHours(0,0,0,0)`) which mapped to 6pm Denver time the previous day, excluding all imports made during Denver business hours
+- Now calculates local midnight using server timezone offset
+
+---
+
 ## 2026-04-08b — Reference Date Fix for Comparable Sales
 
 ### Per-Subject Reference Date
