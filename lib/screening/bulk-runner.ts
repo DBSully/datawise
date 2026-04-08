@@ -114,10 +114,12 @@ type PoolListing = {
   mls_status: string | null;
   list_price: number | null;
   close_price: number | null;
+  concessions_amount: number | null;
   close_date: string | null;
   listing_contract_date: string | null;
   purchase_contract_date: string | null;
   property_condition_source: string | null;
+  subdivision_name: string | null;
 };
 
 type PoolFinancials = {
@@ -259,7 +261,7 @@ function buildTrendSalesPool(pool: CompPool): TrendSaleInput[] {
 
     for (const listing of listings) {
       if (!listing.close_date || !listing.close_price) continue;
-      const closePrice = toNum(listing.close_price);
+      const closePrice = toNum(listing.close_price) - toNum(listing.concessions_amount);
       if (closePrice <= 0) continue;
 
       sales.push({
@@ -306,7 +308,7 @@ async function loadCompPool(
     fetchAllRows<PoolListing>(
       supabase,
       "mls_listings",
-      "id, listing_id, real_property_id, mls_status, list_price, close_price, close_date, listing_contract_date, purchase_contract_date, property_condition_source",
+      "id, listing_id, real_property_id, mls_status, list_price, close_price, concessions_amount, close_date, listing_contract_date, purchase_contract_date, property_condition_source, subdivision_name",
       (q: any) =>
         q
           .not("close_date", "is", null)
@@ -363,7 +365,7 @@ async function loadSubjects(
     const rows = await fetchAllRows<PoolListing>(
       supabase,
       "mls_listings",
-      "id, listing_id, real_property_id, mls_status, list_price, close_price, close_date, listing_contract_date, purchase_contract_date, property_condition_source",
+      "id, listing_id, real_property_id, mls_status, list_price, close_price, concessions_amount, close_date, listing_contract_date, purchase_contract_date, property_condition_source, subdivision_name",
       (q: any) =>
         q
           .in("real_property_id", chunk)
@@ -505,8 +507,9 @@ function scoreCompsForSubject(
       // Condition match
       const conditionScore = computeConditionMatchScore(subjectCondition, listing.property_condition_source);
 
-      // PSF
-      const ppsf = compSqft > 0 ? roundNumber(toNum(listing.close_price) / compSqft, 2) : null;
+      // Net price (close price minus concessions) and PSF
+      const netPrice = toNum(listing.close_price) - toNum(listing.concessions_amount);
+      const ppsf = compSqft > 0 ? roundNumber(netPrice / compSqft, 2) : null;
 
       // Build weighted score (same logic as analysis engine)
       const distanceComponent = clamp01(1 - distanceMiles / rules.maxDistanceMiles);
@@ -560,6 +563,8 @@ function scoreCompsForSubject(
           longitude: compProperty.longitude,
           close_date: listing.close_date,
           close_price: listing.close_price,
+          concessions_amount: listing.concessions_amount,
+          net_price: netPrice,
           ppsf,
           building_area_total_sqft: compPhysical.building_area_total_sqft,
           above_grade_finished_area_sqft: compPhysical.above_grade_finished_area_sqft,
@@ -579,6 +584,7 @@ function scoreCompsForSubject(
           levels_raw: compPhysical.levels_raw,
           level_class_standardized: compPhysical.level_class_standardized,
           property_condition_source: listing.property_condition_source,
+          subdivision_name: listing.subdivision_name,
           distance_miles: distRounded,
           days_since_close: daysSinceClose,
           sqft_delta_pct: sqftDeltaPct !== null ? roundNumber(sqftDeltaPct, 3) : null,
@@ -597,7 +603,7 @@ function scoreCompsForSubject(
         compRealPropertyId: compPropertyId,
         listingId: listing.listing_id,
         address: compProperty.unparsed_address,
-        closePrice: toNum(listing.close_price),
+        closePrice: netPrice,
         closeDateIso: listing.close_date,
         compBuildingSqft: compSqft,
         compAboveGradeSqft: compAbove,
@@ -1081,4 +1087,127 @@ export async function runScreeningBatch(
       .eq("id", batchId);
     throw err;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Expand Comparable Search — run a wider search for a single subject and
+// merge new candidates into the existing comparable_search_run.
+// ---------------------------------------------------------------------------
+
+export type ExpandSearchOverrides = {
+  maxDistanceMiles?: number;
+  maxDaysSinceClose?: number;
+  sqftTolerancePct?: number;
+  requireSameLevelClass?: boolean;
+  requireSameBuildingForm?: boolean;
+  /** If provided, only keep candidates with these level classes (post-filter). Empty = any. */
+  targetLevelClasses?: string[];
+  /** If provided, only keep candidates with these building forms (post-filter). Empty = any. */
+  targetBuildingForms?: string[];
+  maxCandidates?: number;
+};
+
+export async function expandComparableSearch(
+  supabase: any,
+  compSearchRunId: string,
+  subjectPropertyId: string,
+  overrides: ExpandSearchOverrides,
+): Promise<{ added: number; total: number }> {
+  // Load the existing run to get the subject listing and parameters
+  const { data: run } = await supabase
+    .from("comparable_search_runs")
+    .select("subject_listing_row_id, parameters_json")
+    .eq("id", compSearchRunId)
+    .single();
+
+  if (!run) throw new Error("Comparable search run not found");
+
+  // Load existing candidate listing IDs to skip duplicates
+  const { data: existingCandidates } = await supabase
+    .from("comparable_search_candidates")
+    .select("comp_listing_row_id")
+    .eq("comparable_search_run_id", compSearchRunId);
+
+  const existingListingIds = new Set(
+    (existingCandidates ?? []).map((c: any) => c.comp_listing_row_id),
+  );
+
+  // Build expanded rules — start from the original run parameters, apply overrides
+  const baseRules = (run.parameters_json ?? {}) as ComparableSearchRules;
+  const expandedRules: ComparableSearchRules = {
+    ...baseRules,
+    maxDistanceMiles: overrides.maxDistanceMiles ?? baseRules.maxDistanceMiles ?? 1.5,
+    maxDaysSinceClose: overrides.maxDaysSinceClose ?? baseRules.maxDaysSinceClose ?? 365,
+    sqftTolerancePct: overrides.sqftTolerancePct ?? baseRules.sqftTolerancePct ?? 30,
+    requireSameLevelClass: overrides.requireSameLevelClass ?? false,
+    requireSameBuildingForm: overrides.requireSameBuildingForm ?? false,
+    maxCandidates: overrides.maxCandidates ?? 50,
+  };
+
+  // Load comp pool with the expanded days range
+  const pool = await loadCompPool(supabase, expandedRules.maxDaysSinceClose);
+
+  // Build subject data
+  const subjectProp = pool.properties.get(subjectPropertyId);
+  const subjectPhys = pool.physicals.get(subjectPropertyId);
+  if (!subjectProp || !subjectPhys) throw new Error("Subject property not found in pool");
+
+  // Get subject listing
+  let subjectListing: PoolListing | null = null;
+  if (run.subject_listing_row_id) {
+    const { data: listing } = await supabase
+      .from("mls_listings")
+      .select("id, listing_id, real_property_id, mls_status, list_price, close_price, concessions_amount, close_date, listing_contract_date, purchase_contract_date, property_condition_source, subdivision_name")
+      .eq("id", run.subject_listing_row_id)
+      .single();
+    subjectListing = listing;
+  }
+
+  const subject: SubjectData = {
+    property: subjectProp,
+    physical: subjectPhys,
+    listing: subjectListing,
+    financials: null,
+  };
+
+  // Score comps with expanded rules
+  const scored = scoreCompsForSubject(subject, pool, expandedRules, new Date());
+
+  // Filter out existing candidates and apply target filters
+  const targetLevels = (overrides.targetLevelClasses ?? []).map((v) => v.toLowerCase());
+  const targetForms = (overrides.targetBuildingForms ?? []).map((v) => v.toLowerCase());
+
+  const newCandidates = scored.filter((s) => {
+    if (existingListingIds.has(s.candidateRow.comp_listing_row_id as string)) return false;
+    const m = s.candidateRow.metrics_json as Record<string, unknown> | undefined;
+    if (targetLevels.length > 0 && m) {
+      const lvl = String(m.level_class_standardized ?? "").toLowerCase();
+      if (!targetLevels.includes(lvl)) return false;
+    }
+    if (targetForms.length > 0 && m) {
+      const form = String(m.building_form_standardized ?? "").toLowerCase();
+      if (!targetForms.includes(form)) return false;
+    }
+    return true;
+  });
+
+  if (newCandidates.length === 0) {
+    return { added: 0, total: existingListingIds.size };
+  }
+
+  // Insert new candidates
+  const rows = newCandidates.map((s) => ({
+    comparable_search_run_id: compSearchRunId,
+    ...s.candidateRow,
+  }));
+
+  const CHUNK_SIZE = 200;
+  for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+    const { error } = await supabase
+      .from("comparable_search_candidates")
+      .insert(rows.slice(i, i + CHUNK_SIZE));
+    if (error) throw new Error(error.message);
+  }
+
+  return { added: newCandidates.length, total: existingListingIds.size + newCandidates.length };
 }

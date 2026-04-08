@@ -69,6 +69,7 @@ type CandidateListing = {
   real_property_id: string;
   mls_status: string | null;
   close_price: number | null;
+  concessions_amount: number | null;
   close_date: string | null;
   property_condition_source: string | null;
 };
@@ -361,7 +362,7 @@ export async function runComparableSearch({
       supabase
         .from("mls_listings")
         .select(
-          "id, source_system, listing_id, real_property_id, mls_status, close_price, close_date, property_condition_source",
+          "id, source_system, listing_id, real_property_id, mls_status, close_price, concessions_amount, close_date, property_condition_source",
         )
         .in("real_property_id", candidatePropertyIds)
         .eq("source_system", subjectListingRow?.source_system ?? profile.source_system ?? "recolorado")
@@ -507,9 +508,12 @@ export async function runComparableSearch({
       bathTolerance: parameters.bathTolerance,
     });
 
+    const netPrice = listing.close_price
+      ? Number(listing.close_price) - (Number(listing.concessions_amount) || 0)
+      : null;
     const ppsf =
-      listing.close_price && candidateAreaSqft
-        ? Number((Number(listing.close_price) / candidateAreaSqft).toFixed(2))
+      netPrice && candidateAreaSqft
+        ? Number((netPrice / candidateAreaSqft).toFixed(2))
         : null;
 
     evaluated.push({
@@ -530,6 +534,8 @@ export async function runComparableSearch({
         mls_status: listing.mls_status,
         property_condition_source: listing.property_condition_source,
         close_price: listing.close_price,
+        concessions_amount: listing.concessions_amount,
+        net_price: netPrice,
         close_date: listing.close_date,
         property_type: physical.property_type,
         level_class_standardized: physical.level_class_standardized,

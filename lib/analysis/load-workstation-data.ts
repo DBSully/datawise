@@ -127,7 +127,7 @@ export async function loadWorkstationData(
   if (!property || !analysis) return null;
 
   // Load listing
-  const listingSelect = "id, listing_id, mls_status, list_price, close_price, listing_contract_date, property_condition_source, source_system, original_list_price";
+  const listingSelect = "id, listing_id, mls_status, list_price, close_price, concessions_amount, listing_contract_date, property_condition_source, source_system, original_list_price";
   let listing: Record<string, unknown> | null = null;
 
   if (analysis.listing_id) {
@@ -289,7 +289,7 @@ export async function loadWorkstationData(
         compRealPropertyId: String(c.comp_real_property_id ?? ""),
         listingId: String(m.listing_id ?? c.listing_id ?? ""),
         address: String(m.address ?? ""),
-        closePrice: toNum(m.close_price),
+        closePrice: toNum(m.net_price) || (toNum(m.close_price) - toNum(m.concessions_amount)),
         closeDateIso: String(m.close_date ?? ""),
         compBuildingSqft: toNum(m.building_area_total_sqft) || toNum(m.above_grade_finished_area_sqft),
         compAboveGradeSqft: toNum(m.above_grade_finished_area_sqft) || toNum(m.building_area_total_sqft),
@@ -558,7 +558,10 @@ export async function loadWorkstationData(
   const totalComps = compCandidates.length;
   const selectedCount = selectedComps.length;
   const avgSelectedPrice = selectedCount > 0
-    ? Math.round(selectedComps.reduce((sum: number, c: any) => sum + toNum((c.metrics_json as any)?.close_price), 0) / selectedCount)
+    ? Math.round(selectedComps.reduce((sum: number, c: any) => {
+        const m = c.metrics_json as any;
+        return sum + (toNum(m?.net_price) || (toNum(m?.close_price) - toNum(m?.concessions_amount)));
+      }, 0) / selectedCount)
     : null;
   const avgSelectedPsf = selectedCount > 0
     ? Math.round(selectedComps.reduce((sum: number, c: any) => sum + toNum((c.metrics_json as any)?.ppsf), 0) / selectedCount)
@@ -572,7 +575,10 @@ export async function loadWorkstationData(
   const asIsTotalComps = compCandidates.length;
   const asIsSelectedCount = asIsSelectedComps.length;
   const asIsAvgSelectedPrice = asIsSelectedCount > 0
-    ? Math.round(asIsSelectedComps.reduce((sum: number, c: any) => sum + toNum((c.metrics_json as any)?.close_price), 0) / asIsSelectedCount)
+    ? Math.round(asIsSelectedComps.reduce((sum: number, c: any) => {
+        const m = c.metrics_json as any;
+        return sum + (toNum(m?.net_price) || (toNum(m?.close_price) - toNum(m?.concessions_amount)));
+      }, 0) / asIsSelectedCount)
     : null;
   const asIsAvgSelectedPsf = asIsSelectedCount > 0
     ? Math.round(asIsSelectedComps.reduce((sum: number, c: any) => sum + toNum((c.metrics_json as any)?.ppsf), 0) / asIsSelectedCount)

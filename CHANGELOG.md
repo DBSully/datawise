@@ -1,3 +1,157 @@
+## 2026-04-08g — ScreeningCompModal Overhaul: Property Header, Net Price, Expanded Search, Unified Comp Workspace
+
+### Summary
+
+Major overhaul of the `ScreeningCompModal` — the popup that opens from the screening queue "Map" button. This was a large, multi-feature session that transformed the modal from a basic comp picker into a full-featured comparable analysis workspace. The modal now also replaces the old "Edit Comps" popup in both Analysis Workstation pages, unifying the comp selection experience across the entire application.
+
+### Property Header & MLS Info (Access-style layout)
+
+The modal header was redesigned to match the legacy MS Access workspace layout:
+
+- **Address line**: bold `Address; City ZIP` with `Subdivision | County` right-aligned, plus Prime/Passed pills and Close button
+- **Two info tiles side-by-side** below a thin divider:
+  - **MLS Info tile** (left): MLS Status, MLS#, MLS Change, List Date, Orig List Price, U/C Date, List Price, Close Date — 4 rows × 2 columns
+  - **Property Physical tile** (right): Total SF, Above Grade SF, Below Grade SF, Below Finished, Beds, Baths, Garage, Type, Levels, Year (red if pre-1950), Lot SF, Ownership, Occupant, Taxes/HOA
+- Data loaded via parallel joins to `real_properties`, `property_physical`, `property_financials`, and `mls_listings`
+
+### Net Price Refactor (project-wide)
+
+Introduced `net_price = close_price - concessions_amount` throughout the entire codebase. Concessions were already imported and stored in `mls_listings` but were never subtracted from sale prices.
+
+**14 files updated across 3 layers:**
+
+- **Engines** (`bulk-runner.ts`, `valuation/engine.ts`, `comparables/engine.ts`): All PPSF calculations, ARV inputs, and trend sales now use net price. `concessions_amount` added to all listing queries. `net_price` stored alongside `close_price` in `metrics_json`.
+- **Data loaders** (`load-workstation-data.ts`): ARV averaging uses net price with fallback
+- **UI displays**: All analysis workstations, screening modal, screening detail page, comparable workspace panel, deals actions, report snapshots, and map tooltips (label changed from "Sale" to "Net Sale")
+- **Backfill for existing data**: `loadScreeningCompDataAction` batch-loads concessions from `mls_listings` and computes `net_price` on the fly for candidates that pre-date the code change
+
+### Redesigned Comp Candidate Table
+
+Replaced the old 8-column table with a dense 18-column layout:
+
+**Columns (in order):** Pick, Address, Dist, Subdiv, Lvl, Net Price, Imp ARV, Gap, Days, Year, Bd, Ba, Gar, Bldg SF, Bsmt, BsFin, Lot, Score
+
+- **Imp ARV**: Per-comp implied ARV loaded from `arv_detail_json`, keyed by `comp_listing_row_id`
+- **Gap**: Per-comp gap/sqft with color coding (green ≥$60, red <$30)
+- **Days**: Color coded (red >180, green <60)
+- **Year**: Displayed without comma formatting (e.g., "1908" not "1,908")
+- **Subdivision**: Loaded from `mls_listings.subdivision_name`, backfilled for existing data, added to bulk-runner `metrics_json` for future runs
+- **Bd/Ba/Gar**: Fixed 24px width for visual balance
+- Modal widened to 1440px; map reduced to 380×320px
+
+### Subject Property Row
+
+Added a fixed subject row at the top of the comp table:
+
+- Red "Subject" pill in the pick column
+- Shows List Price (not net), live ARV, live Gap/sqft, average comp score
+- Sticky below the header row (z-20, precise pixel offset) so it stays visible when scrolling
+- Red-50 background with red bottom border
+
+### Live-Recalculated Deal Math
+
+The deal math strip (ARV, Max Offer, Offer%, Gap/sqft) now recalculates instantly as the user picks/unpicks comps:
+
+- Uses decay-weighted average of per-comp ARVs: `Sum(arv × decayWeight) / Sum(decayWeight)`
+- Max Offer recomputed from `ARV - rehab - holding - transaction - financing - targetProfit`
+- Cost components loaded from screening result; falls back to original values when no comps are picked
+
+### Map Legend Improvement
+
+Replaced the simple colored-dot legend with a detailed pin guide that matches the actual map rendering:
+
+- Subject: red fill, white border with red outer ring
+- Picked: green fill, white border
+- Candidates: gray fill with gap/sqft-coded borders (green ≥$60, yellow ≥$30, red <$30)
+- Right-aligned "gap/sqft" label
+
+### Copy MLS# Buttons
+
+Added "Copy Selected (N)" and "Copy All (N)" buttons in the deal math strip, to the right of the comp stats. Copies MLS numbers as comma-separated text.
+
+### Reactivate Passed Properties
+
+Added ability to undo a "Pass" decision:
+
+- New `reactivateScreeningResultAction` clears `review_action`, `pass_reason`, `reviewed_at`, and `reviewed_by_user_id`
+- "Reactivate" button (amber styling) appears in the footer when a property is in Passed state
+- Modal immediately updates to show Promote/Pass buttons again without closing
+
+### Add Comp by MLS#
+
+Added manual comp entry to the screening modal (below the map, above Expand Search):
+
+- Text input + "Add" button; supports Enter key
+- New `addManualScreeningCompAction` server action that:
+  - Looks up the listing, checks for duplicates
+  - Loads full subject + comp property data in parallel
+  - Calculates all deltas (distance, days, sqft, year, beds, baths)
+  - Populates complete `metrics_json` (address, subdivision, level class, all sqft fields, net price, PPSF, etc.)
+  - Auto-picks the comp (`selected_yn: true`)
+- Inline success/error feedback
+
+### Expand Comparable Search
+
+Added ability to run a wider comp search from within the modal:
+
+- "Expand Comparable Search" button opens a compact parameter form below the map
+- **Adjustable parameters**: Radius (mi), SqFt Tolerance %, Max Days, Building Form, Level Class
+- **Building Form and Level Class use multi-checkbox dropdowns** — user can select multiple specific values (e.g., Bi-Level + Tri-Level + Multi-Level) or leave as "Any"
+- New `expandComparableSearch` function in `bulk-runner.ts`:
+  - Loads original run parameters as the base
+  - Applies user overrides
+  - Uses the full scoring engine (`scoreCompsForSubject`)
+  - Deduplicates against existing candidates
+  - Post-filters by selected level classes and building forms
+- Results merged into existing candidate pool; modal reloads to show new comps
+- Shows "+N new comps (M total)" result message
+
+### Unified Comp Workspace (replaces old Edit Comps modal)
+
+`ScreeningCompModal` now supports two modes:
+
+1. **Screening mode**: Pass `resultId` + `batchId` (opens from screening queue/batch tables)
+2. **Workstation mode**: Pass `compSearchRunId` + `realPropertyId` (opens from Analysis Workstation "Edit Comps" buttons)
+
+New `loadCompDataByRunAction` builds the same `ScreeningCompData` from property/MLS/comp tables without requiring a `screening_results` row. If a screening result exists for the same property + run, deal math fields are loaded from it.
+
+Both Analysis Workstation files updated:
+- `analysis/properties/[id]/analyses/[analysisId]/analysis-workstation.tsx`
+- `deals/watchlist/[analysisId]/analysis-workstation.tsx`
+
+Old inline modals (~120 lines each) with `ComparableWorkspacePanel` replaced by a single `<ScreeningCompModal>` call. Workstation mode hides promote/pass/reactivate footer (not applicable), shows simple comp count instead.
+
+### Files Changed
+
+**Core engines:**
+- `lib/screening/bulk-runner.ts` — net price, concessions, subdivision in metrics_json, `expandComparableSearch` export
+- `lib/screening/arv-engine.ts` — (unchanged, consumes net price via `closePrice` input)
+- `lib/valuation/engine.ts` — net price, concessions in query/metrics
+- `lib/comparables/engine.ts` — net price, concessions in query/metrics
+
+**Actions:**
+- `app/(workspace)/intake/screening/actions.ts` — expanded `ScreeningCompData` type, `loadCompDataByRunAction`, `reactivateScreeningResultAction`, `expandComparableSearchAction`, `addManualScreeningCompAction`, backfill logic for net_price/subdivision
+- `app/(workspace)/deals/actions.ts` — net price in manual comp add
+
+**Data loaders:**
+- `lib/analysis/load-workstation-data.ts` — net price in ARV averaging
+- `lib/reports/snapshot.ts` — net price fallback
+
+**Components:**
+- `components/screening/screening-comp-modal.tsx` — complete overhaul (property header, MLS tile, dense table, subject row, live deal math, legend, copy MLS, add comp, expand search, reactivate, workstation mode)
+- `components/properties/comp-map.tsx` — tooltip label "Net Sale"
+- `components/properties/comparable-workspace-panel.tsx` — net price fallback
+
+**Workstation pages:**
+- `app/(workspace)/analysis/properties/[id]/analyses/[analysisId]/analysis-workstation.tsx` — replaced inline Edit Comps modals with ScreeningCompModal
+- `app/(workspace)/deals/watchlist/[analysisId]/analysis-workstation.tsx` — same replacement
+
+**Other displays:**
+- `app/(workspace)/intake/screening/[batchId]/[resultId]/page.tsx` — net price display
+- `app/(workspace)/admin/properties/[id]/page.tsx` — (unchanged, shows raw listing history)
+
+---
+
 ## 2026-04-08f — Property-Type-Specific Comp Search Radii
 
 ### What changed

@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { MapPin, MapPinTooltipData } from "@/components/properties/comp-map";
+import { ScreeningCompModal } from "@/components/screening/screening-comp-modal";
 
 const CompMap = dynamic(
   () => import("@/components/properties/comp-map").then((m) => m.CompMap),
@@ -553,7 +554,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
         return {
           id: String(c.id),
           address: String(m.address ?? "\u2014"),
-          closePrice: m.close_price as number | null,
+          closePrice: (m.net_price as number) ?? (m.close_price as number) ?? null,
           ppsf: m.ppsf as number | null,
           sqft: m.building_area_total_sqft as number | null,
           distance: c.distance_miles as number | null,
@@ -571,7 +572,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
         return {
           id: String(c.id),
           address: String(m.address ?? "\u2014"),
-          closePrice: m.close_price as number | null,
+          closePrice: (m.net_price as number) ?? (m.close_price as number) ?? null,
           ppsf: m.ppsf as number | null,
           sqft: m.building_area_total_sqft as number | null,
           distance: c.distance_miles as number | null,
@@ -678,10 +679,10 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
       const sqftDelta = compSqft && subjectSqft ? subjectSqft - compSqft : null;
       const sqftDeltaPct = compSqft && subjectSqft ? (subjectSqft - compSqft) / subjectSqft : null;
 
-      const compClosePrice = Number(m.close_price) || 0;
+      const compNetPrice = Number(m.net_price) || Number(m.close_price) || 0;
       const perCompGapPerSqft =
-        subjectSqft > 0 && compClosePrice > 0 && subjectListPrice > 0
-          ? Math.round((compClosePrice - subjectListPrice) / subjectSqft)
+        subjectSqft > 0 && compNetPrice > 0 && subjectListPrice > 0
+          ? Math.round((compNetPrice - subjectListPrice) / subjectSqft)
           : null;
 
       const isSelected = Boolean(c.selected_yn);
@@ -691,7 +692,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
         lng,
         label: String(m.address ?? "\u2014"),
         tooltipData: {
-          closePrice: (m.close_price as number) ?? null,
+          closePrice: compNetPrice || null,
           closeDate: m.close_date ? String(m.close_date).slice(0, 10) : null,
           sqft: compSqft,
           sqftDelta,
@@ -736,10 +737,10 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
       const sqftDelta = compSqft && subjectSqft ? subjectSqft - compSqft : null;
       const sqftDeltaPct = compSqft && subjectSqft ? (subjectSqft - compSqft) / subjectSqft : null;
 
-      const compClosePrice = Number(m.close_price) || 0;
+      const compNetPrice = Number(m.net_price) || Number(m.close_price) || 0;
       const perCompGapPerSqft =
-        subjectSqft > 0 && compClosePrice > 0 && subjectListPrice > 0
-          ? Math.round((compClosePrice - subjectListPrice) / subjectSqft)
+        subjectSqft > 0 && compNetPrice > 0 && subjectListPrice > 0
+          ? Math.round((compNetPrice - subjectListPrice) / subjectSqft)
           : null;
 
       const isSelected = Boolean(c.selected_as_is_yn);
@@ -749,7 +750,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
         lng,
         label: String(m.address ?? "\u2014"),
         tooltipData: {
-          closePrice: (m.close_price as number) ?? null,
+          closePrice: compNetPrice || null,
           closeDate: m.close_date ? String(m.close_date).slice(0, 10) : null,
           sqft: compSqft,
           sqftDelta,
@@ -1589,166 +1590,29 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
       {/* ================================================================== */}
       {/* COMP SELECTION MODAL                                               */}
       {/* ================================================================== */}
-      {showCompModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="relative flex h-[90vh] w-[92vw] flex-col overflow-hidden rounded-xl border border-slate-300 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
-              <h2 className="text-sm font-semibold text-slate-800">Comparable Selection &mdash; {d.property.address}</h2>
-              <div className="flex items-center gap-3">
-                <p className="text-[10px] text-slate-400">
-                  Hover for details &middot; Click to select/deselect &middot;
-                  <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 mx-0.5 align-middle" /> Selected
-                  <span className="inline-block h-2 w-2 rounded-full bg-slate-400 mx-0.5 align-middle" /> Candidate
-                  <span className="inline-block h-2 w-2 rounded-full bg-red-600 mx-0.5 align-middle" /> Subject
-                </p>
-                <button
-                  type="button"
-                  onClick={() => { setShowCompModal(false); router.refresh(); }}
-                  className="rounded px-3 py-1 text-sm font-medium text-slate-600 hover:bg-slate-100"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-            <div className="flex flex-1 overflow-hidden">
-              {/* Left: Map */}
-              {mapPins.length > 1 && (
-                <div className="shrink-0 border-r border-slate-200 p-3" style={{ width: 480 }}>
-                  <CompMap
-                    pins={mapPins}
-                    height={480}
-                    subjectLat={d.property.latitude}
-                    subjectLng={d.property.longitude}
-                    onPinClick={handleMapPinToggle}
-                  />
-                </div>
-              )}
-              {/* Right: Candidate list & search controls */}
-              <div className="flex-1 overflow-auto p-3">
-                <ComparableWorkspacePanel
-                  propertyId={d.propertyId}
-                  analysisId={d.analysisId}
-                  subjectListingRowId={d.compModalData.subjectListingRowId}
-                  subjectListingMlsNumber={d.compModalData.subjectListingMlsNumber}
-                  analysisStrategyType={d.analysis.strategyType}
-                  defaultProfileSlug={d.compModalData.defaultProfileSlug}
-                  latestRun={d.compModalData.latestRun}
-                  latestCandidates={d.compModalData.compCandidates as any}
-                  defaultProfileRules={profileRules}
-                  compRunMessage={null}
-                  compErrorMessage={null}
-                  subjectContext={d.subjectContext as any}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
+      {showCompModal && d.compModalData.latestRun && (
+        <ScreeningCompModal
+          compSearchRunId={d.compModalData.latestRun.id}
+          realPropertyId={d.propertyId}
+          onClose={() => { setShowCompModal(false); router.refresh(); }}
+        />
       )}
 
       {/* ================================================================== */}
       {/* AS-IS COMP SELECTION MODAL                                        */}
       {/* ================================================================== */}
-      {showAsIsCompModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="relative flex h-[90vh] w-[92vw] flex-col overflow-hidden rounded-xl border border-slate-300 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
-              <h2 className="text-sm font-semibold text-slate-800">As-Is Comparable Selection &mdash; {d.property.address}</h2>
-              <div className="flex items-center gap-3">
-                <p className="text-[10px] text-slate-400">
-                  Select comps that represent the property in its current condition &middot;
-                  <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 mx-0.5 align-middle" /> Selected
-                  <span className="inline-block h-2 w-2 rounded-full bg-slate-400 mx-0.5 align-middle" /> Candidate
-                  <span className="inline-block h-2 w-2 rounded-full bg-red-600 mx-0.5 align-middle" /> Subject
-                </p>
-                <button
-                  type="button"
-                  onClick={() => { setShowAsIsCompModal(false); router.refresh(); }}
-                  className="rounded px-3 py-1 text-sm font-medium text-slate-600 hover:bg-slate-100"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-            <div className="flex flex-1 overflow-hidden">
-              {/* Left: Map */}
-              {asIsMapPins.length > 1 && (
-                <div className="shrink-0 border-r border-slate-200 p-3" style={{ width: 480 }}>
-                  <CompMap
-                    pins={asIsMapPins}
-                    height={480}
-                    subjectLat={d.property.latitude}
-                    subjectLng={d.property.longitude}
-                    onPinClick={handleAsIsMapPinToggle}
-                  />
-                </div>
-              )}
-              {/* Right: Candidate list with As-Is checkboxes */}
-              <div className="flex-1 overflow-auto p-3">
-                {d.compModalData.compCandidates.length === 0 ? (
-                  <div className="flex h-full items-center justify-center text-sm text-slate-400">
-                    No candidates available. Run a comp search from the ARV Comparables panel first.
-                  </div>
-                ) : (
-                  <div className="overflow-auto rounded-lg border border-slate-200">
-                    <table className="w-full text-[11px]">
-                      <thead>
-                        <tr className="border-b border-slate-200 bg-slate-50 text-left text-[9px] uppercase tracking-[0.1em] text-slate-500 sticky top-0">
-                          <th className="px-2 py-1.5 text-center">As-Is</th>
-                          <th className="px-2 py-1.5 text-center">ARV</th>
-                          <th className="px-2 py-1.5">Address</th>
-                          <th className="px-2 py-1.5 text-right">Close</th>
-                          <th className="px-2 py-1.5 text-right">PSF</th>
-                          <th className="px-2 py-1.5 text-right">Sqft</th>
-                          <th className="px-2 py-1.5 text-right">Dist</th>
-                          <th className="px-2 py-1.5 text-right">Score</th>
-                          <th className="px-2 py-1.5 text-right">Date</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {d.compModalData.compCandidates.map((c) => {
-                          const m = (c.metrics_json ?? {}) as Record<string, unknown>;
-                          const isAsIs = Boolean(c.selected_as_is_yn);
-                          const isArv = Boolean(c.selected_yn);
-                          return (
-                            <tr
-                              key={String(c.id)}
-                              className={`border-b border-slate-100 hover:bg-slate-50 ${isAsIs ? "bg-emerald-50/50" : ""}`}
-                            >
-                              <td className="px-2 py-1 text-center">
-                                <input
-                                  type="checkbox"
-                                  checked={isAsIs}
-                                  onChange={async () => {
-                                    const fd = new FormData();
-                                    fd.set("candidate_id", String(c.id));
-                                    fd.set("property_id", d.propertyId);
-                                    fd.set("analysis_id", d.analysisId);
-                                    fd.set("next_selected", isAsIs ? "false" : "true");
-                                    await toggleAsIsComparableCandidateSelectionAction(fd);
-                                    router.refresh();
-                                  }}
-                                  className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                                />
-                              </td>
-                              <td className="px-2 py-1 text-center">
-                                <span className={`inline-block h-2 w-2 rounded-full ${isArv ? "bg-emerald-500" : "bg-slate-300"}`} />
-                              </td>
-                              <td className="px-2 py-1 font-medium text-slate-700">{String(m.address ?? "\u2014")}</td>
-                              <td className="px-2 py-1 text-right font-mono text-slate-700">{fmt(m.close_price as number | null)}</td>
-                              <td className="px-2 py-1 text-right font-mono text-slate-600">${fmtNum(m.ppsf as number | null)}</td>
-                              <td className="px-2 py-1 text-right text-slate-600">{fmtNum(m.building_area_total_sqft as number | null)}</td>
-                              <td className="px-2 py-1 text-right text-slate-600">{fmtNum(c.distance_miles as number | null, 2)} mi</td>
-                              <td className="px-2 py-1 text-right font-mono text-slate-500">{fmtNum(c.raw_score as number | null, 1)}</td>
-                              <td className="px-2 py-1 text-right text-slate-500">{m.close_date ? String(m.close_date).slice(0, 10) : "\u2014"}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
+      {showAsIsCompModal && d.compModalData.latestRun && (
+        <ScreeningCompModal
+          compSearchRunId={d.compModalData.latestRun.id}
+          realPropertyId={d.propertyId}
+          onClose={() => { setShowAsIsCompModal(false); router.refresh(); }}
+        />
+      )}
+      {showAsIsCompModal && !d.compModalData.latestRun && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="rounded-xl bg-white p-6 shadow-2xl">
+            <p className="text-sm text-slate-500">No comp search run available. Run a comp search first.</p>
+            <button type="button" onClick={() => setShowAsIsCompModal(false)} className="mt-3 rounded bg-slate-700 px-3 py-1 text-xs text-white">Close</button>
           </div>
         </div>
       )}

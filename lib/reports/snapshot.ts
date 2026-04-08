@@ -13,7 +13,7 @@ export function buildReportSnapshot(data: WorkstationData): ReportContentJson {
       const m = (c.metrics_json ?? {}) as Record<string, unknown>;
       return {
         address: String(m.address ?? "\u2014"),
-        closePrice: (m.close_price as number) ?? null,
+        closePrice: (m.net_price as number) ?? (m.close_price as number) ?? null,
         ppsf: (m.ppsf as number) ?? null,
         sqft: (m.building_area_total_sqft as number) ?? null,
         distance: (c.distance_miles as number) ?? null,

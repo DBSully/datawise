@@ -766,6 +766,7 @@ async function fetchCandidateListingsByPropertyIds(
         source_system,
         close_date,
         close_price,
+        concessions_amount,
         list_price,
         property_condition_source,
         listing_contract_date,
@@ -1293,7 +1294,9 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
           ? computeConditionMatchScore(subjectCondition, candidateCondition)
           : null;
 
-        const closePrice = toNumber(listing.close_price);
+        const grossClosePrice = toNumber(listing.close_price);
+        const concessions = toNumber(listing.concessions_amount) ?? 0;
+        const closePrice = grossClosePrice !== null ? grossClosePrice - concessions : null;
         const ppsf =
           closePrice !== null && candidateSqft !== null && candidateSqft > 0
             ? closePrice / candidateSqft
@@ -1411,7 +1414,9 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
             listing_id: listing.listing_id,
             address: property.unparsed_address,
             close_date: listing.close_date,
-            close_price: closePrice,
+            close_price: grossClosePrice,
+            concessions_amount: listing.concessions_amount,
+            net_price: closePrice,
             ppsf,
             building_area_total_sqft: candidateBuildingAreaTotalSqft,
             above_grade_finished_area_sqft: candidateAboveGradeFinishedSqft,

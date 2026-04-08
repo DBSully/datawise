@@ -590,7 +590,7 @@ export async function addManualCompAction(formData: FormData) {
   // Look up the listing by MLS number (listing_id)
   const { data: compListing, error: listingError } = await supabase
     .from("mls_listings")
-    .select("id, real_property_id, close_price, close_date, listing_id")
+    .select("id, real_property_id, close_price, concessions_amount, close_date, listing_id")
     .eq("listing_id", mlsNumber)
     .maybeSingle();
 
@@ -713,6 +713,8 @@ export async function addManualCompAction(formData: FormData) {
         source: "manual",
         listing_id: compListing.listing_id,
         close_price: compListing.close_price,
+        concessions_amount: compListing.concessions_amount,
+        net_price: (Number(compListing.close_price) || 0) - (Number(compListing.concessions_amount) || 0),
         close_date: compListing.close_date,
       },
       score_breakdown_json: { source: "manual" },

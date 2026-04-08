@@ -207,7 +207,7 @@ export function CompMap({
       let rows = "";
       if (t && !isSubject) {
         // Sale price row
-        if (t.closePrice != null) rows += `<tr><td style="color:#94a3b8;padding-right:8px">Sale</td><td style="font-weight:600">${$f(t.closePrice)}</td></tr>`;
+        if (t.closePrice != null) rows += `<tr><td style="color:#94a3b8;padding-right:8px">Net Sale</td><td style="font-weight:600">${$f(t.closePrice)}</td></tr>`;
         // Close date
         if (t.closeDate) rows += `<tr><td style="color:#94a3b8;padding-right:8px">Closed</td><td>${t.closeDate}</td></tr>`;
         // PSF

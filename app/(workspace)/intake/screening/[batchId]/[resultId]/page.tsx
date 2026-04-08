@@ -510,7 +510,7 @@ export default async function DealDetailPage({ params }: DealDetailPageProps) {
                     <tr key={c.id}>
                       <td className="font-mono text-xs">{String(m.listing_id ?? "—")}</td>
                       <td>{String(m.address ?? "—")}</td>
-                      <td className="text-right">{formatCurrency(m.close_price as number)}</td>
+                      <td className="text-right">{formatCurrency((m.net_price as number) ?? (m.close_price as number))}</td>
                       <td className="text-xs">{m.close_date ? new Date(String(m.close_date)).toLocaleDateString() : "—"}</td>
                       <td className="text-right">{formatNumber(c.distance_miles, 2)}</td>
                       <td className="text-right">{c.days_since_close ?? "—"}</td>

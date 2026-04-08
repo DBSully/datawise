@@ -790,7 +790,7 @@ export function ComparableWorkspacePanel({
         ) ?? "—";
 
       const closeDate = metricValue(metrics, "close_date", "closeDate");
-      const closePrice = metricValue(metrics, "close_price", "closePrice");
+      const closePrice = metricValue(metrics, "net_price", "close_price", "closePrice");
 
       const gla = metricValue(
         metrics,
