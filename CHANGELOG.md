@@ -1,3 +1,31 @@
+## 2026-04-08h — Live ARV Computation for All Comp Candidates
+
+### What changed
+
+Implied ARV per comp is now computed live every time the modal loads, rather than only reading from the stored `arv_detail_json` snapshot. This means manually added comps and expanded search results immediately show Implied ARV, Gap/sqft, and contribute to the live deal math recalculation — no rescreen needed.
+
+### How it works
+
+New `computeArvForCandidates` helper in the screening actions file:
+- Takes all processed candidates (after net price and subdivision backfill)
+- Builds `CompArvInput[]` from each candidate's `metrics_json`
+- Runs `calculateArv` from the ARV engine with the `DENVER_FLIP_V1` strategy profile
+- Returns per-comp `{ arv, weight }` map keyed by `comp_listing_row_id`
+
+Called in both data loaders:
+- `loadScreeningCompDataAction` (screening mode)
+- `loadCompDataByRunAction` (workstation mode)
+
+### Why this matters
+
+Previously, `arvByCompListingId` was built solely from `arv_detail_json` stored on the screening result at screening time. Comps added later (via manual MLS# entry or expanded search) had no entry in that JSON, so their Implied ARV column showed "—" and they couldn't contribute to the live ARV recalculation. Now the ARV engine processes every candidate on every load.
+
+### Files changed
+
+- `app/(workspace)/intake/screening/actions.ts` — added `computeArvForCandidates` helper, imports for `calculateArv`/`resolvePropertyTypeFamily`/`CompArvInput`/`PropertyTypeKey`; both data loaders now compute ARV live instead of reading stored JSON
+
+---
+
 ## 2026-04-08g — ScreeningCompModal Overhaul: Property Header, Net Price, Expanded Search, Unified Comp Workspace
 
 ### Summary

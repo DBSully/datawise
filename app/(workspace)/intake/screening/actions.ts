@@ -5,6 +5,9 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { runScreeningBatch, expandComparableSearch, type ExpandSearchOverrides } from "@/lib/screening/bulk-runner";
 import { DENVER_FLIP_V1 } from "@/lib/screening/strategy-profiles";
+import { calculateArv } from "@/lib/screening/arv-engine";
+import { resolvePropertyTypeFamily } from "@/lib/comparables/scoring";
+import type { CompArvInput, PropertyTypeKey } from "@/lib/screening/types";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -13,6 +16,60 @@ import { DENVER_FLIP_V1 } from "@/lib/screening/strategy-profiles";
 function textValue(formData: FormData, key: string): string {
   const value = formData.get(key);
   return typeof value === "string" ? value.trim() : "";
+}
+
+/** Compute per-comp implied ARV for all candidates using the ARV engine. */
+function computeArvForCandidates(
+  candidates: Array<{ comp_listing_row_id: string | null; metrics_json: Record<string, unknown> }>,
+  subjectBuildingSqft: number,
+  subjectAboveGradeSqft: number,
+  subjectPropertyType: string | null,
+): Record<string, { arv: number; weight: number }> {
+  const propertyType = resolvePropertyTypeFamily(subjectPropertyType) as PropertyTypeKey;
+  const comps: CompArvInput[] = [];
+
+  for (const c of candidates) {
+    const m = c.metrics_json;
+    const closePrice = Number(m.net_price) || Number(m.close_price) || 0;
+    const closeDateIso = m.close_date ? String(m.close_date) : null;
+    if (closePrice <= 0 || !closeDateIso || !c.comp_listing_row_id) continue;
+
+    comps.push({
+      compListingRowId: c.comp_listing_row_id,
+      compRealPropertyId: String(m.comp_real_property_id ?? ""),
+      listingId: String(m.listing_id ?? ""),
+      address: String(m.address ?? ""),
+      closePrice,
+      closeDateIso,
+      compBuildingSqft: Number(m.building_area_total_sqft) || Number(m.above_grade_finished_area_sqft) || 0,
+      compAboveGradeSqft: Number(m.above_grade_finished_area_sqft) || Number(m.building_area_total_sqft) || 0,
+      distanceMiles: Number(m.distance_miles) || 0,
+      yearBuilt: m.year_built != null ? Number(m.year_built) : null,
+      bedroomsTotal: m.bedrooms_total != null ? Number(m.bedrooms_total) : null,
+      bathroomsTotal: m.bathrooms_total != null ? Number(m.bathrooms_total) : null,
+      propertyType: m.property_type ? String(m.property_type) : null,
+      levelClass: m.level_class_standardized ? String(m.level_class_standardized) : null,
+      mlsStatus: m.mls_status ? String(m.mls_status) : null,
+    });
+  }
+
+  if (comps.length === 0) return {};
+
+  const result = calculateArv({
+    subjectBuildingSqft,
+    subjectAboveGradeSqft,
+    comps,
+    config: DENVER_FLIP_V1.arv,
+    propertyType,
+  });
+
+  if (!result) return {};
+
+  const map: Record<string, { arv: number; weight: number }> = {};
+  for (const d of result.perCompDetails) {
+    map[d.compListingRowId] = { arv: d.arvTimeAdjusted, weight: d.decayWeight };
+  }
+  return map;
 }
 
 // ---------------------------------------------------------------------------
@@ -391,19 +448,6 @@ export async function loadScreeningCompDataAction(
     closePrice: mls?.close_price ?? null,
   };
 
-  // Build per-comp implied ARV lookup from arv_detail_json
-  const arvByCompListingId: Record<string, { arv: number; weight: number }> = {};
-  if (Array.isArray(result.arv_detail_json)) {
-    for (const d of result.arv_detail_json as Array<{ compListingRowId?: string; arvTimeAdjusted?: number; decayWeight?: number }>) {
-      if (d.compListingRowId && d.arvTimeAdjusted != null) {
-        arvByCompListingId[d.compListingRowId] = {
-          arv: d.arvTimeAdjusted,
-          weight: d.decayWeight ?? 1,
-        };
-      }
-    }
-  }
-
   const base = {
     compSearchRunId: result.comp_search_run_id ?? null,
     realPropertyId: result.real_property_id,
@@ -416,7 +460,7 @@ export async function loadScreeningCompDataAction(
     estGapPerSqft: result.est_gap_per_sqft,
     ...dealFields,
     ...headerFields,
-    arvByCompListingId,
+    arvByCompListingId: {} as Record<string, { arv: number; weight: number }>,
   };
 
   if (!result.comp_search_run_id) {
@@ -450,29 +494,40 @@ export async function loadScreeningCompDataAction(
     }
   }
 
+  const processedCandidates = (candidates ?? []).map((c) => {
+    const m = (c.metrics_json ?? {}) as Record<string, unknown>;
+    // Always compute net_price from close_price - concessions
+    if (m.close_price != null && m.net_price == null) {
+      const concessions = c.comp_listing_row_id
+        ? concessionsMap.get(c.comp_listing_row_id) ?? 0
+        : 0;
+      m.net_price = (Number(m.close_price) || 0) - concessions;
+      m.concessions_amount = concessions;
+      const sqft = Number(m.building_area_total_sqft) || Number(m.size_basis_value) || 0;
+      if (sqft > 0) {
+        m.ppsf = Math.round(((m.net_price as number) / sqft) * 100) / 100;
+      }
+    }
+    if (m.subdivision_name == null && c.comp_listing_row_id) {
+      m.subdivision_name = subdivisionMap.get(c.comp_listing_row_id) ?? null;
+    }
+    return { ...c, metrics_json: m };
+  });
+
+  // Compute per-comp implied ARV live from all candidates (covers manual adds + expanded search)
+  const subjectBldg = Number(result.subject_building_sqft) || Number(result.subject_above_grade_sqft) || 0;
+  const subjectAbove = Number(result.subject_above_grade_sqft) || Number(result.subject_building_sqft) || 0;
+  const arvByCompListingId = computeArvForCandidates(
+    processedCandidates,
+    subjectBldg,
+    subjectAbove,
+    result.subject_property_type,
+  );
+
   return {
     ...base,
-    candidates: (candidates ?? []).map((c) => {
-      const m = (c.metrics_json ?? {}) as Record<string, unknown>;
-      // Always compute net_price from close_price - concessions
-      if (m.close_price != null && m.net_price == null) {
-        const concessions = c.comp_listing_row_id
-          ? concessionsMap.get(c.comp_listing_row_id) ?? 0
-          : 0;
-        m.net_price = (Number(m.close_price) || 0) - concessions;
-        m.concessions_amount = concessions;
-        // Recompute PPSF from net price
-        const sqft = Number(m.building_area_total_sqft) || Number(m.size_basis_value) || 0;
-        if (sqft > 0) {
-          m.ppsf = Math.round(((m.net_price as number) / sqft) * 100) / 100;
-        }
-      }
-      // Backfill subdivision_name from listing if missing
-      if (m.subdivision_name == null && c.comp_listing_row_id) {
-        m.subdivision_name = subdivisionMap.get(c.comp_listing_row_id) ?? null;
-      }
-      return { ...c, metrics_json: m };
-    }),
+    arvByCompListingId,
+    candidates: processedCandidates,
   };
 }
 
@@ -800,19 +855,6 @@ export async function loadCompDataByRunAction(
   const buildingSqft = phys?.building_area_total_sqft ?? phys?.above_grade_finished_area_sqft ?? null;
   const listPrice = mls?.list_price ?? null;
 
-  // Build per-comp implied ARV lookup
-  const arvByCompListingId: Record<string, { arv: number; weight: number }> = {};
-  if (sr?.arv_detail_json && Array.isArray(sr.arv_detail_json)) {
-    for (const d of sr.arv_detail_json as Array<{ compListingRowId?: string; arvTimeAdjusted?: number; decayWeight?: number }>) {
-      if (d.compListingRowId && d.arvTimeAdjusted != null) {
-        arvByCompListingId[d.compListingRowId] = {
-          arv: d.arvTimeAdjusted,
-          weight: d.decayWeight ?? 1,
-        };
-      }
-    }
-  }
-
   const base: Omit<ScreeningCompData, "candidates"> = {
     compSearchRunId,
     realPropertyId,
@@ -862,7 +904,7 @@ export async function loadCompDataByRunAction(
     closeDate: mls?.close_date ?? null,
     originalListPrice: mls?.original_list_price ?? null,
     closePrice: mls?.close_price ?? null,
-    arvByCompListingId,
+    arvByCompListingId: {} as Record<string, { arv: number; weight: number }>,
   };
 
   // Load candidates
@@ -892,26 +934,39 @@ export async function loadCompDataByRunAction(
     }
   }
 
+  const processedCandidates = (candidates ?? []).map((c) => {
+    const m = (c.metrics_json ?? {}) as Record<string, unknown>;
+    if (m.close_price != null && m.net_price == null) {
+      const concessions = c.comp_listing_row_id
+        ? concessionsMap.get(c.comp_listing_row_id) ?? 0
+        : 0;
+      m.net_price = (Number(m.close_price) || 0) - concessions;
+      m.concessions_amount = concessions;
+      const sqft = Number(m.building_area_total_sqft) || Number(m.size_basis_value) || 0;
+      if (sqft > 0) {
+        m.ppsf = Math.round(((m.net_price as number) / sqft) * 100) / 100;
+      }
+    }
+    if (m.subdivision_name == null && c.comp_listing_row_id) {
+      m.subdivision_name = subdivisionMap.get(c.comp_listing_row_id) ?? null;
+    }
+    return { ...c, metrics_json: m };
+  });
+
+  // Compute per-comp implied ARV live from all candidates
+  const subjectBldg = Number(buildingSqft) || Number(phys?.above_grade_finished_area_sqft) || 0;
+  const subjectAbove = Number(phys?.above_grade_finished_area_sqft) || Number(buildingSqft) || 0;
+  const arvByCompListingId = computeArvForCandidates(
+    processedCandidates,
+    subjectBldg,
+    subjectAbove,
+    phys?.property_type ?? null,
+  );
+
   return {
     ...base,
-    candidates: (candidates ?? []).map((c) => {
-      const m = (c.metrics_json ?? {}) as Record<string, unknown>;
-      if (m.close_price != null && m.net_price == null) {
-        const concessions = c.comp_listing_row_id
-          ? concessionsMap.get(c.comp_listing_row_id) ?? 0
-          : 0;
-        m.net_price = (Number(m.close_price) || 0) - concessions;
-        m.concessions_amount = concessions;
-        const sqft = Number(m.building_area_total_sqft) || Number(m.size_basis_value) || 0;
-        if (sqft > 0) {
-          m.ppsf = Math.round(((m.net_price as number) / sqft) * 100) / 100;
-        }
-      }
-      if (m.subdivision_name == null && c.comp_listing_row_id) {
-        m.subdivision_name = subdivisionMap.get(c.comp_listing_row_id) ?? null;
-      }
-      return { ...c, metrics_json: m };
-    }),
+    arvByCompListingId,
+    candidates: processedCandidates,
   };
 }
 
