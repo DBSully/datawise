@@ -106,6 +106,8 @@ type PoolListing = {
   list_price: number | null;
   close_price: number | null;
   close_date: string | null;
+  listing_contract_date: string | null;
+  purchase_contract_date: string | null;
   property_condition_source: string | null;
 };
 
@@ -133,6 +135,42 @@ type ScoredCandidate = {
   compArvInput: CompArvInput;
   candidateRow: Record<string, unknown>;
 };
+
+// ---------------------------------------------------------------------------
+// Reference date resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * For closed/pending subjects, the reference date should be the contract date
+ * so that only comps available at deal time are considered. For active listings
+ * or manual entries (no listing), use today.
+ */
+function resolveSubjectReferenceDate(
+  listing: PoolListing | null,
+  today: Date,
+): Date {
+  if (!listing) return today;
+
+  const status = (listing.mls_status ?? "").toLowerCase();
+  const isClosed = status === "closed";
+  const isPending = status === "pending";
+
+  if (isClosed || isPending) {
+    // Prefer purchase_contract_date (when the deal was struck),
+    // then listing_contract_date, then close_date
+    const dateStr =
+      listing.purchase_contract_date ??
+      listing.listing_contract_date ??
+      listing.close_date;
+
+    if (dateStr) {
+      const parsed = new Date(dateStr);
+      if (!isNaN(parsed.getTime())) return parsed;
+    }
+  }
+
+  return today;
+}
 
 // ---------------------------------------------------------------------------
 // Supabase helpers
@@ -259,7 +297,7 @@ async function loadCompPool(
     fetchAllRows<PoolListing>(
       supabase,
       "mls_listings",
-      "id, listing_id, real_property_id, mls_status, list_price, close_price, close_date, property_condition_source",
+      "id, listing_id, real_property_id, mls_status, list_price, close_price, close_date, listing_contract_date, purchase_contract_date, property_condition_source",
       (q: any) =>
         q
           .not("close_date", "is", null)
@@ -316,7 +354,7 @@ async function loadSubjects(
     const rows = await fetchAllRows<PoolListing>(
       supabase,
       "mls_listings",
-      "id, listing_id, real_property_id, mls_status, list_price, close_price, close_date, property_condition_source",
+      "id, listing_id, real_property_id, mls_status, list_price, close_price, close_date, listing_contract_date, purchase_contract_date, property_condition_source",
       (q: any) =>
         q
           .in("real_property_id", chunk)
@@ -952,7 +990,7 @@ export async function runScreeningBatch(
       .maybeSingle();
     const compProfileId = compProfile?.id ?? null;
 
-    const referenceDate = new Date();
+    const today = new Date();
     const trendSalesPool = buildTrendSalesPool(pool);
 
     const results: ScreeningResultRow[] = [];
@@ -965,6 +1003,11 @@ export async function runScreeningBatch(
     for (const propertyId of subjectPropertyIds) {
       const subject = subjects.get(propertyId);
       if (!subject) continue;
+
+      // For closed/pending subjects, use the contract date as the reference
+      // point so comps that closed after the subject are excluded.
+      // Priority: purchase_contract_date > listing_contract_date > close_date > today
+      const referenceDate = resolveSubjectReferenceDate(subject.listing, today);
 
       try {
         const { result, candidateRows } = screenSubject(subject, pool, profile, referenceDate, trendSalesPool);

@@ -1,3 +1,17 @@
+## 2026-04-08b — Reference Date Fix for Comparable Sales
+
+### Per-Subject Reference Date
+
+Fixed a critical issue where the screening engine used today's date as the reference point for all subjects, causing comps that closed *after* a subject's contract date to appear in results. Example: 2850 Kearney (closed 3/05/26) was returning comps from 3/17/26 and 3/26/26.
+
+- **`bulk-runner.ts`**: Added `resolveSubjectReferenceDate()` — derives a per-subject reference date instead of using a single `new Date()` for the entire batch
+- **Date priority**: `purchase_contract_date` → `listing_contract_date` → `close_date` → today
+- **Status rules**: Closed and Pending subjects use their contract/close date; Active, Coming Soon, Expired, Withdrawn, and manual entries (no listing) use today
+- **`PoolListing` type**: Added `listing_contract_date` and `purchase_contract_date` fields; both listing queries (comp pool and subject listings) now select them
+- The existing `if (daysSinceClose < 0) continue` filter in `scoreCompsForSubject` naturally excludes comps that closed after the resolved reference date
+
+---
+
 ## 2026-04-08 — Manual Intake, Off-Market Analysis, and Screening Fixes
 
 ### Manual Property Entry Redesign
