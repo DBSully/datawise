@@ -893,6 +893,7 @@ export function ComparableWorkspacePanel({
     aboveGradeFinishedSqft: subjectContext.aboveGradeFinishedAreaSqft ?? null,
     belowGradeTotalSqft: subjectContext.belowGradeTotalSqft ?? null,
     belowGradeFinishedSqft: subjectContext.belowGradeFinishedAreaSqft ?? null,
+    lotSizeSqft: subjectContext.lotSizeSqft ?? null,
     bedroomsTotal: subjectContext.bedroomsTotal ?? null,
     bathroomsTotal: subjectContext.bathroomsTotal ?? null,
     garageSpaces: subjectContext.garageSpaces ?? null,
@@ -994,29 +995,57 @@ export function ComparableWorkspacePanel({
         </button>
 
         {selectedCandidates.length > 0 ? (
-          <div className="dw-table-wrap">
-            <table className="dw-table-compact">
+          <div className="dw-table-wrap overflow-auto">
+            <table className="w-full text-[11px]">
               <thead>
-                <tr>
-                  <th>MLS#</th>
-                  <th>Address</th>
-                  <th>Dist</th>
-                  <th>Close</th>
-                  <th>Price</th>
-                  <th>PSF</th>
+                <tr className="bg-slate-50 text-[9px] uppercase tracking-wider text-slate-500">
+                  <th className="px-1 py-0.5 text-right">Dist</th>
+                  <th className="px-1 py-0.5 text-left" style={{ maxWidth: 140 }}>Address</th>
+                  <th className="px-1 py-0.5 text-left" style={{ maxWidth: 110 }}>Subdiv</th>
+                  <th className="px-1 py-0.5 text-right">Net Price</th>
+                  <th className="px-1 py-0.5 text-right">Gap</th>
+                  <th className="px-1 py-0.5 text-right">Days</th>
+                  <th className="px-1 py-0.5 text-left" style={{ maxWidth: 56 }}>Lvl</th>
+                  <th className="px-1 py-0.5 text-right">Year</th>
+                  <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Bd</th>
+                  <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Ba</th>
+                  <th className="px-1 py-0.5 text-right">Bldg SF</th>
+                  <th className="px-1 py-0.5 text-right" style={{ width: 34 }}>Score</th>
                 </tr>
               </thead>
               <tbody>
-                {selectedCandidates.map((candidate) => (
-                  <tr key={candidate.id}>
-                    <td>{candidate.listingId ?? "—"}</td>
-                    <td>{candidate.address}</td>
-                    <td>{formatNumber(candidate.distance_miles, 2)}</td>
-                    <td>{formatDate(candidate.closeDate)}</td>
-                    <td>{formatCurrency(candidate.closePrice)}</td>
-                    <td>{formatCurrency(candidate.ppsf)}</td>
-                  </tr>
-                ))}
+                {selectedCandidates.map((candidate) => {
+                  const m = candidate.metrics_json ?? {};
+                  const netPrice = parseNumericLike(m.net_price) ?? parseNumericLike(m.close_price) ?? null;
+                  const subSqft = subjectContext.buildingAreaTotalSqft ?? subjectContext.aboveGradeFinishedAreaSqft ?? 0;
+                  const subList = subjectContext.listPrice ?? 0;
+                  const gapPerSqft = netPrice != null && subSqft > 0 && subList > 0
+                    ? Math.round((netPrice - subList) / subSqft) : null;
+                  const gapClass = gapPerSqft != null && gapPerSqft >= 60 ? "text-emerald-600 font-semibold"
+                    : gapPerSqft != null && gapPerSqft < 30 ? "text-red-600 font-semibold" : "text-slate-700";
+                  const distClass = candidate.distance_miles != null && candidate.distance_miles <= 0.2 ? "text-emerald-600 font-semibold"
+                    : candidate.distance_miles != null && candidate.distance_miles >= 0.6 ? "text-red-600 font-semibold" : "text-slate-700";
+                  const days = candidate.days_since_close;
+                  const daysClass = days != null && days > 180 ? "text-red-600"
+                    : days != null && days < 60 ? "text-emerald-600" : "text-slate-700";
+
+                  return (
+                    <tr key={candidate.id} className="border-t border-slate-100 bg-emerald-50/60">
+                      <td className={`px-1 py-0.5 text-right ${distClass}`}>{formatNumber(candidate.distance_miles, 2)}</td>
+                      <td className="max-w-[140px] truncate px-1 py-0.5 font-semibold text-slate-900" title={candidate.address}>{candidate.address}</td>
+                      <td className="max-w-[110px] truncate px-1 py-0.5 text-slate-700" title={String(m.subdivision_name ?? "")}>{String(m.subdivision_name ?? "—")}</td>
+                      <td className="px-1 py-0.5 text-right text-slate-700">{formatCurrency(netPrice)}</td>
+                      <td className={`px-1 py-0.5 text-right ${gapClass}`}>{gapPerSqft != null ? `$${formatNumber(gapPerSqft)}` : "—"}</td>
+                      <td className={`px-1 py-0.5 text-right font-semibold ${daysClass}`}>{days ?? "—"}</td>
+                      <td className="max-w-[56px] truncate px-1 py-0.5 text-slate-700">{String(m.level_class_standardized ?? "—")}</td>
+                      <td className="px-1 py-0.5 text-right text-slate-700">{m.year_built != null ? String(m.year_built) : "—"}</td>
+                      <td className="px-1 py-0.5 text-right text-slate-700">{m.bedrooms_total != null ? formatNumber(m.bedrooms_total as number) : "—"}</td>
+                      <td className="px-1 py-0.5 text-right text-slate-700">{m.bathrooms_total != null ? formatNumber(m.bathrooms_total as number) : "—"}</td>
+                      <td className="px-1 py-0.5 text-right text-slate-700">{formatNumber(m.building_area_total_sqft as number | null)}</td>
+                      <td className="px-1 py-0.5 text-right font-semibold text-slate-900">{formatNumber(candidate.raw_score, 1)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

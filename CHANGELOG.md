@@ -1,3 +1,50 @@
+## 2026-04-08k — Unified Comp Tables Across Workstations
+
+### What changed
+
+Aligned all comparable sales tables in the Analysis Workstation (properties + deals/watchlist) to match the ScreeningCompModal's column set, formatting, conditional coloring, and sort behavior.
+
+#### Columns (matching ScreeningCompModal exactly)
+
+Dist | Address | Subdiv | Net Price | Imp ARV | Gap | Days | Lvl | Year | Bd | Ba | Gar | Bldg SF | Bsmt | BsFin | Lot | Score
+
+- **Imp ARV** — per-comp implied ARV computed live by the ARV engine for ALL candidates on every load (not just selected comps)
+- **Gap** — per-comp gap/sqft with conditional color (green ≥$60, red <$30)
+- **Dist** — conditional color (green ≤0.2mi, red ≥0.6mi)
+- **Days** — conditional color (green <60, red >180)
+- **Gar** — garage spaces column added after Ba
+- **Subdiv** — subdivision name, backfilled from mls_listings for existing data
+
+#### Subject property row
+
+Sticky red-highlighted subject row at the top of each table (ARV Comparables + As-Is Comparables) with full property data, matching the ScreeningCompModal layout.
+
+#### Sorting & filtering (ComparableCandidateTable)
+
+- Sortable columns: Imp ARV, Gap, Days, Bldg SF (default Gap descending)
+- Show Selected Only toggle
+- "Why" score breakdown expansion preserved
+
+#### Data pipeline changes
+
+- **`lib/comparables/engine.ts`** — now stores `subdivision_name` in metrics_json for new comp searches
+- **`lib/analysis/load-workstation-data.ts`** — backfills `subdivision_name`, `net_price`, and `concessions_amount` from mls_listings for existing candidates; loads `subdivision_name` for the subject listing; computes per-candidate implied ARV via `calculateArv` for all candidates and exposes `arvByCompListingId` on workstation data
+- **`lib/reports/types.ts`** — added `subdivisionName` to listing type, `arvByCompListingId` to compModalData type
+- **MLS copy buttons** (ScreeningCompModal) — Copy Selected and Copy All now output subject MLS# first, then comps sorted by Imp ARV descending
+
+### Files changed
+
+- `components/screening/screening-comp-modal.tsx` — MLS copy ordering
+- `components/properties/comparable-candidate-table.tsx` — complete rewrite matching modal columns, sort, conditional formatting
+- `components/properties/comparable-workspace-panel.tsx` — selected comp summary table updated, `lotSizeSqft` added to subject summary
+- `app/(workspace)/analysis/properties/[id]/analyses/[analysisId]/analysis-workstation.tsx` — inline ARV + As-Is comp tables rewritten with full column set, subject row, Imp ARV, Gar
+- `app/(workspace)/deals/watchlist/[analysisId]/analysis-workstation.tsx` — same changes as above
+- `lib/analysis/load-workstation-data.ts` — subdivision backfill, per-candidate ARV computation, subject subdivision
+- `lib/comparables/engine.ts` — subdivision_name in query + metrics_json
+- `lib/reports/types.ts` — type additions
+
+---
+
 ## 2026-04-08j — Analysis Completion Timestamps & Daily Activity Log
 
 ### What changed

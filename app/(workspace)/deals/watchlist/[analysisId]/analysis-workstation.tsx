@@ -548,23 +548,47 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
     [d.propertyId, d.analysisId, router],
   );
 
+  const _subjSqft = d.physical?.buildingSqft ?? 0;
+  const _subjListPrice = d.listing?.listPrice ?? 0;
+
+  const _arvMap = d.compModalData.arvByCompListingId;
+
   // Build selected comps list for the table
   const selectedComps = useMemo(() => {
     return d.compModalData.compCandidates
       .filter((c) => Boolean(c.selected_yn))
       .map((c) => {
         const m = (c.metrics_json ?? {}) as Record<string, unknown>;
+        const netPrice = (m.net_price as number) ?? (m.close_price as number) ?? null;
+        const gapPerSqft = netPrice != null && _subjSqft > 0 && _subjListPrice > 0
+          ? Math.round((netPrice - _subjListPrice) / _subjSqft) : null;
+        const arvDetail = c.comp_listing_row_id ? _arvMap[c.comp_listing_row_id as string] ?? null : null;
         return {
           id: String(c.id),
           address: String(m.address ?? "\u2014"),
+          netPrice,
           closePrice: (m.net_price as number) ?? (m.close_price as number) ?? null,
           ppsf: m.ppsf as number | null,
           sqft: m.building_area_total_sqft as number | null,
           distance: c.distance_miles as number | null,
+          days: c.days_since_close as number | null,
           closeDate: m.close_date ? String(m.close_date).slice(0, 10) : null,
+          subdivision: String(m.subdivision_name ?? ""),
+          levelClass: String(m.level_class_standardized ?? ""),
+          yearBuilt: m.year_built as number | null,
+          beds: m.bedrooms_total as number | null,
+          baths: m.bathrooms_total as number | null,
+          garageSpaces: m.garage_spaces as number | null,
+          bldgSf: m.building_area_total_sqft as number | null,
+          bsmt: m.below_grade_total_sqft as number | null,
+          bsFin: m.below_grade_finished_area_sqft as number | null,
+          lot: m.lot_size_sqft as number | null,
+          score: c.raw_score as number | null,
+          gapPerSqft,
+          impliedArv: arvDetail?.arv ?? null,
         };
       });
-  }, [d]);
+  }, [d, _subjSqft, _subjListPrice, _arvMap]);
 
   // Build selected As-Is comps list — same candidate pool, different selection flag
   const selectedAsIsComps = useMemo(() => {
@@ -572,17 +596,36 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
       .filter((c) => Boolean(c.selected_as_is_yn))
       .map((c) => {
         const m = (c.metrics_json ?? {}) as Record<string, unknown>;
+        const netPrice = (m.net_price as number) ?? (m.close_price as number) ?? null;
+        const gapPerSqft = netPrice != null && _subjSqft > 0 && _subjListPrice > 0
+          ? Math.round((netPrice - _subjListPrice) / _subjSqft) : null;
+        const arvDetail = c.comp_listing_row_id ? _arvMap[c.comp_listing_row_id as string] ?? null : null;
         return {
           id: String(c.id),
           address: String(m.address ?? "\u2014"),
+          netPrice,
           closePrice: (m.net_price as number) ?? (m.close_price as number) ?? null,
           ppsf: m.ppsf as number | null,
           sqft: m.building_area_total_sqft as number | null,
           distance: c.distance_miles as number | null,
+          days: c.days_since_close as number | null,
           closeDate: m.close_date ? String(m.close_date).slice(0, 10) : null,
+          subdivision: String(m.subdivision_name ?? ""),
+          levelClass: String(m.level_class_standardized ?? ""),
+          yearBuilt: m.year_built as number | null,
+          beds: m.bedrooms_total as number | null,
+          baths: m.bathrooms_total as number | null,
+          garageSpaces: m.garage_spaces as number | null,
+          bldgSf: m.building_area_total_sqft as number | null,
+          bsmt: m.below_grade_total_sqft as number | null,
+          bsFin: m.below_grade_finished_area_sqft as number | null,
+          lot: m.lot_size_sqft as number | null,
+          score: c.raw_score as number | null,
+          gapPerSqft,
+          impliedArv: arvDetail?.arv ?? null,
         };
       });
-  }, [d]);
+  }, [d, _subjSqft, _subjListPrice, _arvMap]);
 
   // MLS number clipboard helpers
   const allMlsText = useMemo(() => {
@@ -1295,26 +1338,72 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                   <div className="overflow-auto rounded-lg border border-slate-200 max-h-[250px]">
                     <table className="w-full text-[11px]">
                       <thead>
-                        <tr className="border-b border-slate-200 bg-slate-50 text-left text-[9px] uppercase tracking-[0.1em] text-slate-500 sticky top-0">
-                          <th className="px-2 py-1">Address</th>
-                          <th className="px-2 py-1 text-right">Close</th>
-                          <th className="px-2 py-1 text-right">PSF</th>
-                          <th className="px-2 py-1 text-right">Sqft</th>
-                          <th className="px-2 py-1 text-right">Dist</th>
-                          <th className="px-2 py-1 text-right">Date</th>
+                        <tr className="sticky top-0 z-10 bg-slate-50 text-[9px] uppercase tracking-wider text-slate-500" style={{ height: 22 }}>
+                          <th className="px-1 py-0.5 text-right">Dist</th>
+                          <th className="px-1 py-0.5 text-left" style={{ maxWidth: 140 }}>Address</th>
+                          <th className="px-1 py-0.5 text-left" style={{ maxWidth: 100 }}>Subdiv</th>
+                          <th className="px-1 py-0.5 text-right">Net Price</th>
+                          <th className="px-1 py-0.5 text-right">Imp ARV</th>
+                          <th className="px-1 py-0.5 text-right">Gap</th>
+                          <th className="px-1 py-0.5 text-right">Days</th>
+                          <th className="px-1 py-0.5 text-left" style={{ maxWidth: 56 }}>Lvl</th>
+                          <th className="px-1 py-0.5 text-right">Year</th>
+                          <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Bd</th>
+                          <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Ba</th>
+                          <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Gar</th>
+                          <th className="px-1 py-0.5 text-right">Bldg SF</th>
+                          <th className="px-1 py-0.5 text-right">Bsmt</th>
+                          <th className="px-1 py-0.5 text-right">BsFin</th>
+                          <th className="px-1 py-0.5 text-right">Lot</th>
+                          <th className="px-1 py-0.5 text-right" style={{ width: 34 }}>Score</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {selectedComps.map((c) => (
-                          <tr key={c.id} className="border-b border-slate-100 hover:bg-slate-50">
-                            <td className="px-2 py-1 font-medium text-slate-700">{c.address}</td>
-                            <td className="px-2 py-1 text-right font-mono text-slate-700">{fmt(c.closePrice)}</td>
-                            <td className="px-2 py-1 text-right font-mono text-slate-600">${fmtNum(c.ppsf)}</td>
-                            <td className="px-2 py-1 text-right text-slate-600">{fmtNum(c.sqft)}</td>
-                            <td className="px-2 py-1 text-right text-slate-600">{fmtNum(c.distance, 2)} mi</td>
-                            <td className="px-2 py-1 text-right text-slate-500">{c.closeDate ?? "\u2014"}</td>
-                          </tr>
-                        ))}
+                        <tr className="sticky z-20 border-b border-red-200 bg-red-50 font-semibold text-slate-900" style={{ top: 22 }}>
+                          <td className="px-1 py-0.5 text-right">—</td>
+                          <td className="max-w-[140px] truncate px-1 py-0.5" title={d.property.address}>{d.property.address}</td>
+                          <td className="max-w-[100px] truncate px-1 py-0.5" title={d.listing?.subdivisionName ?? ""}>{d.listing?.subdivisionName ?? "—"}</td>
+                          <td className="px-1 py-0.5 text-right">{fmt(d.listing?.listPrice)}</td>
+                          <td className="px-1 py-0.5 text-right">—</td>
+                          <td className="px-1 py-0.5 text-right">{d.dealMath?.estGapPerSqft != null ? `$${fmtNum(d.dealMath.estGapPerSqft)}` : "—"}</td>
+                          <td className="px-1 py-0.5 text-right">—</td>
+                          <td className="max-w-[56px] truncate px-1 py-0.5">{p?.levelClass ?? "—"}</td>
+                          <td className="px-1 py-0.5 text-right">{p?.yearBuilt != null ? String(p.yearBuilt) : "—"}</td>
+                          <td className="px-1 py-0.5 text-right">{p?.bedroomsTotal ?? "—"}</td>
+                          <td className="px-1 py-0.5 text-right">{p?.bathroomsTotal != null ? fmtNum(p.bathroomsTotal) : "—"}</td>
+                          <td className="px-1 py-0.5 text-right">{p?.garageSpaces != null ? fmtNum(p.garageSpaces) : "—"}</td>
+                          <td className="px-1 py-0.5 text-right">{fmtNum(p?.buildingSqft)}</td>
+                          <td className="px-1 py-0.5 text-right">{fmtNum(p?.belowGradeTotalSqft)}</td>
+                          <td className="px-1 py-0.5 text-right">{fmtNum(p?.belowGradeFinishedSqft)}</td>
+                          <td className="px-1 py-0.5 text-right">{fmtNum(p?.lotSizeSqft)}</td>
+                          <td className="px-1 py-0.5 text-right">—</td>
+                        </tr>
+                        {selectedComps.map((c) => {
+                          const distClass = c.distance != null && c.distance <= 0.2 ? "text-emerald-600 font-semibold" : c.distance != null && c.distance >= 0.6 ? "text-red-600 font-semibold" : "text-slate-700";
+                          const gapClass = c.gapPerSqft != null && c.gapPerSqft >= 60 ? "text-emerald-600 font-semibold" : c.gapPerSqft != null && c.gapPerSqft < 30 ? "text-red-600 font-semibold" : "text-slate-700";
+                          const daysClass = c.days != null && c.days > 180 ? "text-red-600" : c.days != null && c.days < 60 ? "text-emerald-600" : "text-slate-700";
+                          return (
+                            <tr key={c.id} className="border-t border-slate-100 bg-emerald-50/60">
+                              <td className={`px-1 py-0.5 text-right ${distClass}`}>{fmtNum(c.distance, 2)}</td>
+                              <td className="max-w-[140px] truncate px-1 py-0.5 font-semibold text-slate-900" title={c.address}>{c.address}</td>
+                              <td className="max-w-[100px] truncate px-1 py-0.5 text-slate-700" title={c.subdivision}>{c.subdivision || "\u2014"}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{fmt(c.netPrice)}</td>
+                              <td className="px-1 py-0.5 text-right font-semibold text-slate-900">{c.impliedArv != null ? fmt(c.impliedArv) : "\u2014"}</td>
+                              <td className={`px-1 py-0.5 text-right ${gapClass}`}>{c.gapPerSqft != null ? `$${fmtNum(c.gapPerSqft)}` : "\u2014"}</td>
+                              <td className={`px-1 py-0.5 text-right font-semibold ${daysClass}`}>{c.days ?? "\u2014"}</td>
+                              <td className="max-w-[56px] truncate px-1 py-0.5 text-slate-700">{c.levelClass || "\u2014"}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{c.yearBuilt != null ? String(c.yearBuilt) : "\u2014"}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{c.beds != null ? fmtNum(c.beds) : "\u2014"}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{c.baths != null ? fmtNum(c.baths) : "\u2014"}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{c.garageSpaces != null ? fmtNum(c.garageSpaces) : "\u2014"}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(c.bldgSf)}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(c.bsmt)}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(c.bsFin)}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(c.lot)}</td>
+                              <td className="px-1 py-0.5 text-right font-semibold text-slate-900">{fmtNum(c.score, 1)}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1377,26 +1466,71 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                   <div className="overflow-auto rounded-lg border border-slate-200 max-h-[250px]">
                     <table className="w-full text-[11px]">
                       <thead>
-                        <tr className="border-b border-slate-200 bg-slate-50 text-left text-[9px] uppercase tracking-[0.1em] text-slate-500 sticky top-0">
-                          <th className="px-2 py-1">Address</th>
-                          <th className="px-2 py-1 text-right">Close</th>
-                          <th className="px-2 py-1 text-right">PSF</th>
-                          <th className="px-2 py-1 text-right">Sqft</th>
-                          <th className="px-2 py-1 text-right">Dist</th>
-                          <th className="px-2 py-1 text-right">Date</th>
+                        <tr className="sticky top-0 z-10 bg-slate-50 text-[9px] uppercase tracking-wider text-slate-500" style={{ height: 22 }}>
+                          <th className="px-1 py-0.5 text-right">Dist</th>
+                          <th className="px-1 py-0.5 text-left" style={{ maxWidth: 140 }}>Address</th>
+                          <th className="px-1 py-0.5 text-left" style={{ maxWidth: 100 }}>Subdiv</th>
+                          <th className="px-1 py-0.5 text-right">Net Price</th>
+                          <th className="px-1 py-0.5 text-right">Imp ARV</th>
+                          <th className="px-1 py-0.5 text-right">Gap</th>
+                          <th className="px-1 py-0.5 text-right">Days</th>
+                          <th className="px-1 py-0.5 text-left" style={{ maxWidth: 56 }}>Lvl</th>
+                          <th className="px-1 py-0.5 text-right">Year</th>
+                          <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Bd</th>
+                          <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Ba</th>
+                          <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Gar</th>
+                          <th className="px-1 py-0.5 text-right">Bldg SF</th>
+                          <th className="px-1 py-0.5 text-right">Bsmt</th>
+                          <th className="px-1 py-0.5 text-right">BsFin</th>
+                          <th className="px-1 py-0.5 text-right">Lot</th>
+                          <th className="px-1 py-0.5 text-right" style={{ width: 34 }}>Score</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {selectedAsIsComps.map((c) => (
-                          <tr key={c.id} className="border-b border-slate-100 hover:bg-slate-50">
-                            <td className="px-2 py-1 font-medium text-slate-700">{c.address}</td>
-                            <td className="px-2 py-1 text-right font-mono text-slate-700">{fmt(c.closePrice)}</td>
-                            <td className="px-2 py-1 text-right font-mono text-slate-600">${fmtNum(c.ppsf)}</td>
-                            <td className="px-2 py-1 text-right text-slate-600">{fmtNum(c.sqft)}</td>
-                            <td className="px-2 py-1 text-right text-slate-600">{fmtNum(c.distance, 2)} mi</td>
-                            <td className="px-2 py-1 text-right text-slate-500">{c.closeDate ?? "\u2014"}</td>
-                          </tr>
-                        ))}
+                        <tr className="sticky z-20 border-b border-red-200 bg-red-50 font-semibold text-slate-900" style={{ top: 22 }}>
+                          <td className="px-1 py-0.5 text-right">—</td>
+                          <td className="max-w-[140px] truncate px-1 py-0.5" title={d.property.address}>{d.property.address}</td>
+                          <td className="max-w-[100px] truncate px-1 py-0.5" title={d.listing?.subdivisionName ?? ""}>{d.listing?.subdivisionName ?? "—"}</td>
+                          <td className="px-1 py-0.5 text-right">{fmt(d.listing?.listPrice)}</td>
+                          <td className="px-1 py-0.5 text-right">—</td>
+                          <td className="px-1 py-0.5 text-right">—</td>
+                          <td className="max-w-[56px] truncate px-1 py-0.5">{p?.levelClass ?? "—"}</td>
+                          <td className="px-1 py-0.5 text-right">{p?.yearBuilt != null ? String(p.yearBuilt) : "—"}</td>
+                          <td className="px-1 py-0.5 text-right">{p?.bedroomsTotal ?? "—"}</td>
+                          <td className="px-1 py-0.5 text-right">{p?.bathroomsTotal != null ? fmtNum(p.bathroomsTotal) : "—"}</td>
+                          <td className="px-1 py-0.5 text-right">{p?.garageSpaces != null ? fmtNum(p.garageSpaces) : "—"}</td>
+                          <td className="px-1 py-0.5 text-right">{fmtNum(p?.buildingSqft)}</td>
+                          <td className="px-1 py-0.5 text-right">{fmtNum(p?.belowGradeTotalSqft)}</td>
+                          <td className="px-1 py-0.5 text-right">{fmtNum(p?.belowGradeFinishedSqft)}</td>
+                          <td className="px-1 py-0.5 text-right">{fmtNum(p?.lotSizeSqft)}</td>
+                          <td className="px-1 py-0.5 text-right">—</td>
+                        </tr>
+                        {selectedAsIsComps.map((c) => {
+                          const distClass = c.distance != null && c.distance <= 0.2 ? "text-emerald-600 font-semibold" : c.distance != null && c.distance >= 0.6 ? "text-red-600 font-semibold" : "text-slate-700";
+                          const gapClass = c.gapPerSqft != null && c.gapPerSqft >= 60 ? "text-emerald-600 font-semibold" : c.gapPerSqft != null && c.gapPerSqft < 30 ? "text-red-600 font-semibold" : "text-slate-700";
+                          const daysClass = c.days != null && c.days > 180 ? "text-red-600" : c.days != null && c.days < 60 ? "text-emerald-600" : "text-slate-700";
+                          return (
+                            <tr key={c.id} className="border-t border-slate-100 bg-emerald-50/60">
+                              <td className={`px-1 py-0.5 text-right ${distClass}`}>{fmtNum(c.distance, 2)}</td>
+                              <td className="max-w-[140px] truncate px-1 py-0.5 font-semibold text-slate-900" title={c.address}>{c.address}</td>
+                              <td className="max-w-[100px] truncate px-1 py-0.5 text-slate-700" title={c.subdivision}>{c.subdivision || "\u2014"}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{fmt(c.netPrice)}</td>
+                              <td className="px-1 py-0.5 text-right font-semibold text-slate-900">{c.impliedArv != null ? fmt(c.impliedArv) : "\u2014"}</td>
+                              <td className={`px-1 py-0.5 text-right ${gapClass}`}>{c.gapPerSqft != null ? `$${fmtNum(c.gapPerSqft)}` : "\u2014"}</td>
+                              <td className={`px-1 py-0.5 text-right font-semibold ${daysClass}`}>{c.days ?? "\u2014"}</td>
+                              <td className="max-w-[56px] truncate px-1 py-0.5 text-slate-700">{c.levelClass || "\u2014"}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{c.yearBuilt != null ? String(c.yearBuilt) : "\u2014"}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{c.beds != null ? fmtNum(c.beds) : "\u2014"}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{c.baths != null ? fmtNum(c.baths) : "\u2014"}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{c.garageSpaces != null ? fmtNum(c.garageSpaces) : "\u2014"}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(c.bldgSf)}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(c.bsmt)}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(c.bsFin)}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(c.lot)}</td>
+                              <td className="px-1 py-0.5 text-right font-semibold text-slate-900">{fmtNum(c.score, 1)}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

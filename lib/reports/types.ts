@@ -190,6 +190,7 @@ export type WorkstationData = {
     listPrice: number;
     originalListPrice: number;
     listingContractDate: string | null;
+    subdivisionName: string | null;
   } | null;
   financials: { annualTax: number; annualHoa: number } | null;
   arv: {
@@ -264,6 +265,7 @@ export type WorkstationData = {
       summary_json: Record<string, unknown> | null;
     } | null;
     compCandidates: Array<Record<string, unknown>>;
+    arvByCompListingId: Record<string, { arv: number; weight: number }>;
   };
   asIsCompSummary: {
     totalComps: number;

@@ -570,16 +570,26 @@ export function ScreeningCompModal({
               </span>
               <CopyMlsButton
                 label="Copy Selected"
-                mlsNumbers={data.candidates
-                  .filter((c) => c.selected_yn)
-                  .map((c) => String(c.metrics_json.listing_id ?? ""))
-                  .filter(Boolean)}
+                mlsNumbers={[
+                  ...(data.mlsNumber ? [data.mlsNumber] : []),
+                  ...data.candidates
+                    .filter((c) => c.selected_yn)
+                    .map((c) => ({ mls: String(c.metrics_json.listing_id ?? ""), arv: (c.comp_listing_row_id ? data.arvByCompListingId[c.comp_listing_row_id]?.arv : null) ?? 0 }))
+                    .filter((x) => x.mls)
+                    .sort((a, b) => b.arv - a.arv)
+                    .map((x) => x.mls),
+                ]}
               />
               <CopyMlsButton
                 label="Copy All"
-                mlsNumbers={data.candidates
-                  .map((c) => String(c.metrics_json.listing_id ?? ""))
-                  .filter(Boolean)}
+                mlsNumbers={[
+                  ...(data.mlsNumber ? [data.mlsNumber] : []),
+                  ...data.candidates
+                    .map((c) => ({ mls: String(c.metrics_json.listing_id ?? ""), arv: (c.comp_listing_row_id ? data.arvByCompListingId[c.comp_listing_row_id]?.arv : null) ?? 0 }))
+                    .filter((x) => x.mls)
+                    .sort((a, b) => b.arv - a.arv)
+                    .map((x) => x.mls),
+                ]}
               />
             </div>
           </div>

@@ -770,7 +770,8 @@ async function fetchCandidateListingsByPropertyIds(
         list_price,
         property_condition_source,
         listing_contract_date,
-        mls_status
+        mls_status,
+        subdivision_name
       `,
       )
       .eq("source_system", sourceSystem)
@@ -1444,6 +1445,7 @@ export async function runComparableSearch(input: RunComparableSearchInput) {
             latitude: property.latitude,
             longitude: property.longitude,
             property_condition_source: candidateCondition,
+            subdivision_name: listing.subdivision_name ?? null,
             distance_miles: roundNumber(distanceMiles),
             days_since_close: toIntegerOrNull(daysSinceClose),
             sqft_delta_pct:

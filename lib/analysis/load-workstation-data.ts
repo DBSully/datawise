@@ -127,7 +127,7 @@ export async function loadWorkstationData(
   if (!property || !analysis) return null;
 
   // Load listing
-  const listingSelect = "id, listing_id, mls_status, list_price, close_price, concessions_amount, listing_contract_date, property_condition_source, source_system, original_list_price";
+  const listingSelect = "id, listing_id, mls_status, list_price, close_price, concessions_amount, listing_contract_date, property_condition_source, source_system, original_list_price, subdivision_name";
   let listing: Record<string, unknown> | null = null;
 
   if (analysis.listing_id) {
@@ -184,12 +184,14 @@ export async function loadWorkstationData(
         new Set(rawCandidates.map((c: any) => c.comp_listing_row_id).filter(Boolean)),
       );
       let listingIdMap = new Map<string, string>();
+      let listingExtraMap = new Map<string, { subdivision_name: string | null; concessions_amount: number | null }>();
       if (compListingIds.length > 0) {
         const { data: compListings } = await supabase
           .from("mls_listings")
-          .select("id, listing_id")
+          .select("id, listing_id, subdivision_name, concessions_amount")
           .in("id", compListingIds.slice(0, 200));
         listingIdMap = new Map((compListings ?? []).map((r: any) => [r.id, r.listing_id]));
+        listingExtraMap = new Map((compListings ?? []).map((r: any) => [r.id, { subdivision_name: r.subdivision_name, concessions_amount: r.concessions_amount }]));
       }
 
       // Resolve lat/lng from real_properties for map pins
@@ -207,7 +209,13 @@ export async function loadWorkstationData(
 
       compCandidates = rawCandidates.map((c: any) => {
         const coords = c.comp_real_property_id ? coordsMap.get(c.comp_real_property_id) : null;
+        const extra = c.comp_listing_row_id ? listingExtraMap.get(c.comp_listing_row_id) : null;
         const metrics = (c.metrics_json ?? {}) as Record<string, unknown>;
+        // Backfill subdivision_name and net_price from source if missing
+        const subdivName = metrics.subdivision_name ?? extra?.subdivision_name ?? null;
+        const concessions = Number(metrics.concessions_amount) || Number(extra?.concessions_amount) || 0;
+        const grossPrice = Number(metrics.close_price) || 0;
+        const netPrice = metrics.net_price ?? (grossPrice > 0 ? grossPrice - concessions : null);
         return {
           ...c,
           listing_id: c.comp_listing_row_id ? listingIdMap.get(c.comp_listing_row_id) ?? null : null,
@@ -215,6 +223,9 @@ export async function loadWorkstationData(
             ...metrics,
             latitude: metrics.latitude ?? coords?.latitude ?? null,
             longitude: metrics.longitude ?? coords?.longitude ?? null,
+            subdivision_name: subdivName,
+            net_price: netPrice,
+            concessions_amount: concessions || metrics.concessions_amount,
           },
         };
       });
@@ -334,6 +345,52 @@ export async function loadWorkstationData(
   }
 
   const selectedArv = selectedArvResult?.arvAggregate ?? null;
+
+  // Per-candidate implied ARV (for all candidates, not just selected)
+  const arvByCompListingId: Record<string, { arv: number; weight: number }> = {};
+  if (compCandidates.length > 0 && buildingSqft > 0) {
+    const allCompInputs = compCandidates
+      .filter((c: any) => c.comp_listing_row_id)
+      .map((c: any) => {
+        const m = (c.metrics_json ?? {}) as Record<string, unknown>;
+        const cp = toNum(m.net_price) || (toNum(m.close_price) - toNum(m.concessions_amount));
+        const cd = m.close_date ? String(m.close_date) : null;
+        if (cp <= 0 || !cd) return null;
+        return {
+          compListingRowId: String(c.comp_listing_row_id),
+          compRealPropertyId: String(c.comp_real_property_id ?? ""),
+          listingId: String(m.listing_id ?? c.listing_id ?? ""),
+          address: String(m.address ?? ""),
+          closePrice: cp,
+          closeDateIso: cd,
+          compBuildingSqft: toNum(m.building_area_total_sqft) || toNum(m.above_grade_finished_area_sqft),
+          compAboveGradeSqft: toNum(m.above_grade_finished_area_sqft) || toNum(m.building_area_total_sqft),
+          distanceMiles: toNum(c.distance_miles),
+          yearBuilt: m.year_built != null ? Number(m.year_built) : null,
+          bedroomsTotal: m.bedrooms_total != null ? Number(m.bedrooms_total) : null,
+          bathroomsTotal: m.bathrooms_total != null ? Number(m.bathrooms_total) : null,
+          propertyType: m.property_type ? String(m.property_type) : null,
+          levelClass: m.level_class_standardized ? String(m.level_class_standardized) : null,
+          mlsStatus: null,
+        };
+      })
+      .filter(Boolean) as any[];
+
+    if (allCompInputs.length > 0) {
+      const allArvResult = calculateArv({
+        subjectBuildingSqft: buildingSqft,
+        subjectAboveGradeSqft: aboveGradeSqft,
+        comps: allCompInputs,
+        config: arvConfig,
+        propertyType,
+      });
+      if (allArvResult) {
+        for (const d of allArvResult.perCompDetails) {
+          arvByCompListingId[d.compListingRowId] = { arv: d.arvTimeAdjusted, weight: d.decayWeight };
+        }
+      }
+    }
+  }
 
   // Final ARV (manual override)
   const finalArv = manualAnalysis?.arv_manual ? toNum(manualAnalysis.arv_manual) : null;
@@ -627,6 +684,7 @@ export async function loadWorkstationData(
       listPrice,
       originalListPrice: toNum(listing.original_list_price),
       listingContractDate: listing.listing_contract_date as string | null,
+      subdivisionName: listing.subdivision_name as string | null,
     } : null,
     financials: financials ? {
       annualTax: toNum(financials.annual_property_tax),
@@ -688,6 +746,7 @@ export async function loadWorkstationData(
         summary_json: latestRun.summary_json as Record<string, unknown> | null,
       } : null,
       compCandidates,
+      arvByCompListingId,
     },
     asIsCompSummary: {
       totalComps: asIsTotalComps,
