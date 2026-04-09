@@ -75,20 +75,20 @@ export function calculateArv(input: CalculateArvInput): ArvResult | null {
       : comp.compBuildingSqft;
 
     if (effectiveCompBldg <= 0 || effectiveCompAbove <= 0) continue;
-    if (comp.closePrice <= 0) continue;
+    if (comp.netSalePrice <= 0) continue;
 
-    const psfBuilding = comp.closePrice / effectiveCompBldg;
-    const psfAboveGrade = comp.closePrice / effectiveCompAbove;
+    const psfBuilding = comp.netSalePrice / effectiveCompBldg;
+    const psfAboveGrade = comp.netSalePrice / effectiveCompAbove;
 
     // Size-adjusted ARV per layer
     const arvBuilding =
-      comp.closePrice +
+      comp.netSalePrice +
       (effectiveSubjectBldg - effectiveCompBldg) *
         psfBuilding *
         blend.buildingDampening;
 
     const arvAboveGrade =
-      comp.closePrice +
+      comp.netSalePrice +
       (effectiveSubjectAbove - effectiveCompAbove) *
         psfAboveGrade *
         blend.aboveGradeDampening;
@@ -114,7 +114,7 @@ export function calculateArv(input: CalculateArvInput): ArvResult | null {
       compRealPropertyId: comp.compRealPropertyId,
       listingId: comp.listingId,
       address: comp.address,
-      closePrice: comp.closePrice,
+      netSalePrice: comp.netSalePrice,
       closeDateIso: comp.closeDateIso,
       daysSinceClose,
       distanceMiles: comp.distanceMiles,

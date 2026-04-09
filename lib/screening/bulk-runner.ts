@@ -261,14 +261,14 @@ function buildTrendSalesPool(pool: CompPool): TrendSaleInput[] {
 
     for (const listing of listings) {
       if (!listing.close_date || !listing.close_price) continue;
-      const closePrice = toNum(listing.close_price) - toNum(listing.concessions_amount);
-      if (closePrice <= 0) continue;
+      const netSalePrice = toNum(listing.close_price) - toNum(listing.concessions_amount);
+      if (netSalePrice <= 0) continue;
 
       sales.push({
         realPropertyId: propertyId,
         latitude: prop.latitude,
         longitude: prop.longitude,
-        closePrice,
+        netSalePrice,
         closeDateIso: listing.close_date,
         buildingSqft: pickBuildingSqft(phys),
         aboveGradeSqft: pickAboveGradeSqft(phys),
@@ -603,7 +603,7 @@ function scoreCompsForSubject(
         compRealPropertyId: compPropertyId,
         listingId: listing.listing_id,
         address: compProperty.unparsed_address,
-        closePrice: netPrice,
+        netSalePrice: netPrice,
         closeDateIso: listing.close_date,
         compBuildingSqft: compSqft,
         compAboveGradeSqft: compAbove,
@@ -960,7 +960,7 @@ async function writeScreeningResults(
 
       screening_status: r.screeningStatus,
       error_message: r.errorMessage,
-      last_screened_at: new Date().toISOString(),
+      screening_updated_at: new Date().toISOString(),
     }));
 
     const { error } = await supabase.from("screening_results").insert(rows);

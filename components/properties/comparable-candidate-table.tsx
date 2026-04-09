@@ -231,6 +231,7 @@ export function ComparableCandidateTable({
               <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Ba</th>
               <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Gar</th>
               <th className="cursor-pointer select-none px-1 py-0.5 text-right hover:text-slate-800" onClick={() => toggleSort("bldg")}>Bldg SF{sortArrow("bldg")}</th>
+              <th className="px-1 py-0.5 text-right">Abv SF</th>
               <th className="px-1 py-0.5 text-right">Bsmt</th>
               <th className="px-1 py-0.5 text-right">BsFin</th>
               <th className="px-1 py-0.5 text-right">Lot</th>
@@ -261,6 +262,7 @@ export function ComparableCandidateTable({
                 <td className="px-1 py-0.5 text-right">{subjectSummary.bathroomsTotal != null ? fmtNum(subjectSummary.bathroomsTotal) : "—"}</td>
                 <td className="px-1 py-0.5 text-right">{subjectSummary.garageSpaces != null ? fmtNum(subjectSummary.garageSpaces) : "—"}</td>
                 <td className="px-1 py-0.5 text-right">{fmtNum(subjectSummary.gla)}</td>
+                <td className="px-1 py-0.5 text-right">{fmtNum(subjectSummary.aboveGradeFinishedSqft)}</td>
                 <td className="px-1 py-0.5 text-right">{fmtNum(subjectSummary.belowGradeTotalSqft)}</td>
                 <td className="px-1 py-0.5 text-right">{fmtNum(subjectSummary.belowGradeFinishedSqft)}</td>
                 <td className="px-1 py-0.5 text-right">{fmtNum(subjectSummary.lotSizeSqft)}</td>
@@ -346,6 +348,7 @@ export function ComparableCandidateTable({
                       <td className="px-1 py-0.5 text-right text-slate-700">{m.bathrooms_total != null ? fmtNum(m.bathrooms_total as number) : "—"}</td>
                       <td className="px-1 py-0.5 text-right text-slate-700">{m.garage_spaces != null ? fmtNum(m.garage_spaces as number) : "—"}</td>
                       <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(m.building_area_total_sqft as number | null)}</td>
+                      <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(m.above_grade_finished_area_sqft as number | null)}</td>
                       <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(m.below_grade_total_sqft as number | null)}</td>
                       <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(m.below_grade_finished_area_sqft as number | null)}</td>
                       <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(m.lot_size_sqft as number | null)}</td>
@@ -365,7 +368,7 @@ export function ComparableCandidateTable({
 
                     {isExpanded && (
                       <tr>
-                        <td colSpan={19} className="bg-slate-50 px-3 py-3">
+                        <td colSpan={20} className="bg-slate-50 px-3 py-3">
                           <div className="grid gap-3 xl:grid-cols-2">
                             <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
                               <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Candidate Metrics</div>
@@ -425,7 +428,7 @@ export function ComparableCandidateTable({
               })
             ) : (
               <tr>
-                <td colSpan={19} className="px-2 py-4 text-center text-slate-500">
+                <td colSpan={20} className="px-2 py-4 text-center text-slate-500">
                   {showSelectedOnly
                     ? "No selected comps. Switch to Show All Comps."
                     : "Comparable candidate list will appear here after a comp search is run."}

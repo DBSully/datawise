@@ -4,6 +4,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import type { MapPin } from "@/components/properties/comp-map";
+import { ArvBreakdownTooltip } from "@/components/screening/arv-breakdown-tooltip";
 import {
   loadScreeningCompDataAction,
   loadCompDataByRunAction,
@@ -244,6 +245,7 @@ export function ScreeningCompModal({
         subjectSqft > 0 && compNetPrice > 0 && subjectListPrice > 0
           ? Math.round((compNetPrice - subjectListPrice) / subjectSqft)
           : null;
+      const compArvDetail = c.comp_listing_row_id ? data.arvByCompListingId[c.comp_listing_row_id] ?? null : null;
 
       pins.push({
         id: c.id,
@@ -252,6 +254,7 @@ export function ScreeningCompModal({
         label: String(m.address ?? "—"),
         tooltipData: {
           closePrice: compNetPrice || null,
+          impliedArv: compArvDetail?.arv ?? null,
           closeDate: m.close_date ? String(m.close_date).slice(0, 10) : null,
           sqft: compSqft,
           sqftDelta,
@@ -689,6 +692,7 @@ export function ScreeningCompModal({
                     <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Ba</th>
                     <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Gar</th>
                     <th className="cursor-pointer select-none px-1 py-0.5 text-right hover:text-slate-800" onClick={() => toggleSort("bldg")}>Bldg SF{sortCol === "bldg" ? (sortDir === "desc" ? " ▼" : " ▲") : ""}</th>
+                    <th className="px-1 py-0.5 text-right">Abv SF</th>
                     <th className="px-1 py-0.5 text-right">Bsmt</th>
                     <th className="px-1 py-0.5 text-right">BsFin</th>
                     <th className="px-1 py-0.5 text-right">Lot</th>
@@ -730,6 +734,7 @@ export function ScreeningCompModal({
                     <td className="px-1 py-0.5 text-right">{data.bathsTotal != null ? fmtNum(data.bathsTotal) : "—"}</td>
                     <td className="px-1 py-0.5 text-right">{data.garageSpaces != null ? fmtNum(data.garageSpaces) : "—"}</td>
                     <td className="px-1 py-0.5 text-right">{fmtNum(data.subjectBuildingSqft)}</td>
+                    <td className="px-1 py-0.5 text-right">{fmtNum(data.aboveGradeSqft)}</td>
                     <td className="px-1 py-0.5 text-right">{fmtNum(data.belowGradeTotalSqft)}</td>
                     <td className="px-1 py-0.5 text-right">{fmtNum(data.belowGradeFinishedSqft)}</td>
                     <td className="px-1 py-0.5 text-right">{fmtNum(data.lotSizeSqft)}</td>
@@ -762,7 +767,7 @@ export function ScreeningCompModal({
                       if (vb == null) return -1;
                       return (va - vb) * mult;
                     });
-                    return withSortVals.map(({ c, m, netPrice, impliedArv, gapPerSqft }) => {
+                    return withSortVals.map(({ c, m, netPrice, arvDetail, impliedArv, gapPerSqft }) => {
                     const gapClass =
                       gapPerSqft != null && gapPerSqft >= 60
                         ? "text-emerald-600 font-semibold"
@@ -817,8 +822,9 @@ export function ScreeningCompModal({
                         <td className="px-1 py-0.5 text-right text-slate-700">
                           {$f(netPrice)}
                         </td>
-                        <td className="px-1 py-0.5 text-right font-semibold text-slate-900">
+                        <td className="relative px-1 py-0.5 text-right font-semibold text-slate-900">
                           {impliedArv != null ? $f(impliedArv) : "—"}
+                          {arvDetail && <ArvBreakdownTooltip d={arvDetail} />}
                         </td>
                         <td className={`px-1 py-0.5 text-right ${gapClass}`}>
                           {gapPerSqft != null ? `$${fmtNum(gapPerSqft)}` : "—"}
@@ -843,6 +849,9 @@ export function ScreeningCompModal({
                         </td>
                         <td className="px-1 py-0.5 text-right text-slate-700">
                           {fmtNum(m.building_area_total_sqft as number | null)}
+                        </td>
+                        <td className="px-1 py-0.5 text-right text-slate-700">
+                          {fmtNum(m.above_grade_finished_area_sqft as number | null)}
                         </td>
                         <td className="px-1 py-0.5 text-right text-slate-700">
                           {fmtNum(m.below_grade_total_sqft as number | null)}

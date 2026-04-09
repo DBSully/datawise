@@ -39,7 +39,7 @@ export type CompArvInput = {
   compRealPropertyId: string;
   listingId: string;
   address: string;
-  closePrice: number;
+  netSalePrice: number;
   closeDateIso: string;
   compBuildingSqft: number;
   compAboveGradeSqft: number;
@@ -58,7 +58,7 @@ export type CompArvDetail = {
   compRealPropertyId: string;
   listingId: string;
   address: string;
-  closePrice: number;
+  netSalePrice: number;
   closeDateIso: string;
   daysSinceClose: number;
   distanceMiles: number;
@@ -273,7 +273,7 @@ export type TrendSaleInput = {
   realPropertyId: string;
   latitude: number;
   longitude: number;
-  closePrice: number;
+  netSalePrice: number;
   closeDateIso: string;
   buildingSqft: number;
   aboveGradeSqft: number;

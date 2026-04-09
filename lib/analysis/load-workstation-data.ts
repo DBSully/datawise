@@ -279,7 +279,7 @@ export async function loadWorkstationData(
     compCount: number;
     perCompDetails: Array<{
       address: string;
-      closePrice: number;
+      netSalePrice: number;
       closeDateIso: string;
       daysSinceClose: number;
       distanceMiles: number;
@@ -300,7 +300,7 @@ export async function loadWorkstationData(
         compRealPropertyId: String(c.comp_real_property_id ?? ""),
         listingId: String(m.listing_id ?? c.listing_id ?? ""),
         address: String(m.address ?? ""),
-        closePrice: toNum(m.net_price) || (toNum(m.close_price) - toNum(m.concessions_amount)),
+        netSalePrice: toNum(m.net_price) || (toNum(m.close_price) - toNum(m.concessions_amount)),
         closeDateIso: String(m.close_date ?? ""),
         compBuildingSqft: toNum(m.building_area_total_sqft) || toNum(m.above_grade_finished_area_sqft),
         compAboveGradeSqft: toNum(m.above_grade_finished_area_sqft) || toNum(m.building_area_total_sqft),
@@ -329,7 +329,7 @@ export async function loadWorkstationData(
         compCount: arvResult.compCount,
         perCompDetails: arvResult.perCompDetails.map((d) => ({
           address: d.address,
-          closePrice: d.closePrice,
+          netSalePrice: d.netSalePrice,
           closeDateIso: d.closeDateIso,
           daysSinceClose: d.daysSinceClose,
           distanceMiles: d.distanceMiles,
@@ -347,7 +347,7 @@ export async function loadWorkstationData(
   const selectedArv = selectedArvResult?.arvAggregate ?? null;
 
   // Per-candidate implied ARV (for all candidates, not just selected)
-  const arvByCompListingId: Record<string, { arv: number; weight: number }> = {};
+  const arvByCompListingId: Record<string, import("@/lib/reports/types").ArvCompBreakdown> = {};
   if (compCandidates.length > 0 && buildingSqft > 0) {
     const allCompInputs = compCandidates
       .filter((c: any) => c.comp_listing_row_id)
@@ -361,7 +361,7 @@ export async function loadWorkstationData(
           compRealPropertyId: String(c.comp_real_property_id ?? ""),
           listingId: String(m.listing_id ?? c.listing_id ?? ""),
           address: String(m.address ?? ""),
-          closePrice: cp,
+          netSalePrice: cp,
           closeDateIso: cd,
           compBuildingSqft: toNum(m.building_area_total_sqft) || toNum(m.above_grade_finished_area_sqft),
           compAboveGradeSqft: toNum(m.above_grade_finished_area_sqft) || toNum(m.building_area_total_sqft),
@@ -386,7 +386,21 @@ export async function loadWorkstationData(
       });
       if (allArvResult) {
         for (const d of allArvResult.perCompDetails) {
-          arvByCompListingId[d.compListingRowId] = { arv: d.arvTimeAdjusted, weight: d.decayWeight };
+          arvByCompListingId[d.compListingRowId] = {
+            arv: d.arvTimeAdjusted,
+            weight: d.decayWeight,
+            netSalePrice: d.netSalePrice,
+            compBuildingSqft: d.compBuildingSqft,
+            compAboveGradeSqft: d.compAboveGradeSqft,
+            psfBuilding: d.psfBuilding,
+            psfAboveGrade: d.psfAboveGrade,
+            arvBuilding: d.arvBuilding,
+            arvAboveGrade: d.arvAboveGrade,
+            arvBlended: d.arvBlended,
+            timeAdjustment: d.timeAdjustment,
+            daysSinceClose: d.daysSinceClose,
+            confidence: d.confidence,
+          };
         }
       }
     }

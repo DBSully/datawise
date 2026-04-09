@@ -258,7 +258,7 @@ export function ReportDocument({ report, title, mapSlot }: Props) {
                       </span>
                     </td>
                     <td className="px-2 py-1.5 text-slate-800">{comp.address}</td>
-                    <td className="px-2 py-1.5 text-right font-mono">{fmt(comp.closePrice)}</td>
+                    <td className="px-2 py-1.5 text-right font-mono">{fmt(comp.netSalePrice)}</td>
                     <td className="px-2 py-1.5 text-right font-mono">{comp.ppsf != null ? `$${fmtNum(comp.ppsf)}` : "\u2014"}</td>
                     <td className="px-2 py-1.5 text-right font-mono">{comp.sqft != null ? fmtNum(comp.sqft) : "\u2014"}</td>
                     <td className="px-2 py-1.5 text-right font-mono">{comp.distance != null ? `${fmtNum(comp.distance, 2)} mi` : "\u2014"}</td>

@@ -91,7 +91,7 @@ export type FinancingDetail = {
 
 export type ArvPerCompDetail = {
   address: string;
-  closePrice: number;
+  netSalePrice: number;
   closeDateIso: string;
   daysSinceClose: number;
   distanceMiles: number;
@@ -101,6 +101,23 @@ export type ArvPerCompDetail = {
   arvTimeAdjusted: number;
   confidence: number;
   decayWeight: number;
+};
+
+/** Per-comp ARV breakdown for tooltip display. */
+export type ArvCompBreakdown = {
+  arv: number;
+  weight: number;
+  netSalePrice: number;
+  compBuildingSqft: number;
+  compAboveGradeSqft: number;
+  psfBuilding: number;
+  psfAboveGrade: number;
+  arvBuilding: number;
+  arvAboveGrade: number;
+  arvBlended: number;
+  timeAdjustment: number;
+  daysSinceClose: number;
+  confidence: number;
 };
 
 export type TrendTierSegment = { rate: number | null; compCount: number };
@@ -265,7 +282,7 @@ export type WorkstationData = {
       summary_json: Record<string, unknown> | null;
     } | null;
     compCandidates: Array<Record<string, unknown>>;
-    arvByCompListingId: Record<string, { arv: number; weight: number }>;
+    arvByCompListingId: Record<string, ArvCompBreakdown>;
   };
   asIsCompSummary: {
     totalComps: number;
@@ -299,7 +316,7 @@ export type WorkstationData = {
 
 export type ReportSelectedComp = {
   address: string;
-  closePrice: number | null;
+  netSalePrice: number | null;
   ppsf: number | null;
   sqft: number | null;
   distance: number | null;

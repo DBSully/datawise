@@ -35,7 +35,7 @@ export function calculateDealMath(input: CalculateDealMathInput): DealMathResult
 
   // Spread-based metrics require a list price
   const hasListPrice = listPrice !== null && listPrice > 0;
-  const spread = hasListPrice ? Math.round(arv - listPrice) : null;
+  const spread = hasListPrice ? Math.round(listPrice - maxOffer) : null;
   const offerPct = hasListPrice ? roundTo(maxOffer / listPrice, 4) : null;
   const estGapPerSqft =
     hasListPrice && buildingSqft > 0

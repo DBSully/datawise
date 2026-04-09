@@ -121,6 +121,7 @@ export async function passFromWatchListAction(
         pass_reason: `Passed from Watch List: ${passReason}`,
         reviewed_at: new Date().toISOString(),
         reviewed_by_user_id: user.id,
+        screening_updated_at: new Date().toISOString(),
       })
       .eq("id", pipeline.promoted_from_screening_result_id)
       .is("review_action", null);

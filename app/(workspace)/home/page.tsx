@@ -207,7 +207,7 @@ export default async function DashboardPage() {
 
   const { data: activityRows } = await supabase
     .from("daily_activity_v")
-    .select("activity_type, real_property_id, analysis_id, address, city, is_prime_candidate, strategy_type, analysis_status, activity_at")
+    .select("activity_type, real_property_id, analysis_id, address, city, is_prime_candidate, strategy_type, screening_decision, activity_at")
     .gte("activity_at", todayIso)
     .order("activity_at", { ascending: false })
     .limit(30);
@@ -220,7 +220,7 @@ export default async function DashboardPage() {
     city: string | null;
     is_prime_candidate: boolean | null;
     strategy_type: string | null;
-    analysis_status: string | null;
+    screening_decision: string | null;
     activity_at: string;
   };
 
@@ -477,8 +477,18 @@ export default async function DashboardPage() {
                     {new Date(a.activity_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </td>
                   <td className="px-2 py-1">
-                    <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${a.activity_type === "screening" ? "bg-violet-100 text-violet-700" : "bg-blue-100 text-blue-700"}`}>
-                      {a.activity_type === "screening" ? "Screened" : "Analysis"}
+                    <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
+                      a.activity_type === "screening"
+                        ? a.screening_decision === "promoted" ? "bg-emerald-100 text-emerald-700"
+                          : a.screening_decision === "passed" ? "bg-red-100 text-red-700"
+                          : "bg-violet-100 text-violet-700"
+                        : "bg-blue-100 text-blue-700"
+                    }`}>
+                      {a.activity_type === "screening"
+                        ? a.screening_decision === "promoted" ? "Promoted"
+                          : a.screening_decision === "passed" ? "Passed"
+                          : "Screened"
+                        : "Analysis"}
                     </span>
                   </td>
                   <td className="px-2 py-1 font-medium text-slate-800">

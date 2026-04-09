@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
+import { createPortal } from "react-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -16,6 +17,7 @@ export type MapPinTooltipData = {
   sqftDeltaPct?: number | null;    // as decimal e.g. 0.05 = 5%
   ppsf?: number | null;
   distance?: number | null;
+  impliedArv?: number | null;     // per-comp implied ARV from ARV engine
   gapPerSqft?: number | null;     // deal-level (ARV − list) / sqft
   listPrice?: number | null;      // subject list price (for subject pin)
 };
@@ -128,6 +130,11 @@ export function CompMap({
   const onPinClickRef = useRef(onPinClick);
   onPinClickRef.current = onPinClick;
 
+  // Portal tooltip state
+  const [hoverPin, setHoverPin] = useState<{ html: string; x: number; y: number } | null>(null);
+  const hoverPinRef = useRef(hoverPin);
+  hoverPinRef.current = hoverPin;
+
   // -- Effect 1: Create the map instance once --
   useEffect(() => {
     if (!containerRef.current) return;
@@ -208,6 +215,8 @@ export function CompMap({
       if (t && !isSubject) {
         // Sale price row
         if (t.closePrice != null) rows += `<tr><td style="color:#94a3b8;padding-right:8px">Net Sale</td><td style="font-weight:600">${$f(t.closePrice)}</td></tr>`;
+        // Implied ARV
+        if (t.impliedArv != null) rows += `<tr><td style="color:#94a3b8;padding-right:8px">Imp ARV</td><td style="font-weight:600;color:#1e40af">${$f(t.impliedArv)}</td></tr>`;
         // Close date
         if (t.closeDate) rows += `<tr><td style="color:#94a3b8;padding-right:8px">Closed</td><td>${t.closeDate}</td></tr>`;
         // PSF
@@ -250,39 +259,23 @@ export function CompMap({
       </div>`;
     }
 
-    // Dynamically reposition tooltip toward map center on each hover,
-    // so it stays visible even after pan/zoom
-    function addSmartTooltip(marker: L.Marker, pin: MapPin, iconSize: number) {
+    // Show tooltip via React portal so it escapes map overflow
+    function addSmartTooltip(marker: L.Marker, pin: MapPin, _iconSize: number) {
       const html = tooltipHtml(pin);
-      const pad = iconSize / 2 + 4;
 
-      function bestDir(): { direction: L.Direction; offset: L.PointExpression } {
-        const pinPt = map!.latLngToContainerPoint(marker.getLatLng());
-        const size = map!.getSize();
-        const dx = size.x / 2 - pinPt.x;
-        const dy = size.y / 2 - pinPt.y;
-
-        if (Math.abs(dy) > Math.abs(dx)) {
-          return dy > 0
-            ? { direction: "bottom", offset: [0, pad] }
-            : { direction: "top", offset: [0, -pad] };
-        }
-        return dx > 0
-          ? { direction: "right", offset: [pad, 0] }
-          : { direction: "left", offset: [-pad, 0] };
-      }
-
-      // Rebind with correct direction on every hover (before Leaflet opens it)
       marker.on("mouseover", () => {
-        if (marker.getTooltip()) marker.unbindTooltip();
-        const d = bestDir();
-        marker.bindTooltip(html, {
-          direction: d.direction,
-          offset: d.offset,
-          opacity: 0.97,
-          className: "comp-map-tooltip",
+        const pt = map!.latLngToContainerPoint(marker.getLatLng());
+        const mapEl = map!.getContainer();
+        const mapRect = mapEl.getBoundingClientRect();
+        setHoverPin({
+          html,
+          x: mapRect.left + pt.x,
+          y: mapRect.top + pt.y,
         });
-        marker.openTooltip();
+      });
+
+      marker.on("mouseout", () => {
+        setHoverPin(null);
       });
     }
 
@@ -396,11 +389,35 @@ export function CompMap({
     );
   }
 
+  // Position tooltip toward screen center
+  let tooltipStyle: React.CSSProperties | null = null;
+  if (hoverPin) {
+    const tooltipW = 240;
+    const tooltipH = 180;
+    const cx = typeof window !== "undefined" ? window.innerWidth / 2 : 600;
+    const cy = typeof window !== "undefined" ? window.innerHeight / 2 : 400;
+    let left = hoverPin.x < cx ? hoverPin.x + 14 : hoverPin.x - tooltipW - 14;
+    let top = hoverPin.y < cy ? hoverPin.y + 14 : hoverPin.y - tooltipH - 14;
+    if (left < 4) left = 4;
+    if (top < 4) top = 4;
+    tooltipStyle = { position: "fixed" as const, top, left, zIndex: 9999, width: tooltipW };
+  }
+
   return (
-    <div
-      ref={containerRef}
-      className={`rounded-lg border border-slate-200 ${className}`}
-      style={{ height }}
-    />
+    <>
+      <div
+        ref={containerRef}
+        className={`rounded-lg border border-slate-200 ${className}`}
+        style={{ height, position: "relative", zIndex: 0, isolation: "isolate" }}
+      />
+      {hoverPin && tooltipStyle && createPortal(
+        <div
+          className="pointer-events-none rounded-lg border border-slate-300 bg-white/97 p-2 shadow-xl"
+          style={tooltipStyle}
+          dangerouslySetInnerHTML={{ __html: hoverPin.html }}
+        />,
+        document.body,
+      )}
+    </>
   );
 }

@@ -75,8 +75,8 @@ export function ReportViewer({ reportId, title, content, createdAt }: Props) {
       const sqftDelta = comp.sqft && subjectSqft ? subjectSqft - comp.sqft : null;
       const sqftDeltaPct = comp.sqft && subjectSqft ? (subjectSqft - comp.sqft) / subjectSqft : null;
       const gapPerSqft =
-        subjectSqft > 0 && (comp.closePrice ?? 0) > 0 && subjectListPrice > 0
-          ? Math.round(((comp.closePrice ?? 0) - subjectListPrice) / subjectSqft)
+        subjectSqft > 0 && (comp.netSalePrice ?? 0) > 0 && subjectListPrice > 0
+          ? Math.round(((comp.netSalePrice ?? 0) - subjectListPrice) / subjectSqft)
           : null;
 
       pins.push({
@@ -86,7 +86,7 @@ export function ReportViewer({ reportId, title, content, createdAt }: Props) {
         label: comp.address,
         pinLabel: String(i + 1),
         tooltipData: {
-          closePrice: comp.closePrice,
+          closePrice: comp.netSalePrice,
           closeDate: comp.closeDate,
           sqft: comp.sqft,
           sqftDelta,

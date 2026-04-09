@@ -1,3 +1,77 @@
+## 2026-04-09a — ARV Transparency, Map Tooltips, Naming Fixes & Spread Correction
+
+### What changed
+
+#### `closePrice` → `netSalePrice` rename (consistency)
+
+Renamed the `closePrice` field to `netSalePrice` across all ARV/valuation types and engines to make it explicit that the ARV engine operates on net sale price (close price minus concessions). No logic change — the values were already correct; this is a naming fix for clarity.
+
+**Types renamed:** `CompArvInput`, `CompArvDetail`, `TrendSaleInput`, `ArvPerCompDetail`, `ReportSelectedComp`
+**Engines updated:** arv-engine, bulk-runner, trend-engine, load-workstation-data, screening actions, both workstations, report viewer, report document
+
+#### ARV Breakdown Tooltip
+
+Hover over any Imp ARV value to see the full calculation breakdown in a floating card:
+- Net Sale Price → PSF Bldg / PSF AG → ARV Bldg (size adj) / ARV AG (size adj) → ARV Blended → Time Adjustment → **Implied ARV** → Confidence / Decay Weight
+
+Uses `createPortal` to render on `document.body` at `z-index: 9999`, positioned toward the center of the screen so it never clips. Shared `ArvCompBreakdown` type carries the full per-comp detail from the ARV engine through to the UI.
+
+**New component:** `components/screening/arv-breakdown-tooltip.tsx`
+**New type:** `ArvCompBreakdown` in `lib/reports/types.ts`
+
+#### Map tooltip: Implied ARV
+
+Map pin hover tooltips now show **Imp ARV** (blue, bold) directly below Net Sale price. Added `impliedArv` to `MapPinTooltipData` and wired it through all map pin builders (ScreeningCompModal + both workstation ARV/As-Is maps).
+
+#### Map tooltip portal rendering
+
+Replaced Leaflet's built-in tooltip (clipped by `overflow: auto`) with a React portal tooltip rendered on `document.body`. Positioned toward the center of the screen relative to the pin. Map container uses `isolation: isolate` + `zIndex: 0` to keep Leaflet internals from overlapping modals.
+
+#### Map stacking context fix
+
+Maps in ARV/As-Is Comparables tiles no longer render on top of modals. The map container now creates its own stacking context via `isolation: isolate` + `zIndex: 0`.
+
+#### Abv SF column
+
+Added `above_grade_finished_area_sqft` with header "Abv SF" to the left of Bsmt in all comp tables: ScreeningCompModal, ComparableCandidateTable, and both workstation ARV/As-Is inline tables.
+
+#### `last_screened_at` → `screening_updated_at`
+
+Renamed to track the timing of the most recent screening decision (not just batch run). Now stamped on every screening action: initial screen, promote, pass, reactivate, pass from watch list. Backfilled from `reviewed_at` where more recent.
+
+**Migration:** `20260408210000_screening_updated_at.sql`
+
+Daily activity view updated to include `screening_decision` column (promoted/passed/null). Dashboard badges now color-coded: green "Promoted", red "Passed", violet "Screened".
+
+#### Spread formula fix
+
+`deal-math.ts` spread was computed as `ARV - List Price` but the report label said "Spread (List - Max Offer)". Fixed to `List Price - Max Offer` to match the label. Existing screening results retain stale values; new screenings and live deal math use the corrected formula.
+
+### Files changed
+
+- `lib/screening/types.ts` — `closePrice` → `netSalePrice` on 3 types
+- `lib/screening/arv-engine.ts` — `comp.closePrice` → `comp.netSalePrice`
+- `lib/screening/bulk-runner.ts` — renamed local var + field assignments
+- `lib/screening/trend-engine.ts` — renamed all `closePrice` refs
+- `lib/screening/deal-math.ts` — spread formula fix
+- `lib/reports/types.ts` — `ArvCompBreakdown` type, `netSalePrice` renames, `subdivisionName`
+- `lib/reports/snapshot.ts` — `netSalePrice` rename
+- `lib/analysis/load-workstation-data.ts` — per-candidate ARV breakdown, `netSalePrice`, `screening_updated_at`
+- `app/(workspace)/intake/screening/actions.ts` — `ArvCompBreakdown`, `screening_updated_at` on all review actions
+- `app/(workspace)/deals/watchlist/actions.ts` — `screening_updated_at` on pass
+- `app/(workspace)/home/page.tsx` — `screening_decision` column, color-coded badges
+- `app/(workspace)/analysis/properties/[id]/analyses/[analysisId]/analysis-workstation.tsx` — Abv SF column, ARV breakdown tooltip, map impliedArv, `netSalePrice`
+- `app/(workspace)/deals/watchlist/[analysisId]/analysis-workstation.tsx` — same as above
+- `app/(workspace)/reports/[reportId]/report-viewer.tsx` — `netSalePrice`
+- `components/screening/screening-comp-modal.tsx` — Abv SF column, ARV breakdown tooltip, map impliedArv
+- `components/screening/arv-breakdown-tooltip.tsx` — new shared component
+- `components/properties/comp-map.tsx` — portal tooltip, `impliedArv` in tooltip, stacking context fix
+- `components/properties/comparable-candidate-table.tsx` — Abv SF column
+- `components/reports/report-document.tsx` — `netSalePrice`
+- `supabase/migrations/20260408210000_screening_updated_at.sql` — column rename + view update
+
+---
+
 ## 2026-04-08k — Unified Comp Tables Across Workstations
 
 ### What changed

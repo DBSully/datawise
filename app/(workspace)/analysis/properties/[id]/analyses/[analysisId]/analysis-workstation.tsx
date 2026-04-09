@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { MapPin, MapPinTooltipData } from "@/components/properties/comp-map";
 import { ScreeningCompModal } from "@/components/screening/screening-comp-modal";
+import { ArvBreakdownTooltip } from "@/components/screening/arv-breakdown-tooltip";
 
 const CompMap = dynamic(
   () => import("@/components/properties/comp-map").then((m) => m.CompMap),
@@ -229,12 +230,14 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
           baths: m.bathrooms_total as number | null,
           garageSpaces: m.garage_spaces as number | null,
           bldgSf: m.building_area_total_sqft as number | null,
+          abvSf: m.above_grade_finished_area_sqft as number | null,
           bsmt: m.below_grade_total_sqft as number | null,
           bsFin: m.below_grade_finished_area_sqft as number | null,
           lot: m.lot_size_sqft as number | null,
           score: c.raw_score as number | null,
           gapPerSqft,
           impliedArv: arvDetail?.arv ?? null,
+          arvBreakdown: arvDetail ?? null,
         };
       });
   }, [d, _subjSqft, _subjListPrice, _arvMap]);
@@ -266,12 +269,14 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
           baths: m.bathrooms_total as number | null,
           garageSpaces: m.garage_spaces as number | null,
           bldgSf: m.building_area_total_sqft as number | null,
+          abvSf: m.above_grade_finished_area_sqft as number | null,
           bsmt: m.below_grade_total_sqft as number | null,
           bsFin: m.below_grade_finished_area_sqft as number | null,
           lot: m.lot_size_sqft as number | null,
           score: c.raw_score as number | null,
           gapPerSqft,
           impliedArv: arvDetail?.arv ?? null,
+          arvBreakdown: arvDetail ?? null,
         };
       });
   }, [d, _subjSqft, _subjListPrice, _arvMap]);
@@ -379,6 +384,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
         subjectSqft > 0 && compNetPrice > 0 && subjectListPrice > 0
           ? Math.round((compNetPrice - subjectListPrice) / subjectSqft)
           : null;
+      const compArvDetail = c.comp_listing_row_id ? _arvMap[c.comp_listing_row_id as string] ?? null : null;
 
       const isSelected = Boolean(c.selected_yn);
       pins.push({
@@ -388,6 +394,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
         label: String(m.address ?? "\u2014"),
         tooltipData: {
           closePrice: compNetPrice || null,
+          impliedArv: compArvDetail?.arv ?? null,
           closeDate: m.close_date ? String(m.close_date).slice(0, 10) : null,
           sqft: compSqft,
           sqftDelta,
@@ -437,6 +444,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
         subjectSqft > 0 && compNetPrice > 0 && subjectListPrice > 0
           ? Math.round((compNetPrice - subjectListPrice) / subjectSqft)
           : null;
+      const compArvDetailAsIs = c.comp_listing_row_id ? _arvMap[c.comp_listing_row_id as string] ?? null : null;
 
       const isSelected = Boolean(c.selected_as_is_yn);
       pins.push({
@@ -446,6 +454,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
         label: String(m.address ?? "\u2014"),
         tooltipData: {
           closePrice: compNetPrice || null,
+          impliedArv: compArvDetailAsIs?.arv ?? null,
           closeDate: m.close_date ? String(m.close_date).slice(0, 10) : null,
           sqft: compSqft,
           sqftDelta,
@@ -822,7 +831,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                         {d.arv.selectedDetail.perCompDetails.map((comp, i) => (
                           <tr key={i} className="border-b border-slate-50">
                             <td className="py-0.5 pr-1 text-slate-600 truncate max-w-[120px]">{comp.address}</td>
-                            <td className="py-0.5 text-right font-mono text-slate-600">{fmt(comp.closePrice)}</td>
+                            <td className="py-0.5 text-right font-mono text-slate-600">{fmt(comp.netSalePrice)}</td>
                             <td className="py-0.5 text-right font-mono text-slate-700">{fmt(comp.arvTimeAdjusted)}</td>
                             <td className="py-0.5 text-right font-mono text-slate-400">{comp.decayWeight.toFixed(2)}</td>
                           </tr>
@@ -981,6 +990,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                           <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Ba</th>
                           <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Gar</th>
                           <th className="px-1 py-0.5 text-right">Bldg SF</th>
+                          <th className="px-1 py-0.5 text-right">Abv SF</th>
                           <th className="px-1 py-0.5 text-right">Bsmt</th>
                           <th className="px-1 py-0.5 text-right">BsFin</th>
                           <th className="px-1 py-0.5 text-right">Lot</th>
@@ -1002,6 +1012,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                           <td className="px-1 py-0.5 text-right">{p?.bathroomsTotal != null ? fmtNum(p.bathroomsTotal) : "—"}</td>
                           <td className="px-1 py-0.5 text-right">{p?.garageSpaces != null ? fmtNum(p.garageSpaces) : "—"}</td>
                           <td className="px-1 py-0.5 text-right">{fmtNum(p?.buildingSqft)}</td>
+                          <td className="px-1 py-0.5 text-right">{fmtNum(p?.aboveGradeSqft)}</td>
                           <td className="px-1 py-0.5 text-right">{fmtNum(p?.belowGradeTotalSqft)}</td>
                           <td className="px-1 py-0.5 text-right">{fmtNum(p?.belowGradeFinishedSqft)}</td>
                           <td className="px-1 py-0.5 text-right">{fmtNum(p?.lotSizeSqft)}</td>
@@ -1017,7 +1028,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                               <td className="max-w-[140px] truncate px-1 py-0.5 font-semibold text-slate-900" title={c.address}>{c.address}</td>
                               <td className="max-w-[100px] truncate px-1 py-0.5 text-slate-700" title={c.subdivision}>{c.subdivision || "\u2014"}</td>
                               <td className="px-1 py-0.5 text-right text-slate-700">{fmt(c.netPrice)}</td>
-                              <td className="px-1 py-0.5 text-right font-semibold text-slate-900">{c.impliedArv != null ? fmt(c.impliedArv) : "\u2014"}</td>
+                              <td className="relative px-1 py-0.5 text-right font-semibold text-slate-900">{c.impliedArv != null ? fmt(c.impliedArv) : "\u2014"}{c.arvBreakdown && <ArvBreakdownTooltip d={c.arvBreakdown} />}</td>
                               <td className={`px-1 py-0.5 text-right ${gapClass}`}>{c.gapPerSqft != null ? `$${fmtNum(c.gapPerSqft)}` : "\u2014"}</td>
                               <td className={`px-1 py-0.5 text-right font-semibold ${daysClass}`}>{c.days ?? "\u2014"}</td>
                               <td className="max-w-[56px] truncate px-1 py-0.5 text-slate-700">{c.levelClass || "\u2014"}</td>
@@ -1026,6 +1037,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                               <td className="px-1 py-0.5 text-right text-slate-700">{c.baths != null ? fmtNum(c.baths) : "\u2014"}</td>
                               <td className="px-1 py-0.5 text-right text-slate-700">{c.garageSpaces != null ? fmtNum(c.garageSpaces) : "\u2014"}</td>
                               <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(c.bldgSf)}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(c.abvSf)}</td>
                               <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(c.bsmt)}</td>
                               <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(c.bsFin)}</td>
                               <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(c.lot)}</td>
@@ -1109,6 +1121,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                           <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Ba</th>
                           <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Gar</th>
                           <th className="px-1 py-0.5 text-right">Bldg SF</th>
+                          <th className="px-1 py-0.5 text-right">Abv SF</th>
                           <th className="px-1 py-0.5 text-right">Bsmt</th>
                           <th className="px-1 py-0.5 text-right">BsFin</th>
                           <th className="px-1 py-0.5 text-right">Lot</th>
@@ -1129,6 +1142,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                           <td className="px-1 py-0.5 text-right">{p?.bathroomsTotal != null ? fmtNum(p.bathroomsTotal) : "—"}</td>
                           <td className="px-1 py-0.5 text-right">{p?.garageSpaces != null ? fmtNum(p.garageSpaces) : "—"}</td>
                           <td className="px-1 py-0.5 text-right">{fmtNum(p?.buildingSqft)}</td>
+                          <td className="px-1 py-0.5 text-right">{fmtNum(p?.aboveGradeSqft)}</td>
                           <td className="px-1 py-0.5 text-right">{fmtNum(p?.belowGradeTotalSqft)}</td>
                           <td className="px-1 py-0.5 text-right">{fmtNum(p?.belowGradeFinishedSqft)}</td>
                           <td className="px-1 py-0.5 text-right">{fmtNum(p?.lotSizeSqft)}</td>
@@ -1144,7 +1158,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                               <td className="max-w-[140px] truncate px-1 py-0.5 font-semibold text-slate-900" title={c.address}>{c.address}</td>
                               <td className="max-w-[100px] truncate px-1 py-0.5 text-slate-700" title={c.subdivision}>{c.subdivision || "\u2014"}</td>
                               <td className="px-1 py-0.5 text-right text-slate-700">{fmt(c.netPrice)}</td>
-                              <td className="px-1 py-0.5 text-right font-semibold text-slate-900">{c.impliedArv != null ? fmt(c.impliedArv) : "\u2014"}</td>
+                              <td className="relative px-1 py-0.5 text-right font-semibold text-slate-900">{c.impliedArv != null ? fmt(c.impliedArv) : "\u2014"}{c.arvBreakdown && <ArvBreakdownTooltip d={c.arvBreakdown} />}</td>
                               <td className={`px-1 py-0.5 text-right ${gapClass}`}>{c.gapPerSqft != null ? `$${fmtNum(c.gapPerSqft)}` : "\u2014"}</td>
                               <td className={`px-1 py-0.5 text-right font-semibold ${daysClass}`}>{c.days ?? "\u2014"}</td>
                               <td className="max-w-[56px] truncate px-1 py-0.5 text-slate-700">{c.levelClass || "\u2014"}</td>
@@ -1153,6 +1167,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                               <td className="px-1 py-0.5 text-right text-slate-700">{c.baths != null ? fmtNum(c.baths) : "\u2014"}</td>
                               <td className="px-1 py-0.5 text-right text-slate-700">{c.garageSpaces != null ? fmtNum(c.garageSpaces) : "\u2014"}</td>
                               <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(c.bldgSf)}</td>
+                              <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(c.abvSf)}</td>
                               <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(c.bsmt)}</td>
                               <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(c.bsFin)}</td>
                               <td className="px-1 py-0.5 text-right text-slate-700">{fmtNum(c.lot)}</td>

@@ -8,6 +8,7 @@ import { DENVER_FLIP_V1 } from "@/lib/screening/strategy-profiles";
 import { calculateArv } from "@/lib/screening/arv-engine";
 import { resolvePropertyTypeFamily } from "@/lib/comparables/scoring";
 import type { CompArvInput, PropertyTypeKey } from "@/lib/screening/types";
+import type { ArvCompBreakdown } from "@/lib/reports/types";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -24,22 +25,22 @@ function computeArvForCandidates(
   subjectBuildingSqft: number,
   subjectAboveGradeSqft: number,
   subjectPropertyType: string | null,
-): Record<string, { arv: number; weight: number }> {
+): Record<string, ArvCompBreakdown> {
   const propertyType = resolvePropertyTypeFamily(subjectPropertyType) as PropertyTypeKey;
   const comps: CompArvInput[] = [];
 
   for (const c of candidates) {
     const m = c.metrics_json;
-    const closePrice = Number(m.net_price) || Number(m.close_price) || 0;
+    const netSalePrice = Number(m.net_price) || Number(m.close_price) || 0;
     const closeDateIso = m.close_date ? String(m.close_date) : null;
-    if (closePrice <= 0 || !closeDateIso || !c.comp_listing_row_id) continue;
+    if (netSalePrice <= 0 || !closeDateIso || !c.comp_listing_row_id) continue;
 
     comps.push({
       compListingRowId: c.comp_listing_row_id,
       compRealPropertyId: String(m.comp_real_property_id ?? ""),
       listingId: String(m.listing_id ?? ""),
       address: String(m.address ?? ""),
-      closePrice,
+      netSalePrice,
       closeDateIso,
       compBuildingSqft: Number(m.building_area_total_sqft) || Number(m.above_grade_finished_area_sqft) || 0,
       compAboveGradeSqft: Number(m.above_grade_finished_area_sqft) || Number(m.building_area_total_sqft) || 0,
@@ -65,9 +66,23 @@ function computeArvForCandidates(
 
   if (!result) return {};
 
-  const map: Record<string, { arv: number; weight: number }> = {};
+  const map: Record<string, ArvCompBreakdown> = {};
   for (const d of result.perCompDetails) {
-    map[d.compListingRowId] = { arv: d.arvTimeAdjusted, weight: d.decayWeight };
+    map[d.compListingRowId] = {
+      arv: d.arvTimeAdjusted,
+      weight: d.decayWeight,
+      netSalePrice: d.netSalePrice,
+      compBuildingSqft: d.compBuildingSqft,
+      compAboveGradeSqft: d.compAboveGradeSqft,
+      psfBuilding: d.psfBuilding,
+      psfAboveGrade: d.psfAboveGrade,
+      arvBuilding: d.arvBuilding,
+      arvAboveGrade: d.arvAboveGrade,
+      arvBlended: d.arvBlended,
+      timeAdjustment: d.timeAdjustment,
+      daysSinceClose: d.daysSinceClose,
+      confidence: d.confidence,
+    };
   }
   return map;
 }
@@ -330,7 +345,7 @@ export type ScreeningCompData = {
   originalListPrice: number | null;
   closePrice: number | null;
   // Per-comp implied ARV keyed by comp_listing_row_id (arvTimeAdjusted + decayWeight)
-  arvByCompListingId: Record<string, { arv: number; weight: number }>;
+  arvByCompListingId: Record<string, ArvCompBreakdown>;
   candidates: Array<{
     id: string;
     comp_listing_row_id: string | null;
@@ -460,7 +475,7 @@ export async function loadScreeningCompDataAction(
     estGapPerSqft: result.est_gap_per_sqft,
     ...dealFields,
     ...headerFields,
-    arvByCompListingId: {} as Record<string, { arv: number; weight: number }>,
+    arvByCompListingId: {} as Record<string, ArvCompBreakdown>,
   };
 
   if (!result.comp_search_run_id) {
@@ -654,6 +669,7 @@ export async function promoteToAnalysisAction(
       review_action: "promoted",
       reviewed_at: now,
       reviewed_by_user_id: user.id,
+      screening_updated_at: now,
     })
     .eq("id", resultId);
 
@@ -726,6 +742,7 @@ export async function passOnScreeningResultAction(
       reviewed_at: now,
       reviewed_by_user_id: user.id,
       pass_reason: passReason,
+      screening_updated_at: now,
     })
     .eq("id", resultId);
 
@@ -760,6 +777,7 @@ export async function reactivateScreeningResultAction(
       reviewed_at: null,
       reviewed_by_user_id: null,
       pass_reason: null,
+      screening_updated_at: new Date().toISOString(),
     })
     .eq("id", resultId);
 
@@ -904,7 +922,7 @@ export async function loadCompDataByRunAction(
     closeDate: mls?.close_date ?? null,
     originalListPrice: mls?.original_list_price ?? null,
     closePrice: mls?.close_price ?? null,
-    arvByCompListingId: {} as Record<string, { arv: number; weight: number }>,
+    arvByCompListingId: {} as Record<string, ArvCompBreakdown>,
   };
 
   // Load candidates

@@ -100,7 +100,7 @@ export function calculateTrend(input: CalculateTrendInput): TrendResult {
     if (saleSqft < sqftLo || saleSqft > sqftHi) continue;
 
     // Price filter
-    if (sale.closePrice < priceLo || sale.closePrice > priceHi) continue;
+    if (sale.netSalePrice < priceLo || sale.netSalePrice > priceHi) continue;
 
     // Year built filter
     if (sale.yearBuilt != null && (sale.yearBuilt < yearLo || sale.yearBuilt > yearHi)) continue;
@@ -114,8 +114,8 @@ export function calculateTrend(input: CalculateTrendInput): TrendResult {
     const enriched: EnrichedSale = {
       ...sale,
       distanceMiles: dist,
-      psfBuilding: bldgSqft > 0 ? sale.closePrice / bldgSqft : 0,
-      psfAboveGrade: saleSqft > 0 ? sale.closePrice / saleSqft : 0,
+      psfBuilding: bldgSqft > 0 ? sale.netSalePrice / bldgSqft : 0,
+      psfAboveGrade: saleSqft > 0 ? sale.netSalePrice / saleSqft : 0,
       daysSinceWindowStart: Math.max(0, (closeMs - windowStartMs) / 86_400_000),
     };
 
@@ -265,7 +265,7 @@ function olsAnnualRate(comps: RegressionInput[]): number {
 // ---------------------------------------------------------------------------
 
 type EnrichedForStats = {
-  closePrice: number;
+  netSalePrice: number;
   psfBuilding: number;
   psfAboveGrade: number;
   daysSinceWindowStart: number;
@@ -295,8 +295,8 @@ function buildStats(
   let psfAboveLo = Infinity, psfAboveHi = -Infinity;
 
   for (const c of comps) {
-    if (c.closePrice < priceLo) priceLo = c.closePrice;
-    if (c.closePrice > priceHi) priceHi = c.closePrice;
+    if (c.netSalePrice < priceLo) priceLo = c.netSalePrice;
+    if (c.netSalePrice > priceHi) priceHi = c.netSalePrice;
     if (c.psfBuilding > 0) {
       if (c.psfBuilding < psfBldgLo) psfBldgLo = c.psfBuilding;
       if (c.psfBuilding > psfBldgHi) psfBldgHi = c.psfBuilding;
