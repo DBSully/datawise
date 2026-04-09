@@ -1,3 +1,18 @@
+## 2026-04-08i — Comp Table Column Reorder, Sorting, Filtering & Conditional Formatting
+
+### What changed
+
+- **Column reorder**: DIST moved to the left of Address; LVL moved to the left of Year for a more logical scanning order
+- **Sortable columns**: Imp ARV, Gap, Days, and Bldg SF headers are now clickable to sort ascending/descending with ▼/▲ indicators; default sort is Gap descending (best deals first)
+- **Show Selected Only toggle**: Button above the comp table filters to only picked comps for final review (map is unaffected)
+- **DIST conditional formatting**: ≤ 0.2 mi = green (very close comp), ≥ 0.6 mi = red (distant comp), between = default slate
+
+### Files changed
+
+- `components/screening/screening-comp-modal.tsx` — sort state + toggleSort handler, IIFE-wrapped sorted/filtered candidate rendering, clickable sort headers, showSelectedOnly toggle button, distance color coding
+
+---
+
 ## 2026-04-08h — Live ARV Computation for All Comp Candidates
 
 ### What changed

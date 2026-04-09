@@ -126,6 +126,17 @@ export function ScreeningCompModal({
   // Pass form state
   const [passReason, setPassReason] = useState("");
   const [passOtherText, setPassOtherText] = useState("");
+  const [showSelectedOnly, setShowSelectedOnly] = useState(false);
+
+  // Sort state for candidate table
+  type SortCol = "gap" | "impArv" | "days" | "bldg";
+  type SortDir = "asc" | "desc";
+  const [sortCol, setSortCol] = useState<SortCol>("gap");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const toggleSort = (col: SortCol) => {
+    if (sortCol === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortCol(col); setSortDir("desc"); }
+  };
 
   // Determine the loading mode
   const isWorkstationMode = !resultId && !!compSearchRunIdProp && !!realPropertyId;
@@ -640,24 +651,34 @@ export function ScreeningCompModal({
             </div>
 
             {/* Right: Dense candidate table */}
-            <div className="flex-1 overflow-auto">
+            <div className="flex flex-1 flex-col overflow-hidden">
+              <div className="flex items-center justify-end px-1 py-0.5">
+                <button
+                  type="button"
+                  onClick={() => setShowSelectedOnly((v) => !v)}
+                  className={`rounded border px-2 py-0.5 text-[10px] font-semibold ${showSelectedOnly ? "border-emerald-300 bg-emerald-100 text-emerald-800" : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"}`}
+                >
+                  {showSelectedOnly ? "Show All Comps" : "Show Selected Only"}
+                </button>
+              </div>
+              <div className="flex-1 overflow-auto">
               <table className="w-full text-[11px]">
                 <thead>
                   <tr className="sticky top-0 z-20 bg-slate-50 text-[9px] uppercase tracking-wider text-slate-500" style={{ height: 22 }}>
                     <th className="px-1 py-0.5 text-left" style={{ width: 42 }}></th>
-                    <th className="px-1 py-0.5 text-left" style={{ maxWidth: 140 }}>Address</th>
                     <th className="px-1 py-0.5 text-right">Dist</th>
+                    <th className="px-1 py-0.5 text-left" style={{ maxWidth: 140 }}>Address</th>
                     <th className="px-1 py-0.5 text-left" style={{ maxWidth: 110 }}>Subdiv</th>
-                    <th className="px-1 py-0.5 text-left" style={{ maxWidth: 56 }}>Lvl</th>
                     <th className="px-1 py-0.5 text-right">Net Price</th>
-                    <th className="px-1 py-0.5 text-right">Imp ARV</th>
-                    <th className="px-1 py-0.5 text-right">Gap</th>
-                    <th className="px-1 py-0.5 text-right">Days</th>
+                    <th className="cursor-pointer select-none px-1 py-0.5 text-right hover:text-slate-800" onClick={() => toggleSort("impArv")}>Imp ARV{sortCol === "impArv" ? (sortDir === "desc" ? " ▼" : " ▲") : ""}</th>
+                    <th className="cursor-pointer select-none px-1 py-0.5 text-right hover:text-slate-800" onClick={() => toggleSort("gap")}>Gap{sortCol === "gap" ? (sortDir === "desc" ? " ▼" : " ▲") : ""}</th>
+                    <th className="cursor-pointer select-none px-1 py-0.5 text-right hover:text-slate-800" onClick={() => toggleSort("days")}>Days{sortCol === "days" ? (sortDir === "desc" ? " ▼" : " ▲") : ""}</th>
+                    <th className="px-1 py-0.5 text-left" style={{ maxWidth: 56 }}>Lvl</th>
                     <th className="px-1 py-0.5 text-right">Year</th>
                     <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Bd</th>
                     <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Ba</th>
                     <th className="px-1 py-0.5 text-right" style={{ width: 24 }}>Gar</th>
-                    <th className="px-1 py-0.5 text-right">Bldg SF</th>
+                    <th className="cursor-pointer select-none px-1 py-0.5 text-right hover:text-slate-800" onClick={() => toggleSort("bldg")}>Bldg SF{sortCol === "bldg" ? (sortDir === "desc" ? " ▼" : " ▲") : ""}</th>
                     <th className="px-1 py-0.5 text-right">Bsmt</th>
                     <th className="px-1 py-0.5 text-right">BsFin</th>
                     <th className="px-1 py-0.5 text-right">Lot</th>
@@ -672,15 +693,12 @@ export function ScreeningCompModal({
                         Subject
                       </span>
                     </td>
+                    <td className="px-1 py-0.5 text-right">—</td>
                     <td className="max-w-[140px] truncate px-1 py-0.5" title={data.subjectAddress}>
                       {data.subjectAddress}
                     </td>
-                    <td className="px-1 py-0.5 text-right">—</td>
                     <td className="max-w-[110px] truncate px-1 py-0.5" title={data.subdivision ?? ""}>
                       {data.subdivision ?? "—"}
-                    </td>
-                    <td className="max-w-[56px] truncate px-1 py-0.5">
-                      {data.levelsRaw ?? "—"}
                     </td>
                     <td className="px-1 py-0.5 text-right">
                       {$f(data.subjectListPrice)}
@@ -692,6 +710,9 @@ export function ScreeningCompModal({
                       {liveDeal?.gapPerSqft != null ? `$${fmtNum(liveDeal.gapPerSqft)}` : "—"}
                     </td>
                     <td className="px-1 py-0.5 text-right">—</td>
+                    <td className="max-w-[56px] truncate px-1 py-0.5">
+                      {data.levelsRaw ?? "—"}
+                    </td>
                     <td className="px-1 py-0.5 text-right">
                       {data.yearBuilt != null ? String(data.yearBuilt) : "—"}
                     </td>
@@ -706,19 +727,32 @@ export function ScreeningCompModal({
                       {compStats.avgScore != null ? fmtNum(compStats.avgScore, 1) : "—"}
                     </td>
                   </tr>
-                  {data.candidates.map((c) => {
-                    const m = c.metrics_json;
-                    const netPrice = (m.net_price as number) ?? (m.close_price as number) ?? null;
-                    const arvDetail = c.comp_listing_row_id
-                      ? data.arvByCompListingId[c.comp_listing_row_id] ?? null
-                      : null;
-                    const impliedArv = arvDetail?.arv ?? null;
+                  {(() => {
                     const subjectSqftVal = data.subjectBuildingSqft ?? 0;
                     const subjectListVal = data.subjectListPrice ?? 0;
-                    const gapPerSqft =
-                      netPrice != null && subjectSqftVal > 0 && subjectListVal > 0
-                        ? Math.round((netPrice - subjectListVal) / subjectSqftVal)
-                        : null;
+                    const filtered = data.candidates.filter((c) => !showSelectedOnly || c.selected_yn);
+                    const withSortVals = filtered.map((c) => {
+                      const m = c.metrics_json;
+                      const netPrice = (m.net_price as number) ?? (m.close_price as number) ?? null;
+                      const arvDetail = c.comp_listing_row_id ? data.arvByCompListingId[c.comp_listing_row_id] ?? null : null;
+                      const impliedArv = arvDetail?.arv ?? null;
+                      const gapPerSqft = netPrice != null && subjectSqftVal > 0 && subjectListVal > 0
+                        ? Math.round((netPrice - subjectListVal) / subjectSqftVal) : null;
+                      return { c, m, netPrice, arvDetail, impliedArv, gapPerSqft };
+                    });
+                    const mult = sortDir === "desc" ? -1 : 1;
+                    withSortVals.sort((a, b) => {
+                      let va: number | null = null, vb: number | null = null;
+                      if (sortCol === "gap") { va = a.gapPerSqft; vb = b.gapPerSqft; }
+                      else if (sortCol === "impArv") { va = a.impliedArv; vb = b.impliedArv; }
+                      else if (sortCol === "days") { va = a.c.days_since_close; vb = b.c.days_since_close; }
+                      else if (sortCol === "bldg") { va = (a.m.building_area_total_sqft as number) ?? null; vb = (b.m.building_area_total_sqft as number) ?? null; }
+                      if (va == null && vb == null) return 0;
+                      if (va == null) return 1;
+                      if (vb == null) return -1;
+                      return (va - vb) * mult;
+                    });
+                    return withSortVals.map(({ c, m, netPrice, impliedArv, gapPerSqft }) => {
                     const gapClass =
                       gapPerSqft != null && gapPerSqft >= 60
                         ? "text-emerald-600 font-semibold"
@@ -755,23 +789,20 @@ export function ScreeningCompModal({
                             {c.selected_yn ? "Picked" : "Pick"}
                           </button>
                         </td>
+                        <td className={`px-1 py-0.5 text-right ${c.distance_miles != null && c.distance_miles <= 0.2 ? "text-emerald-600 font-semibold" : c.distance_miles != null && c.distance_miles >= 0.6 ? "text-red-600 font-semibold" : "text-slate-700"}`}>
+                          {fmtNum(c.distance_miles, 2)}
+                        </td>
                         <td
                           className={`max-w-[140px] truncate px-1 py-0.5 ${c.selected_yn ? "font-semibold text-slate-900" : "text-slate-700"}`}
                           title={String(m.address ?? "")}
                         >
                           {String(m.address ?? "—")}
                         </td>
-                        <td className="px-1 py-0.5 text-right text-slate-700">
-                          {fmtNum(c.distance_miles, 2)}
-                        </td>
                         <td
                           className="max-w-[110px] truncate px-1 py-0.5 text-slate-700"
                           title={String(m.subdivision_name ?? "")}
                         >
                           {String(m.subdivision_name ?? "—")}
-                        </td>
-                        <td className="max-w-[56px] truncate px-1 py-0.5 text-slate-700" title={String(m.level_class_standardized ?? "")}>
-                          {String(m.level_class_standardized ?? "—")}
                         </td>
                         <td className="px-1 py-0.5 text-right text-slate-700">
                           {$f(netPrice)}
@@ -784,6 +815,9 @@ export function ScreeningCompModal({
                         </td>
                         <td className={`px-1 py-0.5 text-right font-semibold ${daysClass}`}>
                           {days ?? "—"}
+                        </td>
+                        <td className="max-w-[56px] truncate px-1 py-0.5 text-slate-700" title={String(m.level_class_standardized ?? "")}>
+                          {String(m.level_class_standardized ?? "—")}
                         </td>
                         <td className="px-1 py-0.5 text-right text-slate-700">
                           {m.year_built != null ? String(m.year_built) : "—"}
@@ -814,9 +848,11 @@ export function ScreeningCompModal({
                         </td>
                       </tr>
                     );
-                  })}
+                  });
+                  })()}
                 </tbody>
               </table>
+            </div>
             </div>
           </div>
         )}
