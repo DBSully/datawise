@@ -18,6 +18,7 @@ import {
   savePipelineAction,
   toggleComparableCandidateSelectionAction,
   toggleAsIsComparableCandidateSelectionAction,
+  markAnalysisCompleteAction,
 } from "@/app/(workspace)/analysis/properties/actions";
 import { initialManualAnalysisFormState } from "@/lib/analysis/manual-analysis-state";
 import { ComparableWorkspacePanel } from "@/components/properties/comparable-workspace-panel";
@@ -169,6 +170,8 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
   const [showReportDialog, setShowReportDialog] = useState(false);
   const [reportTitle, setReportTitle] = useState("");
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [completedAt, setCompletedAt] = useState<string | null>(data.analysis.analysisCompletedAt ?? null);
+  const [isMarkingComplete, setIsMarkingComplete] = useState(false);
   const [noteCategory, setNoteCategory] = useState("location");
   const [noteBody, setNoteBody] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -464,6 +467,29 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
             <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.1em] text-slate-500">
               {d.analysis.strategyType ?? "general"}
             </span>
+            <button
+              type="button"
+              disabled={isMarkingComplete}
+              onClick={async () => {
+                setIsMarkingComplete(true);
+                try {
+                  const fd = new FormData();
+                  fd.set("analysis_id", d.analysisId);
+                  const res = await markAnalysisCompleteAction(fd);
+                  if (res?.completedAt) setCompletedAt(res.completedAt);
+                } finally {
+                  setIsMarkingComplete(false);
+                }
+              }}
+              className={`rounded-md border px-2 py-0.5 text-[10px] font-semibold ${completedAt ? "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100" : "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"}`}
+            >
+              {isMarkingComplete ? "Saving..." : completedAt ? "Update Complete" : "Mark Complete"}
+            </button>
+            {completedAt && (
+              <span className="text-[9px] text-slate-400">
+                {new Date(completedAt).toLocaleDateString()} {new Date(completedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            )}
             <button
               type="button"
               onClick={() => {

@@ -1,3 +1,38 @@
+## 2026-04-08j — Analysis Completion Timestamps & Daily Activity Log
+
+### What changed
+
+- **`analysis_completed_at`** column on `analyses` — stamped when analyst clicks "Mark Complete" on the workstation, updated on subsequent clicks
+- **`last_screened_at`** column on `screening_results` — stamped when the screening pipeline processes a property (backfilled from `created_at` for existing rows)
+- **"Mark Complete" / "Update Complete" button** on both Analysis Workstation pages (properties + deals/watchlist), positioned next to "Generate Report"
+  - First click: sets `status = 'complete'`, stamps `analysis_completed_at`
+  - Subsequent clicks: re-stamps the timestamp
+  - Shows last-completed date/time inline
+  - Button style changes from amber (not yet complete) to blue (previously completed)
+- **`daily_activity_v` view** — unions screening results and analysis completions for activity tracking
+- **"Today's Activity" dashboard section** on the home page — table showing all screening and analysis activity for the current day with timestamps, type badges, addresses, and links
+
+### Database migration
+
+`20260408200000_analysis_timestamps.sql`:
+- `analyses.analysis_completed_at` (timestamptz, indexed)
+- `screening_results.last_screened_at` (timestamptz, default now(), indexed, backfilled)
+- `daily_activity_v` view
+
+### Files changed
+
+- `supabase/migrations/20260408200000_analysis_timestamps.sql` — new migration
+- `lib/reports/types.ts` — added `analysisCompletedAt` to WorkstationData analysis type
+- `lib/analysis/load-workstation-data.ts` — select and return `analysis_completed_at`
+- `lib/screening/bulk-runner.ts` — stamp `last_screened_at` on screening_results insert
+- `app/(workspace)/analysis/properties/actions.ts` — new `markAnalysisCompleteAction`
+- `app/(workspace)/deals/actions.ts` — new `markAnalysisCompleteAction`
+- `app/(workspace)/analysis/properties/[id]/analyses/[analysisId]/analysis-workstation.tsx` — Mark Complete button + state
+- `app/(workspace)/deals/watchlist/[analysisId]/analysis-workstation.tsx` — Mark Complete button + state
+- `app/(workspace)/home/page.tsx` — daily activity query + "Today's Activity" table section
+
+---
+
 ## 2026-04-08i — Comp Table Column Reorder, Sorting, Filtering & Conditional Formatting
 
 ### What changed

@@ -960,6 +960,7 @@ async function writeScreeningResults(
 
       screening_status: r.screeningStatus,
       error_message: r.errorMessage,
+      last_screened_at: new Date().toISOString(),
     }));
 
     const { error } = await supabase.from("screening_results").insert(rows);

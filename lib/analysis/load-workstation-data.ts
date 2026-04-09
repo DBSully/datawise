@@ -98,7 +98,7 @@ export async function loadWorkstationData(
       .maybeSingle(),
     supabase
       .from("analyses")
-      .select("id, real_property_id, listing_id, scenario_name, strategy_type, status, created_at")
+      .select("id, real_property_id, listing_id, scenario_name, strategy_type, status, analysis_completed_at, created_at")
       .eq("id", analysisId)
       .eq("real_property_id", propertyId)
       .eq("created_by_user_id", userId)
@@ -595,6 +595,7 @@ export async function loadWorkstationData(
       scenarioName: analysis.scenario_name,
       strategyType: analysis.strategy_type,
       status: analysis.status,
+      analysisCompletedAt: analysis.analysis_completed_at,
     },
     property: {
       address: property.unparsed_address,

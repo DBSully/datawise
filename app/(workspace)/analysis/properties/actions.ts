@@ -633,6 +633,47 @@ export async function deleteAnalysisNoteAction(formData: FormData) {
 // ---------------------------------------------------------------------------
 // Save pipeline status
 // ---------------------------------------------------------------------------
+// Mark analysis complete / update timestamp
+// ---------------------------------------------------------------------------
+
+export async function markAnalysisCompleteAction(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const analysisId = textValue(formData, "analysis_id");
+  if (!analysisId) return { error: "Missing analysis_id" };
+
+  const { error } = await supabase
+    .from("analyses")
+    .update({
+      status: "complete",
+      analysis_completed_at: new Date().toISOString(),
+    })
+    .eq("id", analysisId);
+
+  if (error) return { error: error.message };
+
+  const { data: analysis } = await supabase
+    .from("analyses")
+    .select("real_property_id")
+    .eq("id", analysisId)
+    .maybeSingle();
+
+  if (analysis) {
+    revalidatePath(
+      `/analysis/properties/${analysis.real_property_id}/analyses/${analysisId}`,
+    );
+  }
+  revalidatePath("/deals/watchlist");
+  revalidatePath("/home");
+
+  return { error: null, completedAt: new Date().toISOString() };
+}
+
+// ---------------------------------------------------------------------------
 
 export async function savePipelineAction(formData: FormData) {
   const supabase = await createClient();

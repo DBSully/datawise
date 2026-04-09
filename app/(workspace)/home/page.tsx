@@ -203,6 +203,29 @@ export default async function DashboardPage() {
     }
   }
 
+  // --- Section 5: Daily Activity Log ---
+
+  const { data: activityRows } = await supabase
+    .from("daily_activity_v")
+    .select("activity_type, real_property_id, analysis_id, address, city, is_prime_candidate, strategy_type, analysis_status, activity_at")
+    .gte("activity_at", todayIso)
+    .order("activity_at", { ascending: false })
+    .limit(30);
+
+  type ActivityRow = {
+    activity_type: string;
+    real_property_id: string;
+    analysis_id: string | null;
+    address: string;
+    city: string | null;
+    is_prime_candidate: boolean | null;
+    strategy_type: string | null;
+    analysis_status: string | null;
+    activity_at: string;
+  };
+
+  const activityList = (activityRows ?? []) as ActivityRow[];
+
   return (
     <section className="dw-section-stack-compact">
       <div>
@@ -423,6 +446,63 @@ export default async function DashboardPage() {
               </div>
             ))}
           </div>
+        )}
+      </div>
+
+      {/* Section 5: Daily Activity Log */}
+      <div className="dw-card-tight space-y-2">
+        <h2 className="text-sm font-semibold text-slate-800">
+          Today&apos;s Activity
+        </h2>
+
+        {activityList.length === 0 ? (
+          <p className="py-4 text-center text-sm text-slate-400">
+            No activity recorded today.
+          </p>
+        ) : (
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-slate-200 text-[10px] uppercase tracking-wider text-slate-500">
+                <th className="px-2 py-1 text-left">Time</th>
+                <th className="px-2 py-1 text-left">Type</th>
+                <th className="px-2 py-1 text-left">Address</th>
+                <th className="px-2 py-1 text-left">City</th>
+                <th className="px-2 py-1 text-left">Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activityList.map((a, i) => (
+                <tr key={`${a.activity_type}-${a.real_property_id}-${i}`} className="border-t border-slate-100 hover:bg-slate-50">
+                  <td className="whitespace-nowrap px-2 py-1 text-slate-500">
+                    {new Date(a.activity_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </td>
+                  <td className="px-2 py-1">
+                    <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${a.activity_type === "screening" ? "bg-violet-100 text-violet-700" : "bg-blue-100 text-blue-700"}`}>
+                      {a.activity_type === "screening" ? "Screened" : "Analysis"}
+                    </span>
+                  </td>
+                  <td className="px-2 py-1 font-medium text-slate-800">
+                    {a.analysis_id ? (
+                      <Link href={`/deals/watchlist/${a.analysis_id}`} className="hover:underline">
+                        {a.address}
+                      </Link>
+                    ) : (
+                      a.address
+                    )}
+                  </td>
+                  <td className="px-2 py-1 text-slate-600">{a.city ?? "—"}</td>
+                  <td className="px-2 py-1 text-slate-500">
+                    {a.activity_type === "screening" && a.is_prime_candidate && (
+                      <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">Prime</span>
+                    )}
+                    {a.activity_type === "analysis_complete" && a.strategy_type && (
+                      <span className="text-slate-600">{a.strategy_type}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
     </section>

@@ -157,6 +157,7 @@ export type WorkstationData = {
     scenarioName: string | null;
     strategyType: string | null;
     status: string | null;
+    analysisCompletedAt: string | null;
   };
   property: {
     address: string;
