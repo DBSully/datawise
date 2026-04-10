@@ -1,3 +1,81 @@
+## 2026-04-09c — Watch List Rebuild + Workstation Quick Analysis Panel
+
+### What changed
+
+#### Watch List table — full column rebuild
+
+The `/deals/watchlist` table was rebuilt against an expanded view to expose every field needed for at-a-glance deal triage. New column order:
+
+`Actions | Interest | Address | City | Subdivision | Change Type | DOM | List Date | Comps | ARV | List Price | Max Offer | Offer % | Gap | Profit | Lvl | Year | Bd | Ba | Gar | Bldg SF | Abv SF | Bsmt | BsFin | Lot | Status | Note`
+
+- **Actions** moved to the leftmost column.
+- **Actions / Interest / Address** are sticky-frozen on the left so they stay visible while scrolling horizontally (`position: sticky` with explicit `left` offsets and z-index hierarchy for header/body intersections).
+- **Comps** = `selected/total` from `comparable_search_candidates.selected_yn`.
+- **DOM** centered. Pending/closed = `purchase_contract_date − listing_contract_date`. Active/coming soon = `greatest(0, today − listing_contract_date + 1)` (inclusive of list date so a same-day listing shows 1 and a future-dated coming soon shows 0).
+- **List Price** prefers live `mls_listings.list_price` (falls back to subject snapshot only if no MLS row exists).
+- **Offer %** and **Gap** are recomputed against the *live* list price every page load — the table never shows stale snapshot math.
+- **Gap** = `(arv − list_price) / building_area_total_sqft`.
+- **Profit** = `coalesce(manual_analysis.target_profit_manual, screening_results.target_profit)`.
+- **List Date** displays `mm/dd/yy` parsed directly from the `YYYY-MM-DD` string to avoid timezone shifts.
+
+**Filter bar:** City, Level Class, Change Type, Status, Interest, Min Offer %, Min Gap, Clear button, `n of N` count.
+
+**Sorting:** every numeric column is click-to-sort with ▲/▼ indicators. Default is Offer % desc.
+
+**Density:** `text-[11px]` body / `text-[9px]` uppercase headers, `px-1 py-0.5` cells, 22px sticky header — matches `ScreeningCompModal`. Body cells use `text-slate-700`, emphasized values use `font-semibold text-slate-900`. Bd/Ba/Gar/Year columns use explicit tight widths (24/24/28/40px). Subdivision and Lvl truncate at 110/56px with tooltips.
+
+#### `watch_list_v` view — expanded columns
+
+Recreated the view with all the fields the new table needs. **Note:** the migration requires a `drop view if exists` first because Postgres `create or replace view` cannot remove or reorder columns from an existing view.
+
+New columns exposed: `subdivision_name`, `mls_major_change_type`, `listing_contract_date`, `mls_status`, `list_price` (live), `dom`, `level_class_standardized`, `year_built`, `bedrooms_total`, `bathrooms_total`, `garage_spaces`, `building_area_total_sqft`, `above_grade_finished_area_sqft`, `below_grade_total_sqft`, `below_grade_finished_area_sqft`, `lot_size_sqft`, `arv_aggregate`, `max_offer`, `comps_selected`, `comps_total`, `offer_pct` (recomputed), `gap_per_sqft` (recomputed), `target_profit` (manual override applied).
+
+`comps_selected` / `comps_total` come from a lateral aggregate over `comparable_search_candidates` keyed on `screening_results.comp_search_run_id`.
+
+**Migration:** `20260409120000_watch_list_view_expand_columns.sql`
+
+#### Analysis Workstation — three-card panel + Quick Analysis
+
+Imported the top section from `ScreeningCompModal` into the Analysis Workstation as a three-card row sitting just below the existing header bar:
+
+1. **MLS Info** card (max 320px) — MLS Status, MLS#, MLS Change, List Date, Orig List Price, U/C Date, List Price, Close Date.
+2. **Property Physical** card (max 400px) — 4 rows × 3 column-pairs: Total SF/Beds/Type, Above SF/Baths/Levels, Below SF/Garage/Year, Bsmt Fin/Lot SF/Tax|HOA. Year < 1950 renders red bold.
+3. **Quick Analysis** card (max 360px) — three live-recalc inputs: **Manual ARV**, **Rehab Override**, **Target Profit**. Each shows the current effective value as the placeholder.
+
+Below the cards: a **Deal Math summary strip** (`ARV · Max Offer · Offer% · Gap/sqft · Rehab · Target Profit`) that recalculates instantly via a `useMemo` as the user types in the Quick Analysis inputs. The recalc mirrors the modal's logic:
+
+```
+arv         = manual override OR data.arv.effective
+rehabTotal  = manual override OR data.rehab.effective
+targetProfit = manual override OR data.dealMath.targetProfit OR 40,000
+costs       = rehab + holding + transaction + financing + targetProfit
+maxOffer    = arv − costs
+offerPct    = maxOffer / listPrice
+gap/sqft    = (arv − listPrice) / buildingSqft
+```
+
+**Quick Analysis is a what-if scratchpad — nothing persists.** Existing analysis fields stay untouched. The user still uses the existing manual analysis form below to save.
+
+**Tab flow fix:** Tabbing out of the Target Profit input now jumps directly to "Copy Selected MLS#" instead of the "Hold & Trans Detail" toggle. Implemented via a `useRef` on the button + an `onKeyDown` Tab interceptor on the Target Profit input.
+
+#### Card sizing — both Workstation and ScreeningCompModal
+
+The middle Property Physical card was previously `flex-1`, stretching to fill available width. Both files now:
+
+- All three cards use `shrink-0` with explicit `maxWidth` (320 / 400 / 360).
+- Inner grid `1fr` spacer columns replaced with explicit `16px` so the visual grouping survives when the card is content-sized.
+- Empty space sits to the right of the Quick Analysis card, reserved for future widgets.
+
+#### Backend additions
+
+`load-workstation-data.ts` now also pulls `mls_major_change_type`, `purchase_contract_date`, and `close_date` from `mls_listings` and exposes them as `data.listing.mlsMajorChangeType / purchaseContractDate / closeDate`. The `WorkstationData` type in `lib/reports/types.ts` was updated to match. No SQL migration needed — those fields already exist on `mls_listings`.
+
+### Migrations
+
+- `20260409120000_watch_list_view_expand_columns.sql`
+
+---
+
 ## 2026-04-09b — Screening Queue Auto Filters, Performance Indexes
 
 ### What changed

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, type ReactNode } from "react";
+import { useState, useMemo, useCallback, useRef, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -68,6 +68,24 @@ function TrendDirectionBadge({ direction }: { direction: TrendDirection }) {
 function fmtRate(rate: number | null): string {
   if (rate == null) return "\u2014";
   return `${rate >= 0 ? "+" : ""}${(rate * 100).toFixed(1)}%`;
+}
+
+/** Format an ISO date string ("YYYY-MM-DD" or full timestamp) as mm/dd/yy without TZ shifts. */
+function fmtIsoDate(v: string | null | undefined): string {
+  if (!v) return "\u2014";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v);
+  if (!m) return "\u2014";
+  return `${m[2]}/${m[3]}/${m[1].slice(2)}`;
+}
+
+/** Compact deal-stat pill used in the live-recalc summary strip. */
+function DealStat({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div className="flex flex-col leading-tight">
+      <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-500">{label}</span>
+      <span className={`font-mono text-[13px] ${highlight ? "font-bold text-slate-900" : "text-slate-700"}`}>{value}</span>
+    </div>
+  );
 }
 
 function TrendTierColumn({ label, radius, rate, stats }: {
@@ -530,6 +548,14 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
   const [copiedSelected, setCopiedSelected] = useState(false);
   const [copiedSelectedAsIs, setCopiedSelectedAsIs] = useState(false);
 
+  // Quick Analysis overrides — local-only, recalculate live without persisting
+  const [manualArvInput, setManualArvInput] = useState("");
+  const [manualRehabInput, setManualRehabInput] = useState("");
+  const [manualTargetProfitInput, setManualTargetProfitInput] = useState("");
+  // Ref so Tab from Target Profit jumps directly to Copy Selected MLS#
+  // (skipping the Hold & Trans Detail toggle which is the natural next focus)
+  const copySelectedMlsBtnRef = useRef<HTMLButtonElement | null>(null);
+
   const d = data;
   const p = d.physical;
 
@@ -592,6 +618,42 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
         };
       });
   }, [d, _subjSqft, _subjListPrice, _arvMap]);
+
+  // Live-recomputed deal math driven by Quick Analysis overrides.
+  // Mirrors the logic in ScreeningCompModal so the workstation reacts instantly
+  // to manual ARV / rehab / target profit edits without persisting.
+  const liveDeal = useMemo(() => {
+    const parsedArv = manualArvInput ? Number(manualArvInput.replace(/[,$]/g, "")) : null;
+    const parsedRehab = manualRehabInput ? Number(manualRehabInput.replace(/[,$]/g, "")) : null;
+    const parsedTargetProfit = manualTargetProfitInput ? Number(manualTargetProfitInput.replace(/[,$]/g, "")) : null;
+
+    const arv = (parsedArv != null && Number.isFinite(parsedArv) && parsedArv > 0)
+      ? parsedArv
+      : (d.arv.effective ?? 0);
+
+    const rehabTotal = (parsedRehab != null && Number.isFinite(parsedRehab))
+      ? parsedRehab
+      : (d.rehab.effective ?? 0);
+
+    const targetProfit = (parsedTargetProfit != null && Number.isFinite(parsedTargetProfit))
+      ? parsedTargetProfit
+      : (d.dealMath?.targetProfit ?? 40_000);
+
+    const holdTotal = d.holding?.total ?? 0;
+    const transactionTotal = d.transaction?.total ?? 0;
+    const financingTotal = d.financing?.total ?? 0;
+
+    const costs = rehabTotal + holdTotal + transactionTotal + financingTotal + targetProfit;
+    const maxOffer = Math.round(arv - costs);
+    const listPrice = d.listing?.listPrice ?? 0;
+    const offerPct = listPrice > 0 ? Math.round((maxOffer / listPrice) * 10000) / 10000 : null;
+    const sqft = d.physical?.buildingSqft ?? 0;
+    const gapPerSqft = listPrice > 0 && sqft > 0
+      ? Math.round((arv - listPrice) / sqft)
+      : null;
+
+    return { arv, maxOffer, offerPct, gapPerSqft, rehabTotal, targetProfit };
+  }, [d, manualArvInput, manualRehabInput, manualTargetProfitInput]);
 
   // Build selected As-Is comps list — same candidate pool, different selection flag
   const selectedAsIsComps = useMemo(() => {
@@ -937,6 +999,140 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
           {(d.financials?.annualHoa ?? 0) > 0 && <span>HOA: {fmt(d.financials!.annualHoa)}/yr</span>}
           <span>List: <b className="text-slate-700">{fmt(d.listing?.listPrice)}</b></span>
         </div>
+      </div>
+
+      {/* ================================================================== */}
+      {/* THREE-CARD PANEL — MLS Info / Property Physical / Quick Analysis    */}
+      {/* Mirrors the top of ScreeningCompModal for at-a-glance subject facts */}
+      {/* and live recalc inputs that update the Deal Strip below.            */}
+      {/* ================================================================== */}
+      <div className="flex gap-3">
+        {/* MLS Info tile */}
+        <div className="shrink-0 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-snug" style={{ maxWidth: 320 }}>
+          <div className="grid grid-cols-[auto_auto_16px_auto_auto] gap-x-2 gap-y-0.5">
+            <span className="font-bold text-slate-500">MLS Status</span>
+            <span className="text-slate-900">{d.listing?.mlsStatus ?? "\u2014"}</span>
+            <span />
+            <span className="font-bold text-slate-500">MLS#</span>
+            <span className="text-slate-900">{d.listing?.listingId ?? "\u2014"}</span>
+
+            <span className="font-bold text-slate-500">MLS Change</span>
+            <span className="text-slate-900">{d.listing?.mlsMajorChangeType ?? "\u2014"}</span>
+            <span />
+            <span className="font-bold text-slate-500">List Date</span>
+            <span className="text-slate-900">{fmtIsoDate(d.listing?.listingContractDate)}</span>
+
+            <span className="font-bold text-slate-500">Orig List Price</span>
+            <span className="text-slate-900">{fmt(d.listing?.originalListPrice)}</span>
+            <span />
+            <span className="font-bold text-slate-500">U/C Date</span>
+            <span className="text-slate-900">{fmtIsoDate(d.listing?.purchaseContractDate)}</span>
+
+            <span className="font-bold text-slate-500">List Price</span>
+            <span className="text-slate-900">{fmt(d.listing?.listPrice)}</span>
+            <span />
+            <span className="font-bold text-slate-500">Close Date</span>
+            <span className="text-slate-900">{fmtIsoDate(d.listing?.closeDate)}</span>
+          </div>
+        </div>
+
+        {/* Property Physical tile */}
+        <div className="shrink-0 rounded border border-slate-200 bg-slate-50 px-3 py-2" style={{ maxWidth: 400 }}>
+          <div className="grid grid-cols-[auto_auto_16px_auto_auto_16px_auto_auto] gap-x-2 gap-y-0.5 text-[11px] leading-snug">
+            {/* Row 1 */}
+            <span className="font-bold text-slate-500">Total SF</span>
+            <span className="text-slate-900">{fmtNum(p?.buildingSqft)}</span>
+            <span />
+            <span className="font-bold text-slate-500">Beds</span>
+            <span className="text-slate-900">{p?.bedroomsTotal ?? "\u2014"}</span>
+            <span />
+            <span className="font-bold text-slate-500">Type</span>
+            <span className="text-slate-900">{p?.propertyType ?? "\u2014"}</span>
+            {/* Row 2 */}
+            <span className="font-bold text-slate-500">Above SF</span>
+            <span className="text-slate-900">{fmtNum(p?.aboveGradeSqft)}</span>
+            <span />
+            <span className="font-bold text-slate-500">Baths</span>
+            <span className="text-slate-900">{p?.bathroomsTotal != null ? fmtNum(p.bathroomsTotal, 1) : "\u2014"}</span>
+            <span />
+            <span className="font-bold text-slate-500">Levels</span>
+            <span className="text-slate-900">{(d.subjectContext.levelsRaw as string | null) ?? p?.levelClass ?? "\u2014"}</span>
+            {/* Row 3 */}
+            <span className="font-bold text-slate-500">Below SF</span>
+            <span className="text-slate-900">{fmtNum(p?.belowGradeTotalSqft)}</span>
+            <span />
+            <span className="font-bold text-slate-500">Garage</span>
+            <span className="text-slate-900">{p?.garageSpaces != null ? fmtNum(p.garageSpaces, 1) : "\u2014"}</span>
+            <span />
+            <span className="font-bold text-slate-500">Year</span>
+            <span className={p?.yearBuilt && p.yearBuilt < 1950 ? "font-bold text-red-600" : "text-slate-900"}>{p?.yearBuilt ?? "\u2014"}</span>
+            {/* Row 4 */}
+            <span className="font-bold text-slate-500">Bsmt Fin</span>
+            <span className="text-slate-900">{fmtNum(p?.belowGradeFinishedSqft)}</span>
+            <span />
+            <span className="font-bold text-slate-500">Lot SF</span>
+            <span className="text-slate-900">{fmtNum(p?.lotSizeSqft)}</span>
+            <span />
+            <span className="font-bold text-slate-500">Tax/HOA</span>
+            <span className="text-slate-900">{fmt(d.financials?.annualTax)} | {fmt(d.financials?.annualHoa)}</span>
+          </div>
+        </div>
+
+        {/* Quick Analysis tile — live recalc, no persistence */}
+        <div className="shrink-0 rounded border border-blue-200 bg-blue-50/50 px-3 py-2" style={{ maxWidth: 360 }}>
+          <div className="mb-1.5 text-[9px] font-bold uppercase tracking-wider text-blue-600">Quick Analysis</div>
+          <div className="grid grid-cols-3 gap-x-2 gap-y-1">
+            <div>
+              <label className="block text-[9px] font-semibold uppercase tracking-wider text-slate-500">Manual ARV</label>
+              <input
+                type="text"
+                value={manualArvInput}
+                onChange={(e) => setManualArvInput(e.target.value)}
+                placeholder={liveDeal.arv ? `${liveDeal.arv.toLocaleString()}` : "\u2014"}
+                className="mt-0.5 w-[100px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
+              />
+            </div>
+            <div>
+              <label className="block text-[9px] font-semibold uppercase tracking-wider text-slate-500">Rehab Override</label>
+              <input
+                type="text"
+                value={manualRehabInput}
+                onChange={(e) => setManualRehabInput(e.target.value)}
+                placeholder={d.rehab.effective != null ? `${Math.round(d.rehab.effective).toLocaleString()}` : "\u2014"}
+                className="mt-0.5 w-[100px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
+              />
+            </div>
+            <div>
+              <label className="block text-[9px] font-semibold uppercase tracking-wider text-slate-500">Target Profit</label>
+              <input
+                type="text"
+                value={manualTargetProfitInput}
+                onChange={(e) => setManualTargetProfitInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Tab" && !e.shiftKey && copySelectedMlsBtnRef.current) {
+                    e.preventDefault();
+                    copySelectedMlsBtnRef.current.focus();
+                  }
+                }}
+                placeholder={d.dealMath?.targetProfit != null ? `${d.dealMath.targetProfit.toLocaleString()}` : "40,000"}
+                className="mt-0.5 w-[100px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Deal math summary strip — live-recalculated from Quick Analysis inputs */}
+      <div className="flex items-center gap-4 rounded border border-slate-200 bg-slate-50 px-4 py-2">
+        <DealStat label="ARV" value={fmt(liveDeal.arv)} highlight />
+        <DealStat label="Max Offer" value={fmt(liveDeal.maxOffer)} highlight />
+        <DealStat label="Offer%" value={fmtPct(liveDeal.offerPct)} />
+        <DealStat
+          label="Gap/sqft"
+          value={liveDeal.gapPerSqft != null ? `$${fmtNum(liveDeal.gapPerSqft)}` : "\u2014"}
+        />
+        <DealStat label="Rehab" value={fmt(liveDeal.rehabTotal)} />
+        <DealStat label="Target Profit" value={fmt(liveDeal.targetProfit)} />
       </div>
 
       {/* ================================================================== */}
@@ -1306,6 +1502,7 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
                 </button>
                 <button
                   type="button"
+                  ref={copySelectedMlsBtnRef}
                   onClick={handleCopySelectedMls}
                   className="rounded-md border border-slate-200 bg-white px-2 py-0.5 font-mono text-[11px] text-slate-600 hover:bg-slate-50"
                 >

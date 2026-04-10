@@ -127,7 +127,7 @@ export async function loadWorkstationData(
   if (!property || !analysis) return null;
 
   // Load listing
-  const listingSelect = "id, listing_id, mls_status, list_price, close_price, concessions_amount, listing_contract_date, property_condition_source, source_system, original_list_price, subdivision_name";
+  const listingSelect = "id, listing_id, mls_status, list_price, close_price, concessions_amount, listing_contract_date, purchase_contract_date, close_date, mls_major_change_type, property_condition_source, source_system, original_list_price, subdivision_name";
   let listing: Record<string, unknown> | null = null;
 
   if (analysis.listing_id) {
@@ -699,6 +699,9 @@ export async function loadWorkstationData(
       originalListPrice: toNum(listing.original_list_price),
       listingContractDate: listing.listing_contract_date as string | null,
       subdivisionName: listing.subdivision_name as string | null,
+      mlsMajorChangeType: listing.mls_major_change_type as string | null,
+      purchaseContractDate: listing.purchase_contract_date as string | null,
+      closeDate: listing.close_date as string | null,
     } : null,
     financials: financials ? {
       annualTax: toNum(financials.annual_property_tax),

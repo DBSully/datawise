@@ -208,6 +208,9 @@ export type WorkstationData = {
     originalListPrice: number;
     listingContractDate: string | null;
     subdivisionName: string | null;
+    mlsMajorChangeType: string | null;
+    purchaseContractDate: string | null;
+    closeDate: string | null;
   } | null;
   financials: { annualTax: number; annualHoa: number } | null;
   arv: {

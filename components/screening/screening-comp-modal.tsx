@@ -464,8 +464,8 @@ export function ScreeningCompModal({
           {data && (
             <div className="flex gap-3">
               {/* MLS Info tile */}
-              <div className="shrink-0 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-snug">
-                <div className="grid grid-cols-[auto_auto_1fr_auto_auto] gap-x-2 gap-y-0.5">
+              <div className="shrink-0 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-snug" style={{ maxWidth: 320 }}>
+                <div className="grid grid-cols-[auto_auto_16px_auto_auto] gap-x-2 gap-y-0.5">
                   <span className="font-bold text-slate-500">MLS Status</span>
                   <span className="text-slate-900">{data.mlsStatus ?? "—"}</span>
                   <span />
@@ -492,8 +492,8 @@ export function ScreeningCompModal({
                 </div>
               </div>
               {/* Property Physical tile */}
-              <div className="min-w-0 flex-1 rounded border border-slate-200 bg-slate-50 px-3 py-2">
-                <div className="grid grid-cols-[auto_auto_1fr_auto_auto_1fr_auto_auto] gap-x-2 gap-y-0.5 text-[11px] leading-snug">
+              <div className="shrink-0 rounded border border-slate-200 bg-slate-50 px-3 py-2" style={{ maxWidth: 400 }}>
+                <div className="grid grid-cols-[auto_auto_16px_auto_auto_16px_auto_auto] gap-x-2 gap-y-0.5 text-[11px] leading-snug">
                   {/* Row 1 */}
                   <span className="font-bold text-slate-500">Total SF</span>
                   <span className="text-slate-900">{fmtNum(data.subjectBuildingSqft)}</span>
@@ -533,7 +533,7 @@ export function ScreeningCompModal({
                 </div>
               </div>
               {/* Quick Analysis tile */}
-              <div className="shrink-0 rounded border border-blue-200 bg-blue-50/50 px-3 py-2">
+              <div className="shrink-0 rounded border border-blue-200 bg-blue-50/50 px-3 py-2" style={{ maxWidth: 360 }}>
                 <div className="mb-1.5 text-[9px] font-bold uppercase tracking-wider text-blue-600">Quick Analysis</div>
                 <div className="grid grid-cols-3 gap-x-2 gap-y-1">
                   <div>
