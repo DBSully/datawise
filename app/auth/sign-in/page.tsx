@@ -2,12 +2,61 @@
 
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
+/**
+ * Validates a `?next=` query param value to prevent open-redirect attacks.
+ *
+ * Open redirects let attackers craft links like
+ *   https://datawisere.com/auth/sign-in?next=https://evil.com/fake-login
+ * The victim signs in, gets bounced to the attacker's site, and may not
+ * notice the domain change. The validator below only accepts internal
+ * paths starting with exactly one forward slash.
+ *
+ * Rejected:
+ *   - null / empty                  (no param)
+ *   - https://evil.com              (doesn't start with /)
+ *   - //evil.com                    (protocol-relative URL)
+ *   - /\evil                        (backslash injection)
+ *
+ * Falls back to /home in any rejected case.
+ */
+function safeNextPath(raw: string | null): string {
+  if (!raw) return "/home";
+  if (!raw.startsWith("/") || raw.startsWith("//")) return "/home";
+  if (raw.includes("\\")) return "/home";
+  return raw;
+}
+
+/**
+ * Wrapper required by Next.js: useSearchParams() in a client component
+ * page must be inside a Suspense boundary so the page can be statically
+ * pre-rendered without blocking on the URL params resolving.
+ */
 export default function SignInPage() {
+  return (
+    <Suspense fallback={<SignInLoadingFallback />}>
+      <SignInPageInner />
+    </Suspense>
+  );
+}
+
+function SignInLoadingFallback() {
+  return (
+    <main className="mx-auto max-w-md px-6 py-16">
+      <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
+        Sign in to DataWise
+      </h1>
+      <p className="mt-3 text-slate-600">Loading...</p>
+    </main>
+  );
+}
+
+function SignInPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = createClient();
 
   const [email, setEmail] = useState("");
@@ -36,7 +85,10 @@ export default function SignInPage() {
       return;
     }
 
-    router.push("/analysis/properties/new");
+    // Honor the ?next= query param the proxy sets when redirecting
+    // unauthenticated users. Falls back to /home if not provided
+    // or if the param fails open-redirect validation.
+    router.push(safeNextPath(searchParams.get("next")));
     router.refresh();
   }
 
@@ -60,7 +112,9 @@ export default function SignInPage() {
     // If Confirm Email is OFF, Supabase usually gives you a session immediately.
     // If Confirm Email is ON, you may get a user but no active session yet.
     if (data.session) {
-      router.push("/analysis/properties/new");
+      // Same ?next= handling as sign-in: a partner who signs up after
+      // following a share link should land on the shared deal, not /home.
+      router.push(safeNextPath(searchParams.get("next")));
       router.refresh();
       return;
     }
