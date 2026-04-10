@@ -129,6 +129,11 @@ export function ScreeningCompModal({
   const [passOtherText, setPassOtherText] = useState("");
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
 
+  // QuickAnalysis overrides
+  const [manualArvInput, setManualArvInput] = useState("");
+  const [manualTargetProfitInput, setManualTargetProfitInput] = useState("");
+  const [manualRehabInput, setManualRehabInput] = useState("");
+
   // Sort state for candidate table
   type SortCol = "gap" | "impArv" | "days" | "bldg";
   type SortDir = "asc" | "desc";
@@ -307,46 +312,51 @@ export function ScreeningCompModal({
     };
   }, [data]);
 
-  // Live-recomputed ARV and deal math based on current comp selection
+  // Live-recomputed ARV and deal math based on current comp selection + manual overrides
   const liveDeal = useMemo(() => {
     if (!data) return null;
-    const selected = data.candidates.filter((c) => c.selected_yn);
-    // If nothing is picked, show the original screening values
-    if (selected.length === 0) {
-      return {
-        arv: data.arvAggregate,
-        maxOffer: data.maxOffer,
-        offerPct: data.offerPct,
-        gapPerSqft: data.estGapPerSqft,
-      };
-    }
-    // Decay-weighted average of per-comp ARVs for selected comps
-    let weightedSum = 0;
-    let weightTotal = 0;
-    for (const c of selected) {
-      const detail = c.comp_listing_row_id
-        ? data.arvByCompListingId[c.comp_listing_row_id]
-        : null;
-      if (detail) {
-        weightedSum += detail.arv * detail.weight;
-        weightTotal += detail.weight;
+
+    // Parse manual overrides from input strings
+    const parsedArv = manualArvInput ? Number(manualArvInput.replace(/[,$]/g, "")) : null;
+    const parsedTargetProfit = manualTargetProfitInput ? Number(manualTargetProfitInput.replace(/[,$]/g, "")) : null;
+    const parsedRehab = manualRehabInput ? Number(manualRehabInput.replace(/[,$]/g, "")) : null;
+
+    // Determine ARV: manual override → comp-based → screening default
+    let arv: number;
+    if (parsedArv != null && Number.isFinite(parsedArv) && parsedArv > 0) {
+      arv = parsedArv;
+    } else {
+      const selected = data.candidates.filter((c) => c.selected_yn);
+      let weightedSum = 0;
+      let weightTotal = 0;
+      for (const c of selected) {
+        const detail = c.comp_listing_row_id
+          ? data.arvByCompListingId[c.comp_listing_row_id]
+          : null;
+        if (detail) {
+          weightedSum += detail.arv * detail.weight;
+          weightTotal += detail.weight;
+        }
       }
+      arv = weightTotal > 0
+        ? Math.round(weightedSum / weightTotal)
+        : (data.arvAggregate ?? 0);
     }
-    if (weightTotal === 0) {
-      return {
-        arv: data.arvAggregate,
-        maxOffer: data.maxOffer,
-        offerPct: data.offerPct,
-        gapPerSqft: data.estGapPerSqft,
-      };
-    }
-    const arv = Math.round(weightedSum / weightTotal);
+
+    const targetProfit = (parsedTargetProfit != null && Number.isFinite(parsedTargetProfit))
+      ? parsedTargetProfit
+      : (data.targetProfit ?? 40_000);
+
+    const rehabTotal = (parsedRehab != null && Number.isFinite(parsedRehab))
+      ? parsedRehab
+      : (data.rehabTotal ?? 0);
+
     const costs =
-      (data.rehabTotal ?? 0) +
+      rehabTotal +
       (data.holdTotal ?? 0) +
       (data.transactionTotal ?? 0) +
       (data.financingTotal ?? 0) +
-      (data.targetProfit ?? 40_000);
+      targetProfit;
     const maxOffer = Math.round(arv - costs);
     const listPrice = data.subjectListPrice ?? 0;
     const offerPct = listPrice > 0 ? Math.round((maxOffer / listPrice) * 10000) / 10000 : null;
@@ -355,7 +365,7 @@ export function ScreeningCompModal({
       ? Math.round((arv - listPrice) / sqft)
       : null;
     return { arv, maxOffer, offerPct, gapPerSqft };
-  }, [data]);
+  }, [data, manualArvInput, manualTargetProfitInput, manualRehabInput]);
 
   // Promote handler
   const handlePromote = useCallback(
@@ -482,8 +492,8 @@ export function ScreeningCompModal({
                 </div>
               </div>
               {/* Property Physical tile */}
-              <div className="flex-1 rounded border border-slate-200 bg-slate-50 px-3 py-2">
-                <div className="grid grid-cols-[auto_auto_1fr_auto_auto_1fr_auto_auto_1fr_auto_auto] gap-x-2 gap-y-0.5 text-[11px] leading-snug">
+              <div className="min-w-0 flex-1 rounded border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="grid grid-cols-[auto_auto_1fr_auto_auto_1fr_auto_auto] gap-x-2 gap-y-0.5 text-[11px] leading-snug">
                   {/* Row 1 */}
                   <span className="font-bold text-slate-500">Total SF</span>
                   <span className="text-slate-900">{fmtNum(data.subjectBuildingSqft)}</span>
@@ -493,11 +503,8 @@ export function ScreeningCompModal({
                   <span />
                   <span className="font-bold text-slate-500">Type</span>
                   <span className="text-slate-900">{data.propertyType ?? "—"}</span>
-                  <span />
-                  <span className="font-bold text-slate-500">Ownership</span>
-                  <span className="text-slate-900">{data.ownershipRaw ?? "—"}</span>
                   {/* Row 2 */}
-                  <span className="font-bold text-slate-500">Above Grade SF</span>
+                  <span className="font-bold text-slate-500">Above SF</span>
                   <span className="text-slate-900">{fmtNum(data.aboveGradeSqft)}</span>
                   <span />
                   <span className="font-bold text-slate-500">Baths</span>
@@ -505,11 +512,8 @@ export function ScreeningCompModal({
                   <span />
                   <span className="font-bold text-slate-500">Levels</span>
                   <span className="text-slate-900">{data.levelsRaw ?? "—"}</span>
-                  <span />
-                  <span className="font-bold text-slate-500">Occupant</span>
-                  <span className="text-slate-900">{data.occupantType ?? "—"}</span>
                   {/* Row 3 */}
-                  <span className="font-bold text-slate-500">Below Grade SF</span>
+                  <span className="font-bold text-slate-500">Below SF</span>
                   <span className="text-slate-900">{fmtNum(data.belowGradeTotalSqft)}</span>
                   <span />
                   <span className="font-bold text-slate-500">Garage</span>
@@ -517,23 +521,51 @@ export function ScreeningCompModal({
                   <span />
                   <span className="font-bold text-slate-500">Year</span>
                   <span className={data.yearBuilt && data.yearBuilt < 1950 ? "font-bold text-red-600" : "text-slate-900"}>{data.yearBuilt ?? "—"}</span>
-                  <span />
-                  <span className="font-bold text-slate-500">Taxes / HOA</span>
-                  <span className="text-slate-900">
-                    {$f(data.annualPropertyTax)} | {$f(data.annualHoaDues)}
-                  </span>
                   {/* Row 4 */}
-                  <span className="font-bold text-slate-500">Below Finished</span>
+                  <span className="font-bold text-slate-500">Bsmt Fin</span>
                   <span className="text-slate-900">{fmtNum(data.belowGradeFinishedSqft)}</span>
-                  <span />
-                  <span />
-                  <span />
                   <span />
                   <span className="font-bold text-slate-500">Lot SF</span>
                   <span className="text-slate-900">{fmtNum(data.lotSizeSqft)}</span>
                   <span />
-                  <span />
-                  <span />
+                  <span className="font-bold text-slate-500">Tax/HOA</span>
+                  <span className="text-slate-900">{$f(data.annualPropertyTax)} | {$f(data.annualHoaDues)}</span>
+                </div>
+              </div>
+              {/* Quick Analysis tile */}
+              <div className="shrink-0 rounded border border-blue-200 bg-blue-50/50 px-3 py-2">
+                <div className="mb-1.5 text-[9px] font-bold uppercase tracking-wider text-blue-600">Quick Analysis</div>
+                <div className="grid grid-cols-3 gap-x-2 gap-y-1">
+                  <div>
+                    <label className="block text-[9px] font-semibold uppercase tracking-wider text-slate-500">Manual ARV</label>
+                    <input
+                      type="text"
+                      value={manualArvInput}
+                      onChange={(e) => setManualArvInput(e.target.value)}
+                      placeholder={liveDeal ? `${liveDeal.arv.toLocaleString()}` : "—"}
+                      className="mt-0.5 w-[100px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[9px] font-semibold uppercase tracking-wider text-slate-500">Rehab Override</label>
+                    <input
+                      type="text"
+                      value={manualRehabInput}
+                      onChange={(e) => setManualRehabInput(e.target.value)}
+                      placeholder={data.rehabTotal != null ? `${Math.round(data.rehabTotal).toLocaleString()}` : "—"}
+                      className="mt-0.5 w-[100px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[9px] font-semibold uppercase tracking-wider text-slate-500">Target Profit</label>
+                    <input
+                      type="text"
+                      value={manualTargetProfitInput}
+                      onChange={(e) => setManualTargetProfitInput(e.target.value)}
+                      placeholder={data.targetProfit != null ? `${data.targetProfit.toLocaleString()}` : "40,000"}
+                      className="mt-0.5 w-[100px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
+                    />
+                  </div>
                 </div>
               </div>
             </div>

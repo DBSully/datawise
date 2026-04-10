@@ -54,7 +54,8 @@ export function calculateArv(input: CalculateArvInput): ArvResult | null {
   if (comps.length === 0) return null;
   if (subjectBuildingSqft <= 0 && subjectAboveGradeSqft <= 0) return null;
 
-  const blend = config.blendByPropertyType[propertyType];
+  const blend = config.blendByPropertyType[propertyType]
+    ?? config.blendByPropertyType["detached"];
 
   // Use above-grade sqft as fallback for building sqft and vice versa
   const effectiveSubjectBldg = subjectBuildingSqft > 0
@@ -106,7 +107,7 @@ export function calculateArv(input: CalculateArvInput): ArvResult | null {
     const arvTimeAdjusted = arvBlended * timeMultiplier;
 
     // Confidence and decay weight
-    const confidence = lookupConfidence(comp.distanceMiles, config.confidenceTiersByType[propertyType]);
+    const confidence = lookupConfidence(comp.distanceMiles, config.confidenceTiersByType[propertyType] ?? config.confidenceTiersByType["detached"] ?? []);
     const decayWeight = Math.exp(-(daysSinceClose / 365));
 
     details.push({

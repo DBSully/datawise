@@ -1,3 +1,38 @@
+## 2026-04-09b — Screening Queue Auto Filters, Performance Indexes
+
+### What changed
+
+#### Auto Filter Buttons (client-side)
+
+New interactive filter bar on the Screening Queue page, organized by purpose in a grid layout:
+
+- **MLS Status** — one-click buttons for Coming Soon, Active, Pending, Withdrawn, Expired, Closed. Click to toggle on/off.
+- **Date Filters** — "New Listings" (by listing contract date) and "Screened Date" (by screening_updated_at). Each prompts for number of past days to include. Click again to toggle off.
+- **Price Range** — low/high text inputs with Apply button. Shows active range as a blue badge (e.g. `$200k – $500k`). Enter to apply, ✕ to clear.
+- **Clear All** — appears when any auto filter is active; clears all auto-filter params while preserving dropdown filters and sort.
+
+All auto filters compose with the existing dropdown filters and use URL search params for server-side filtering.
+
+**New component:** `components/screening/auto-filter-buttons.tsx`
+
+#### Queue View Performance Indexes
+
+Added composite indexes to resolve statement timeout on `analysis_queue_v`:
+
+- `ix_screening_results_property_created` — `(real_property_id, created_at desc)` for the `DISTINCT ON` sort
+- `ix_mls_listings_property_contract_created` — `(real_property_id, listing_contract_date desc nulls first, created_at desc)` for the lateral join
+
+#### Queue View: screening_updated_at column
+
+Added `screening_updated_at` to the `analysis_queue_v` view to support date-based filtering.
+
+### Migrations
+
+- `20260409100000_queue_view_performance_indexes.sql`
+- `20260409110000_queue_view_add_screened_date.sql`
+
+---
+
 ## 2026-04-09a — ARV Transparency, Map Tooltips, Naming Fixes & Spread Correction
 
 ### What changed

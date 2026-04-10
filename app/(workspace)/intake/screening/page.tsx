@@ -2,6 +2,7 @@ import Link from "next/link";
 import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { QueueResultsTable } from "@/components/screening/queue-results-table";
+import { AutoFilterButtons } from "@/components/screening/auto-filter-buttons";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,10 @@ type ScreeningQueuePageProps = {
     mlsStatus?: string;
     sort?: string;
     page?: string;
+    listingDays?: string;
+    screenedDays?: string;
+    priceLow?: string;
+    priceHigh?: string;
   }>;
 };
 
@@ -52,6 +57,10 @@ export default async function ScreeningQueuePage({
   const mlsStatusFilter = resolved?.mlsStatus ?? "all";
   const sort = resolved?.sort ?? "gap_desc";
   const page = Math.max(1, Number(resolved?.page ?? "1") || 1);
+  const listingDays = resolved?.listingDays ? parseInt(resolved.listingDays, 10) : null;
+  const screenedDays = resolved?.screenedDays ? parseInt(resolved.screenedDays, 10) : null;
+  const priceLow = resolved?.priceLow ? parseInt(resolved.priceLow, 10) : null;
+  const priceHigh = resolved?.priceHigh ? parseInt(resolved.priceHigh, 10) : null;
 
   const supabase = await createClient();
 
@@ -102,6 +111,24 @@ export default async function ScreeningQueuePage({
   }
   if (mlsStatusFilter !== "all") {
     query = query.eq("mls_status", mlsStatusFilter);
+  }
+  if (listingDays && listingDays > 0) {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - (listingDays - 1));
+    cutoff.setHours(0, 0, 0, 0);
+    query = query.gte("listing_contract_date", cutoff.toISOString().slice(0, 10));
+  }
+  if (screenedDays && screenedDays > 0) {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - (screenedDays - 1));
+    cutoff.setHours(0, 0, 0, 0);
+    query = query.gte("screening_updated_at", cutoff.toISOString());
+  }
+  if (priceLow && priceLow > 0) {
+    query = query.gte("subject_list_price", priceLow);
+  }
+  if (priceHigh && priceHigh > 0) {
+    query = query.lte("subject_list_price", priceHigh);
   }
 
   // Sorting
@@ -198,6 +225,9 @@ export default async function ScreeningQueuePage({
           )}
         </p>
       </div>
+
+      {/* Auto Filter Buttons */}
+      <AutoFilterButtons />
 
       {/* Filters */}
       <form method="get" className="dw-card-tight flex flex-wrap items-end gap-3">
