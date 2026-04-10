@@ -292,7 +292,7 @@ export default async function ScreeningQueuePage({
         {sortOptions.map((opt) => (
           <Link
             key={opt.value}
-            href={buildHref("/intake/screening", { ...currentParams, sort: opt.value })}
+            href={buildHref("/screening", { ...currentParams, sort: opt.value })}
             className={`rounded px-2 py-0.5 text-xs ${
               sort === opt.value
                 ? "bg-blue-100 font-semibold text-blue-800"
@@ -312,7 +312,7 @@ export default async function ScreeningQueuePage({
         <div className="flex items-center justify-center gap-2 text-sm">
           {page > 1 && (
             <Link
-              href={buildHref("/intake/screening", { ...currentParams, page: String(page - 1) })}
+              href={buildHref("/screening", { ...currentParams, page: String(page - 1) })}
               className="text-blue-600 hover:underline"
             >
               ← Prev
@@ -323,7 +323,7 @@ export default async function ScreeningQueuePage({
           </span>
           {page < totalPages && (
             <Link
-              href={buildHref("/intake/screening", { ...currentParams, page: String(page + 1) })}
+              href={buildHref("/screening", { ...currentParams, page: String(page + 1) })}
               className="text-blue-600 hover:underline"
             >
               Next →

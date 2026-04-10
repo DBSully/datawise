@@ -50,7 +50,7 @@ export function UnreviewedPrimes({
         </h2>
         {totalCount > 0 && (
           <Link
-            href="/intake/screening?prime=true"
+            href="/screening?prime=true"
             className="text-xs text-blue-600 hover:underline"
           >
             View All {totalCount} →
@@ -94,7 +94,7 @@ export function UnreviewedPrimes({
                   </td>
                   <td className="font-medium">
                     <Link
-                      href={`/intake/screening/${r.screening_batch_id}/${r.id}`}
+                      href={`/screening/${r.screening_batch_id}/${r.id}`}
                       className="text-blue-700 hover:underline"
                     >
                       {r.subject_address}

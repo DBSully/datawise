@@ -391,7 +391,7 @@ export async function previewImportAction(
   }
 
   revalidatePath("/intake/imports");
-  revalidatePath("/intake/screening");
+  revalidatePath("/screening");
   revalidatePath("/admin/properties");
   revalidatePath("/home");
 
@@ -479,7 +479,7 @@ export async function processImportBatchAction(formData: FormData) {
       redirectUrl = `/intake/imports?processed=1&screen_error=1&batch=${encodeURIComponent(batchId)}`;
     }
 
-    revalidatePath("/intake/screening");
+    revalidatePath("/screening");
     revalidatePath("/home");
   } catch (error) {
     const message =

@@ -288,7 +288,7 @@ export function WatchListTable({ rows }: { rows: WatchListRow[] }) {
       <div className="dw-card py-12 text-center">
         <p className="text-sm text-slate-500">
           No deals on the Watch List yet. Promote properties from the{" "}
-          <Link href="/intake/screening" className="text-blue-600 hover:underline">
+          <Link href="/screening" className="text-blue-600 hover:underline">
             Screening Queue
           </Link>{" "}
           to get started.

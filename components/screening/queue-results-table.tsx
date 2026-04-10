@@ -198,7 +198,7 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
                   </td>
                   <td className="truncate font-medium">
                     <Link
-                      href={`/intake/screening/${r.screening_batch_id}/${r.id}`}
+                      href={`/screening/${r.screening_batch_id}/${r.id}`}
                       className="text-blue-700 hover:underline"
                     >
                       {r.subject_address}
@@ -257,7 +257,7 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
                   </td>
                   <td>
                     <Link
-                      href={`/intake/screening/${r.screening_batch_id}/${r.id}`}
+                      href={`/screening/${r.screening_batch_id}/${r.id}`}
                       className="text-xs text-blue-600 hover:underline"
                     >
                       Detail

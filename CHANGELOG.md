@@ -1,3 +1,140 @@
+---
+
+# ============================================================
+# CHECKPOINT — 2026-04-10 — END OF PHASE 4 / START OF PHASE 5
+# ============================================================
+#
+# This commit marks a stable, fully working version of the
+# application immediately before a major workflow restructure.
+#
+# **If anything goes wrong during the Phase 5 restructure, this
+# is the commit to return to.**
+#
+# Tag (recommended): `checkpoint-pre-phase5`
+# Commit message:    "CHECKPOINT: stable pre-Phase 5 restructure baseline"
+# ============================================================
+
+## 2026-04-10 — CHECKPOINT: Stable Baseline Before Phase 5 Workflow Restructure
+
+### Why this checkpoint exists
+
+This is the **last known-good state** of the application before a fundamental restructure of site architecture, navigation, route layout, schema additions for users/profiles/clients, and the introduction of an external client-facing area separated from the analyst workspace by a password / role boundary.
+
+The next phase (Phase 5) will reorganize the entire application around the canonical deal flow:
+
+```
+INTAKE  →  SCREENING  →  ANALYSIS  →  ACTION
+```
+
+…and add a second audience layer (analyst vs. external user / client / owner) with distinct profiles and permission scoping. Because that work touches navigation, routes, layouts, schema, and RLS policies simultaneously, there must be an obvious recovery point. **This is it.**
+
+### How to return to this version
+
+```bash
+# Option 1 — view this exact state
+git checkout checkpoint-pre-phase5
+
+# Option 2 — reset main to this checkpoint (destructive — only if Phase 5 is abandoned)
+git reset --hard checkpoint-pre-phase5
+```
+
+A `checkpoint-pre-phase5` git tag should be created on the commit that ships this changelog entry.
+
+### What is working at this checkpoint
+
+Every feature listed below is verified working in production-style local dev:
+
+**Intake**
+- CSV import upload, preview, staging, batch processing (`/intake/imports`)
+- Manual property entry (`/intake/manual`)
+- Rolling 30-day import limits and batch progress tracking
+
+**Screening** (now a top-level nav item — see "What changed in this commit" below)
+- Screening Queue (`/screening`) — latest screening result per property, filters, sorting
+- Screening Batch results (`/screening/[batchId]`)
+- Screening Result Detail (`/screening/[batchId]/[resultId]`)
+- Auto-filter buttons, price range filter, clear-all, prime candidate filtering
+- DENVER_FLIP_V1 strategy profile with full ARV / rehab / holding / financing / transaction / qualification engines
+- Live ARV recomputation, exponential decay weighted ARV from `comparable_search_candidates`
+
+**Deals**
+- Watch List (`/deals/watchlist`) — rebuilt table with sticky columns, live offer% / gap recompute, comp counts, manual target profit override
+- Analysis Workstation (`/deals/watchlist/[analysisId]`) — three-card panel (MLS Info / Property Physical / Quick Analysis), live deal-math summary strip, scratchpad recalc
+- Pipeline (`/deals/pipeline`) — showing / offer / under-contract lifecycle
+- Closed Deals (`/deals/closed`)
+
+**Reports**
+- Report library grouped by property
+- Report detail with public access via `analysis_reports.access_token`
+
+**Admin**
+- Properties browser (`/admin/properties`)
+- Manual property entry under admin
+- Property edit
+
+**Home**
+- Daily dashboard with unreviewed primes, watch list alerts, pipeline actions, daily activity
+
+**Schema**
+- All tables in stable state (see RESTRUCTURE_PLANNING.md for full inventory)
+- All RLS policies are still permissive "dev authenticated full access" — this WILL change in Phase 5
+
+### What changed in this commit
+
+**Navigation restructure (first step of Phase 5):**
+
+`Screening` was elevated from a tab under `Intake` to a top-level navigation item between `Intake` and `Deals`, reflecting the canonical `Intake → Screening → Analysis → Action` deal flow.
+
+**Routes moved:**
+
+| Old | New |
+|---|---|
+| `/intake/screening` | `/screening` |
+| `/intake/screening/[batchId]` | `/screening/[batchId]` |
+| `/intake/screening/[batchId]/[resultId]` | `/screening/[batchId]/[resultId]` |
+
+**Files moved:** `app/(workspace)/intake/screening/` → `app/(workspace)/screening/` (including `actions.ts`, `page.tsx`, `[batchId]/page.tsx`, `[batchId]/[resultId]/page.tsx`)
+
+**Files updated to point at the new path:**
+- `components/layout/app-chrome.tsx` — added `/screening` to `primaryNav`, removed Screening tab from Intake, added new Screening section config and page label entries
+- `components/screening/screening-comp-modal.tsx` — import path updated
+- `components/screening/auto-filter-buttons.tsx`, `batch-results-table.tsx`, `queue-results-table.tsx` — all `/intake/screening` hrefs → `/screening`
+- `app/(workspace)/home/page.tsx`, `home/unreviewed-primes.tsx` — link hrefs
+- `app/(workspace)/deals/watchlist/watch-list-table.tsx` — link href
+- `app/(workspace)/intake/imports/page.tsx`, `imports/actions.ts` — link hrefs and revalidatePath calls
+- `app/(workspace)/screening/actions.ts` — internal redirects and revalidatePath calls
+- `app/(workspace)/screening/page.tsx`, `[batchId]/page.tsx`, `[batchId]/[resultId]/page.tsx` — internal `buildHref` and back-link references
+- `app/(workspace)/analysis/queue/page.tsx` — legacy redirect now points to `/screening`
+- `app/(workspace)/analysis/screening/[batchId]/page.tsx` — legacy redirect now points to `/screening/[batchId]`
+- `app/(workspace)/analysis/screening/[batchId]/[resultId]/page.tsx` — legacy redirect now points to `/screening/[batchId]/[resultId]`
+
+**Intake** now contains only `Imports` and `Manual Entry` tabs. Its subtitle was updated to "Import data and add properties." (previously "Import data and screen for opportunities.")
+
+**Planning artifact added:**
+
+- `RESTRUCTURE_PLANNING.md` — comprehensive prompt prepared for a Claude Sonnet planning session. Contains: full current site structure inventory, full schema inventory, identified gaps, and an eight-area question framework (stage definitions, route mapping, user/profile layer, Analysis stage, Action stage, Reports, constraints, vision check). The Sonnet output will feed back into a Claude Opus implementation planning session.
+
+### What is NOT yet started (the Phase 5 scope)
+
+- No top-level `Analysis` route — Analysis Workstation still lives at `/deals/watchlist/[analysisId]`
+- No top-level `Action` section — pipeline/closed still under `Deals`
+- No `profiles` table, no `clients` table, no role/permission system
+- All RLS policies are still permissive
+- No client-facing / external user area at all
+- Watch list location and ownership is still ambiguous (Screening output? Analysis input? Standalone?)
+- Reports section is internal-only — not yet a client deliverable layer
+
+These will all be addressed in Phase 5 once the planning session is complete and an implementation plan is approved.
+
+### Recovery / safety notes
+
+- The dev server should be restarted after pulling this commit because `next.config` and route structure changed under `app/(workspace)/`.
+- No database migrations were added in this commit. Schema is unchanged from the previous commit (`c22cfba`).
+- Legacy redirect routes under `/analysis/queue`, `/analysis/screening/...` are intentionally kept and now point at the new `/screening/...` paths, so any external bookmarks continue working.
+- RESTRUCTURE_PLANNING.md is a planning document only — it does not affect runtime behavior and can be safely ignored or deleted without breaking anything.
+
+---
+
 ## 2026-04-09c — Watch List Rebuild + Workstation Quick Analysis Panel
 
 ### What changed

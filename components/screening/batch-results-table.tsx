@@ -173,7 +173,7 @@ export function BatchResultsTable({ batchId, results }: BatchResultsTableProps) 
                   </td>
                   <td className="font-medium">
                     <Link
-                      href={`/intake/screening/${batchId}/${r.id}`}
+                      href={`/screening/${batchId}/${r.id}`}
                       className="text-blue-700 hover:underline"
                     >
                       {r.subject_address}
@@ -246,7 +246,7 @@ export function BatchResultsTable({ batchId, results }: BatchResultsTableProps) 
                   </td>
                   <td>
                     <Link
-                      href={`/intake/screening/${batchId}/${r.id}`}
+                      href={`/screening/${batchId}/${r.id}`}
                       className="text-xs text-blue-600 hover:underline"
                     >
                       Detail

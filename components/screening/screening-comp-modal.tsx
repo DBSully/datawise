@@ -15,7 +15,7 @@ import {
   expandComparableSearchAction,
   addManualScreeningCompAction,
   type ScreeningCompData,
-} from "@/app/(workspace)/intake/screening/actions";
+} from "@/app/(workspace)/screening/actions";
 
 const CompMap = dynamic(
   () => import("@/components/properties/comp-map").then((m) => m.CompMap),

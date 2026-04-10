@@ -154,7 +154,7 @@ export default async function DealDetailPage({ params }: DealDetailPageProps) {
       {/* Header */}
       <div>
         <Link
-          href={`/intake/screening/${batchId}`}
+          href={`/screening/${batchId}`}
           className="text-xs text-blue-600 hover:underline"
         >
           ← Batch Results

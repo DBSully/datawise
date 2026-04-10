@@ -17,6 +17,7 @@ type SectionConfig = {
 const primaryNav = [
   { href: "/home", label: "Home" },
   { href: "/intake", label: "Intake" },
+  { href: "/screening", label: "Screening" },
   { href: "/deals", label: "Deals" },
   { href: "/reports", label: "Reports" },
   { href: "/admin", label: "Admin" },
@@ -34,13 +35,19 @@ function getSectionConfig(pathname: string): SectionConfig {
   if (pathname.startsWith("/intake")) {
     return {
       title: "Intake",
-      subtitle:
-        "Import data and screen for opportunities.",
+      subtitle: "Import data and add properties.",
       tabs: [
         { href: "/intake/imports", label: "Imports", exact: true },
-        { href: "/intake/screening", label: "Screening" },
         { href: "/intake/manual", label: "Manual Entry", exact: true },
       ],
+    };
+  }
+
+  if (pathname.startsWith("/screening")) {
+    return {
+      title: "Screening",
+      subtitle: "Screen properties for opportunities and identify Prime Candidates.",
+      tabs: [{ href: "/screening", label: "Screening Queue" }],
     };
   }
 
@@ -86,8 +93,10 @@ function getPageLabel(pathname: string): string {
   if (pathname === "/home") return "Dashboard";
 
   if (pathname === "/intake/imports") return "Imports";
-  if (pathname.startsWith("/intake/screening")) return "Screening";
   if (pathname === "/intake/manual") return "Manual Entry";
+
+  if (pathname === "/screening") return "Screening Queue";
+  if (pathname.startsWith("/screening/")) return "Screening Batch";
 
   if (pathname === "/deals/watchlist") return "Watch List";
   if (pathname.startsWith("/deals/watchlist/")) return "Analysis Workstation";

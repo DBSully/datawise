@@ -52,7 +52,7 @@ export function AutoFilterButtons() {
       }
     }
     const qs = params.toString();
-    router.push(qs ? `/intake/screening?${qs}` : "/intake/screening");
+    router.push(qs ? `/screening?${qs}` : "/screening");
   }
 
   function handleClearAll() {
@@ -64,7 +64,7 @@ export function AutoFilterButtons() {
     setPriceLow("");
     setPriceHigh("");
     const qs = params.toString();
-    router.push(qs ? `/intake/screening?${qs}` : "/intake/screening");
+    router.push(qs ? `/screening?${qs}` : "/screening");
   }
 
   function handleMlsStatus(status: string) {

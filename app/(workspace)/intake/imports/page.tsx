@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ImportUploadPanel } from "@/components/imports/import-upload-panel";
 import { createClient } from "@/lib/supabase/server";
-import { runImportScreeningAction, runScreeningAction } from "@/app/(workspace)/intake/screening/actions";
+import { runImportScreeningAction, runScreeningAction } from "@/app/(workspace)/screening/actions";
 import { processImportBatchAction } from "./actions";
 
 const ROLLING_LIMIT_30_DAY = 75_000;
@@ -272,7 +272,7 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
           </span>
           {resolvedSearchParams?.screened === "1" ? (
             <Link
-              href="/intake/screening?prime=true"
+              href="/screening?prime=true"
               className="dw-button-primary"
             >
               View Prime Candidates →
@@ -514,7 +514,7 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
                             return (
                               <div className="flex items-center gap-2">
                                 <Link
-                                  href={`/intake/screening/${linked.id}`}
+                                  href={`/screening/${linked.id}`}
                                   className="text-xs text-blue-600 hover:underline"
                                 >
                                   {linked.status === "complete"
@@ -716,7 +716,7 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
                     <tr key={sb.id}>
                       <td className="font-medium">
                         <Link
-                          href={`/intake/screening/${sb.id}`}
+                          href={`/screening/${sb.id}`}
                           className="text-blue-700 hover:underline"
                         >
                           {sb.name}
@@ -745,7 +745,7 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
                       </td>
                       <td>
                         <Link
-                          href={`/intake/screening/${sb.id}`}
+                          href={`/screening/${sb.id}`}
                           className="text-xs text-blue-600 hover:underline"
                         >
                           View

@@ -199,7 +199,7 @@ export default async function BatchResultsPage({
       return true;
     });
 
-  const basePath = `/intake/screening/${batchId}`;
+  const basePath = `/screening/${batchId}`;
 
   const currentParams = {
     city: cityFilter !== "all" ? cityFilter : undefined,

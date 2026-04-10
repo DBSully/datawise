@@ -196,7 +196,7 @@ export async function runScreeningAction(formData: FormData): Promise<void> {
   });
 
   revalidatePath("/intake/imports");
-  redirect(`/intake/screening/${batch.id}`);
+  redirect(`/screening/${batch.id}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -284,7 +284,7 @@ export async function runImportScreeningAction(
   });
 
   revalidatePath("/intake/imports");
-  redirect(`/intake/screening/${batch.id}`);
+  redirect(`/screening/${batch.id}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -589,7 +589,7 @@ export async function toggleScreeningCompSelectionAction(
   }
 
   if (batchId) {
-    revalidatePath(`/intake/screening/${batchId}`);
+    revalidatePath(`/screening/${batchId}`);
   }
 }
 
@@ -684,7 +684,7 @@ export async function promoteToAnalysisAction(
     watch_list_note: watchListNote,
   });
 
-  revalidatePath("/intake/screening");
+  revalidatePath("/screening");
   revalidatePath("/home");
   revalidatePath("/deals/watchlist");
 
@@ -750,7 +750,7 @@ export async function passOnScreeningResultAction(
     throw new Error(error.message);
   }
 
-  revalidatePath("/intake/screening");
+  revalidatePath("/screening");
   revalidatePath("/home");
 }
 
@@ -785,7 +785,7 @@ export async function reactivateScreeningResultAction(
     throw new Error(error.message);
   }
 
-  revalidatePath("/intake/screening");
+  revalidatePath("/screening");
   revalidatePath("/home");
 }
 
