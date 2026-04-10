@@ -1,3 +1,107 @@
+## 2026-04-10 — Phase 1 Step 1 — Auth & Profiles Foundation
+
+First concrete milestone of the Phase 5 restructure. Establishes the multi-tenancy and user-profile foundation that all subsequent Phase 1 work (RLS scaffolding, route restructure, partner portal) will build on top of. Zero changes to existing business logic, route handling, or UI components — Step 1 is purely additive.
+
+### Goals accomplished
+
+1. **Multi-tenancy primitive** — `organizations` table with the DataWiseRE org as the seed row. Future tables will scope to this via `organization_id` (Step 2).
+2. **User profiles** — `profiles` table linked 1:1 with `auth.users` carrying role assignment (`analyst` / `partner` / `admin`), org membership, and analyst-friendly metadata. Auto-create trigger ensures every new signup gets a profile row automatically.
+3. **Proxy-based auth enforcement** — extended the existing Next.js 16 `proxy.ts` (renamed-from-middleware) to enforce authentication on protected routes with public-route allowlisting and `?next=` redirect support. Defense in depth: the existing layout-level auth check is intentionally KEPT as a backstop until proxy enforcement is proven in production.
+4. **Sign-in `?next=` redirect** — sign-in/sign-up now honor the `?next=` query param the proxy sets, with open-redirect attack protection. After signing in to access a protected route, users land back on the page they originally requested instead of always landing on `/home`.
+
+### Schema (Phase A)
+
+Four migrations applied in sequence (each independently committable):
+
+1. **`20260410120000_create_organizations.sql`** — `public.organizations` table with `id`, `name`, `slug` (unique), `market`, `logo_url`, `strategy_profile_slug`, `mls_agreement_confirmed`, timestamps. RLS enabled with permissive Step 1 read policy. Seed row: `DataWiseRE` / `datawisere` / `denver` / `denver_flip_v1`.
+
+2. **`20260410120100_create_profiles.sql`** — `public.profiles` table with FK to `auth.users` (cascade delete) and `organizations` (restrict). Role CHECK constraint (`analyst | partner | admin`). Three indexes (org, email, role). RLS enabled with `profiles_read_own` and `profiles_update_own` policies. (Step 2 will tighten the update policy to only allow `full_name` and `avatar_url` changes.)
+
+3. **`20260410120200_backfill_existing_profiles.sql`** — One-time idempotent INSERT that creates a profile row for every existing `auth.users` entry. In practice this was a single-row insert for Dan, with `role='analyst'`, `organization_id` linked to DataWiseRE, and `full_name` derived from `raw_user_meta_data` or the email local-part.
+
+4. **`20260410120300_profiles_auto_create_trigger.sql`** — `SECURITY DEFINER` trigger on `auth.users` INSERT that auto-creates a profile row for every new signup. Reads `raw_user_meta_data->>'role'` and `raw_user_meta_data->>'organization_slug'` if provided (defaulting to `analyst` + `datawisere`), so Phase 1 Step 4 (Partner Portal) can route partner signups into the partner role with no extra application code. Validates role against the same CHECK constraint. `ON CONFLICT (id) DO NOTHING` makes the trigger idempotent.
+
+### Application code (Phase B)
+
+Six new files, two existing files modified:
+
+**New files:**
+- `lib/types/organizations.ts` — `OrganizationRow` type
+- `lib/types/profiles.ts` — `UserRole`, `ProfileRow`, `ProfileInsert`, `ProfileUpdate` types
+- `lib/auth/get-current-user.ts` — `getCurrentUser()` (cached per React request via `cache()`) and `requireCurrentUser()` (throws if missing). Returns `{ user, profile }` for server-side consumption.
+- `lib/auth/has-role.ts` — `hasRole(current, ...allowedRoles)` plus `isAnalyst` (analyst OR admin), `isPartner`, `isAdmin` convenience wrappers.
+
+**Modified files:**
+- `lib/supabase/proxy.ts` — `updateSession()` now returns `{ response, user }` instead of just `response`. The closure trick that lets `setAll` mutate the outer `response` variable is preserved exactly.
+- `proxy.ts` (root) — now orchestrates session refresh + auth gate. Always refreshes the session first (even on public paths so signed-in users browsing marketing don't have sessions expire). Then checks `PUBLIC_PATHS` / `PUBLIC_PREFIXES`; protected paths require an authenticated user and redirect to `/auth/sign-in?next=<original-path>` if not.
+- `app/auth/sign-in/page.tsx` — wrapped in Suspense boundary (required for `useSearchParams()` in client component pages). Reads `?next=` param via `useSearchParams()`, validates it via `safeNextPath()` (rejects null, non-`/`-prefixed values, protocol-relative `//`, and backslash injection), and redirects to it on success. Both sign-in and sign-up handlers honor it. Default fallback changed from `/analysis/properties/new` to `/home`.
+
+### Discovery: Next.js 16 renamed `middleware.ts` to `proxy.ts`
+
+The implementation plan called for creating `middleware.ts` at the project root. When I created it and ran `npm run build`, Next.js 16.2.1 errored out: *"Both middleware file './middleware.ts' and proxy file './proxy.ts' are detected. Please use './proxy.ts' only."*
+
+The project already had `proxy.ts` at the root doing session refresh via the existing `lib/supabase/proxy.ts` `updateSession()` function. The right move was to **delete the `middleware.ts` I created and instead extend the existing `proxy.ts`** to add public-path checking and auth enforcement on top of the session refresh that was already there. The orchestration order (session refresh first, then auth gate) was deliberately chosen so signed-in users browsing public marketing pages still get their session kept alive.
+
+### Notable design decisions
+
+- **Defense in depth on auth enforcement.** The existing layout-level auth check at `app/(workspace)/layout.tsx:16` is intentionally KEPT alongside the proxy-level enforcement. The proxy is the new primary protection but the layout check stays as a backstop until proxy enforcement is proven in production. Removing it later is a one-line change.
+- **Proxy session refresh runs on ALL matching requests, including public paths.** A signed-in user browsing `/offerings` should still have their session cookie refreshed. Only the auth-gate decision is path-dependent.
+- **`getUser()` not `getSession()`.** The proxy uses `supabase.auth.getUser()` which verifies the JWT against the Supabase server. `getSession()` only reads the cookie locally and could be spoofed by a client with a stale or forged cookie.
+- **Open-redirect protection is non-trivial.** The `safeNextPath()` validator on the sign-in page rejects non-`/`-prefixed values, protocol-relative URLs (`//evil.com`), and backslash-injection attempts. This is a real attack vector — phishing campaigns use open redirects constantly.
+- **Auto-create trigger uses `SECURITY DEFINER` with `SET search_path = public`.** Required because a fresh signup has no privileges to insert into `public.profiles` themselves. The `search_path` setting prevents search-path injection attacks against the privileged function.
+- **Step 1 RLS policies are deliberately permissive.** Update-own currently allows a user to change their own `role` and `organization_id` columns. Step 2 will tighten this. For Step 1 the only user is Dan and the risk is non-existent.
+
+### Verification
+
+All 33 boxes in the implementation plan §8 verification checklist confirmed by Dan:
+- Schema verification — both new tables exist, Dan's profile row populated, trigger and function visible in `pg_proc` / `information_schema.triggers`, RLS enabled
+- Proxy verification — public routes load without auth, protected routes redirect to `/auth/sign-in?next=...`, sign-in succeeds and lands on the original destination
+- Open-redirect protection — `?next=https://google.com` and `?next=//google.com` both rejected and fall back to `/home`
+- **Existing analyst workflow — fully verified, zero regressions.** Workstation, comp map, screening queue, watch list, intake imports, admin properties, reports — all working unchanged
+
+### What's NOT done in Step 1 (deferred to later steps)
+
+| Out of scope | Belongs to |
+|---|---|
+| Adding `organization_id` columns to existing tables (`real_properties`, `analyses`, etc.) | Step 2 — RLS Scaffolding |
+| Replacing the "dev authenticated full access" RLS policies on existing tables | Step 2 — RLS Scaffolding |
+| Route restructure (`/deals/watchlist` → `/analysis`, etc.) | Step 3 — Route Restructure |
+| Building the new Workstation card layout per `WORKSTATION_CARD_SPEC.md` | Step 3 — Route Restructure |
+| `analysis_shares`, `partner_analysis_versions`, `partner_feedback` tables | Step 4 — Partner Portal MVP |
+| Resend email integration for share invites | Step 4 — Partner Portal MVP |
+| Removing the layout-level auth check at `app/(workspace)/layout.tsx:16` | After Step 3 proves proxy enforcement in production use |
+
+### Tag
+
+`phase1-step1-complete` — created on the commit that ships this changelog entry. Use this tag to return to this exact state if Step 2 or 3 work needs to be rolled back without losing the auth/profiles foundation.
+
+### Files touched in this milestone
+
+**New (10):**
+- `supabase/migrations/20260410120000_create_organizations.sql`
+- `supabase/migrations/20260410120100_create_profiles.sql`
+- `supabase/migrations/20260410120200_backfill_existing_profiles.sql`
+- `supabase/migrations/20260410120300_profiles_auto_create_trigger.sql`
+- `lib/types/organizations.ts`
+- `lib/types/profiles.ts`
+- `lib/auth/get-current-user.ts`
+- `lib/auth/has-role.ts`
+- `DataWiseRE_Restructure_Plan.md` (Sonnet's restructure plan, committed alongside)
+- `WORKSTATION_CARD_SPEC.md` (locked card layout spec from the discovery session)
+- `PHASE1_STEP1_IMPLEMENTATION.md` (this milestone's implementation plan)
+
+**Modified (3):**
+- `proxy.ts` (root)
+- `lib/supabase/proxy.ts`
+- `app/auth/sign-in/page.tsx`
+
+**Not modified:**
+- Any business logic (screening engines, comp loaders, analysis math)
+- Any UI component
+- Any existing route page
+- The existing layout-level auth check (kept as defense in depth)
+- Strategy profiles or any other lib/screening file
+
 ---
 
 # ============================================================
