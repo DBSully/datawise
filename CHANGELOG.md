@@ -1,3 +1,154 @@
+## 2026-04-11 — Phase 1 Step 3C — Component Extraction
+
+Third sub-step of the Step 3 milestone. Extract the components the new Workstation in 3E will reuse, without changing any existing user-visible behavior. After 3C, both `ScreeningCompModal` and the current `AnalysisWorkstation` continue to work exactly as before, but they now share underlying components from a new `components/workstation/` directory that 3E will plug into.
+
+**Pure UI refactoring — zero database changes, zero business logic changes, zero route changes.** The verification standard was binary: open the screening modal and walk through the comp workspace, then open a current Workstation and walk through every panel. Anything that looks or behaves differently from before is a bug.
+
+Two intentional behavior changes shipped in this entry:
+- Tasks 9 and 10 unified deliberately-divergent strip JSX between the two consumers per Dan's call ("the differences are purely accidental, no intent for these to be unique"). The screening modal's deal stat strip now uses the workstation's rounded card layout, stacked tiles, and the new value-driven semantic coloring (Offer% / Gap-sqft / Trend green-or-red based on value thresholds).
+- A pre-existing modal Rehab pill bug — the pill read from `data.rehabTotal` (server-static) instead of `liveDeal.rehabTotal` (live recalc), so typing in the Rehab Override input updated ARV/MaxOffer/Offer%/Gap but the Rehab pill itself stayed frozen. Fixed as a side effect of the unification.
+
+### Goals accomplished
+
+1. **Deleted dead code (Task 1)** — `app/(workspace)/analysis/properties/[id]/analyses/[analysisId]/analysis-workstation.tsx` was unreachable after Step 3B Task 4 turned its sibling `page.tsx` into a redirect to `/analysis/[analysisId]`. The file carried duplicated copies of `TrendDirectionBadge`, `TrendTierColumn`, and `CostLine` that confused every grep. **1,548 lines deleted.**
+2. **Lifted CostLine (Task 2)** — moved the cost-waterfall line item primitive into `components/workstation/cost-line.tsx`. Used by 13 call sites in the current Workstation (Holding / Transaction / Financing / Cash Required waterfalls). Pure presentational; no closures.
+3. **Lifted TrendDirectionBadge (Task 3)** — moved into `components/workstation/trend-badges.tsx`. The two existing implementations had diverged on size, weight, and color shade (compact vs prominent visual styles). Per Decision 5.5, surfaced the divergence and added a `variant?: "compact" | "prominent"` prop that preserves both existing looks exactly. Two consumers updated.
+4. **Lifted TrendTierColumn (Task 4)** — moved into the same `trend-badges.tsx` file. Single-consumer lift after Task 1 deleted the dead duplicate. The local `fmtRate` helper moved along as a private file-internal helper.
+5. **Lifted DealStat (Task 5)** — the two implementations had structurally different layouts (vertical tile vs horizontal inline row) AND different highlight semantics (bolder/darker vs green). Per Decision 5.5, added a `variant?: "stacked" | "inline"` prop that preserves both layouts exactly. Six modal call sites updated to pass `variant="inline"`.
+6. **Moved RehabCard to its own file (Task 6)** — lifted the ~310-line component plus its 5 exclusive helpers (`CATEGORY_SCOPE_TIERS`, `REHAB_CATEGORIES`, `SCOPE_MULT_MAP`, `resolveLocalCost`, `MAX_CUSTOM_ITEMS`) into `components/workstation/rehab-card.tsx`. **Bonus extraction discovered during this task:** `CardTitle` was used by 11+ cards across the workstation; lifted it into `components/workstation/card-title.tsx` since RehabCard depends on it and inlining it would have created duplication. The `router` prop interface dropped its `ReturnType<typeof useRouter>` type in favor of a minimal structural type `RouterLike = { refresh: () => void }` since RehabCard only calls `router.refresh()`.
+7. **Extracted ExpandSearchPanel (Task 7)** — lifted out of `screening-comp-modal.tsx` into `components/workstation/expand-search-panel.tsx` along with its private `MultiCheckDropdown` helper and the two option constants (`BUILDING_FORM_OPTIONS`, `LEVEL_CLASS_OPTIONS`) that were only used inside it. Removed the now-orphaned `expandComparableSearchAction` import from the modal.
+8. **Extracted AddCompByMls (Task 8)** — lifted into `components/workstation/add-comp-by-mls.tsx`. Already had a clean prop interface and a single server action dependency. Mechanical lift.
+9. **Built SubjectTileRow by extraction (Task 9)** — the 3-tile horizontal row (MLS Info / Property Physical / Quick Analysis) at the top of both consumers. JSX was structurally identical between the two; only data sources differed. Designed using **data normalization at the prop boundary** — each consumer pre-formats its data with its own helpers and passes display strings into the shared component. The shared component never sees `WorkstationData` or `ScreeningCompData`. The Workstation's special Tab handler (Target Profit input → focus the "Copy Selected MLS" button) is wired through an optional `onTargetProfitTab?` callback prop; the modal omits it.
+10. **Built DealStatStrip with full unification (Task 10)** — the deal-summary stat strip below the SubjectTileRow. Per Dan's call ("the differences are purely accidental"), unified on the workstation's layout (rounded card, stacked tiles) for both surfaces, with new behaviors:
+    - **Trend pill added to BOTH surfaces** (workstation didn't have it before). Hidden entirely when `trendAnnualRate` is null.
+    - **Target Profit pill added to the modal** (modal didn't have it before).
+    - **Modal's right-aligned content** (comp count + Copy MLS buttons) preserved via an optional `rightSlot` prop.
+    - **Modal's Rehab pill bug fixed** — the modal's `liveDeal` now exposes `rehabTotal` and `targetProfit` (already computed inside its useMemo, just not in the return object). Both consumers pass `liveDeal.rehabTotal` so the pill responds to the Rehab Override input correctly.
+    - **Value-driven semantic coloring** via a new `tone?: "default" | "good" | "bad"` prop on `DealStat`. Tone overrides text color but not the highlight bold treatment. The strip applies the tone rules below internally; consumers pass raw numbers and the strip handles formatting + coloring.
+11. **Built DetailCard greenfield wrapper (Task 11)** — generic collapsed card for the new Workstation's right tile column in 3E. Props: `title`, `headline`, `context`, `badge?`, `onExpand`. Pure presentational, two-row layout per spec §5.0 mockup, click-anywhere-to-expand via a wrapping button element for free keyboard accessibility.
+12. **Built DetailModal greenfield wrapper (Task 12)** — partial-screen modal overlay (max 720px × 80vh) for card expansion in 3E. Props: `title`, `onClose`, `children`. Handles ESC, click-outside, page scroll lock, auto-focus on the close button, and a basic Tab focus trap that cycles within the panel. Backdrop dim via `bg-black/40` matching the existing `ScreeningCompModal` pattern.
+
+### Color rules introduced in Task 10
+
+The unified `DealStatStrip` introduces value-driven semantic coloring on the variable stats:
+
+| Stat | Green (`tone="good"`) | Red (`tone="bad"`) | Default |
+|---|---|---|---|
+| **Offer%** | `>= 0.90` | `<= 0.80` | otherwise |
+| **Gap/sqft** | `> 100` | `<= 70` | otherwise |
+| **Trend** | `>= 0.05` (5%/yr) | `<= -0.05` (-5%/yr) | otherwise |
+| **ARV / Max Offer** | — | — | bold + slate-900 (highlighted, no semantic color) |
+| **Rehab / Target Profit** | — | — | default styling |
+
+Tone helpers (`offerPctTone`, `gapPerSqftTone`, `trendTone`) are private to `deal-stat-strip.tsx`. Both consumers pass raw numbers and the strip applies the tone rules internally.
+
+### Notable design decisions
+
+- **The `variant` prop pattern.** Three components in 3C surface a `variant` prop that preserves divergent visual styles between consumers (`TrendDirectionBadge` compact/prominent, `DealStat` stacked/inline, `DetailModal` is greenfield so no variant). The pattern is: when the divergence is intentional and serves the respective layout, preserve both behind a prop rather than forcing one consumer to visually shift. This worked twice (Tasks 3 and 5) and was rejected once (Task 9 — SubjectTileRow JSX was structurally identical so no variant was needed; Task 10 — Dan called the divergence accidental and chose full unification instead).
+
+- **Data normalization at the prop boundary** (Task 9 SubjectTileRow). Two consumers read from completely different type shapes (`WorkstationData` nested vs `ScreeningCompData` flat) but render the same JSX. The shared component takes pre-formatted display strings; each consumer pre-formats its data with its own helpers (workstation `fmt`/`fmtNum`/`fmtIsoDate`; modal local `$f`/`fmtNum`). The shared component never sees the consumer-specific types. Zero behavioral change in either consumer.
+
+- **Raw numbers at the prop boundary** (Task 10 DealStatStrip). Different design choice for DealStatStrip — the strip needs raw numeric values to compute the tone rules (green/red thresholds), so consumer-side pre-formatting wouldn't work. Instead the strip imports `fmt`/`fmtNum`/`fmtPct` from `@/lib/reports/format` directly and handles all formatting + coloring internally. Each consumer's call site collapses to ~10 lines of structured props with raw numbers from `liveDeal`.
+
+- **Bonus extractions when the spec didn't list them.** `CardTitle` (Task 6) is not in spec §6's explicit component list, but it's used by 11+ cards in the current Workstation and RehabCard depends on it. Lifting it was necessary to cleanly extract RehabCard without duplication. Same intent as the rest of 3C — extracted as part of Task 6 with a clear callout in the commit message.
+
+- **Tile sizing iteration during SubjectTileRow verification** (Task 9). The original `maxWidth: 320` cap on the MLS Info tile combined with `auto` grid columns caused the value column to wrap on properties with `mlsMajorChangeType = "Price Decrease"`. Two-step fix: (1) added `whitespace-nowrap` to the MLS tile container so all child text refuses to wrap, (2) replaced `maxWidth: 320` with `width: max-content` so the tile sizes to its natural content width. The original cap was insufficient once the value column expanded to fit the longer mlsMajorChangeType strings; letting the tile grow to fit content is the cleanest fix.
+
+- **The dead-file deletion bonus** (Task 1). Deleting the legacy `analysis/properties/[id]/analyses/[analysisId]/analysis-workstation.tsx` removed one copy of `TrendDirectionBadge`, `TrendTierColumn`, and `CostLine` for free, simplifying the dedupe tasks that followed. 1,548 lines deleted in a single commit.
+
+- **The dropped `useRouter` type dependency** (Task 6 RehabCard). The original RehabCard accepted `router: ReturnType<typeof useRouter>` which forced importing `useRouter` just for the type. The lifted version uses a minimal structural type `RouterLike = { refresh: () => void }` since RehabCard only calls `router.refresh()`. Same runtime behavior, no useless import. Documents the exact contract the component actually depends on.
+
+### Verification
+
+Per §9 of the implementation plan, all checks passed:
+
+**Build verification:**
+- `npx tsc --noEmit` passes after every commit
+
+**Existing analyst workflows (the critical part):**
+- All cards in the current Workstation render with their CardTitle headers
+- Holding / Transaction / Financing / Cash Required cost waterfalls render correctly (CostLine)
+- Price Trend card renders correctly (TrendDirectionBadge + TrendTierColumns)
+- Rehab section works end-to-end: scope selectors, custom items toggle/add/remove, Save Rehab persists
+- SubjectTileRow renders both consumers identically (year built red highlighting, Quick Analysis inputs, Tab handler in workstation only)
+- DealStatStrip color thresholds work in both consumers (Offer% / Gap/sqft / Trend green-or-red)
+- Modal Rehab pill now responds to Rehab Override input (the bug fix)
+- Manual override save still persists
+- Notes save and display still works
+- Pipeline status save still works
+- Generate Report still works
+- Mark Complete still works
+- ScreeningCompModal opens, comp map and table load, Expand Search and Add Comp by MLS# work end-to-end, Promote/Pass/Reactivate workflows still work, ESC and click-outside still close
+- Screening result detail page TrendDirectionBadge renders with prominent variant
+- The legacy `/analysis/properties/[id]/analyses/[analysisId]` redirect still works
+- No console errors
+
+### File size deltas
+
+| File | Before | After | Change |
+|---|---|---|---|
+| `app/(workspace)/deals/watchlist/[analysisId]/analysis-workstation.tsx` | 2046 | 1512 | **−534 lines (−26%)** |
+| `components/screening/screening-comp-modal.tsx` | 1431 | 1060 | **−371 lines (−26%)** |
+| Combined load-bearing UI files | 3477 | 2572 | **−905 lines** |
+
+The 905 lines of inline JSX from the two large files now live as 1688 lines across 11 small focused files in `components/workstation/`. Net repository line count is up because the new files have more whitespace, comments, JSDoc, and prop type declarations than the original inline JSX, but each shared component is independently understandable and reusable.
+
+### Files touched in 3C
+
+**Deleted (1):**
+- `app/(workspace)/analysis/properties/[id]/analyses/[analysisId]/analysis-workstation.tsx` — 1,548 lines of dead code removed (Task 1)
+
+**New shared components (11 in `components/workstation/`):**
+- `card-title.tsx` (29 lines) — bonus extraction in Task 6
+- `cost-line.tsx` (36 lines) — Task 2
+- `trend-badges.tsx` (190 lines) — Tasks 3 + 4 (`TrendDirectionBadge` + `TrendTierColumn` with private `fmtRate` helper)
+- `deal-stat.tsx` (93 lines) — Task 5 + extended in Task 10 with `tone` prop
+- `rehab-card.tsx` (394 lines) — Task 6
+- `expand-search-panel.tsx` (245 lines) — Task 7 (with private `MultiCheckDropdown` helper and option constants)
+- `add-comp-by-mls.tsx` (74 lines) — Task 8
+- `subject-tile-row.tsx` (255 lines) — Task 9
+- `deal-stat-strip.tsx` (126 lines) — Task 10
+- `detail-card.tsx` (85 lines) — Task 11 (greenfield, no consumer until 3E)
+- `detail-modal.tsx` (161 lines) — Task 12 (greenfield, no consumer until 3E)
+
+**Modified (2 application files + 1 unrelated page + 1 changelog):**
+- `app/(workspace)/deals/watchlist/[analysisId]/analysis-workstation.tsx` — strip 13 inline component definitions/helpers, replace with imports from `components/workstation/`
+- `components/screening/screening-comp-modal.tsx` — same
+- `app/(workspace)/screening/[batchId]/[resultId]/page.tsx` — `TrendDirectionBadge` import update (passes `variant="prominent"`)
+- `CHANGELOG.md` — this entry
+
+**Reference docs:**
+- `PHASE1_STEP3C_IMPLEMENTATION.md` — implementation plan (drafted before execution, all 6 decisions locked in the planning commit)
+
+**Not modified — by design:**
+- Any database migration
+- Any business logic, calculation engine, comp loader, server action
+- `lib/analysis/load-workstation-data.ts` and the `WorkstationData` type
+- `lib/screening/*` engines
+- Any route file or `page.tsx`
+- Navigation (`components/layout/app-chrome.tsx`)
+- The `/home` performance fix (untouched)
+
+### What's deferred to later sub-steps
+
+| Out of scope | Belongs to |
+|---|---|
+| Wiring `<DetailCard>` and `<DetailModal>` into actual cards | 3E |
+| Building the new Workstation card layout per `WORKSTATION_CARD_SPEC.md` | 3E |
+| Per-card modal components (`<ArvCardModal>`, `<RehabCardModal>`, etc.) | 3E |
+| Auto-persist infrastructure (`useDebouncedSave`, `<SaveStatusDot>`) | 3D |
+| Building `<CompWorkspace>` (the modal hero — map + table + tab bar + filter chips) | 3E.5 (deferred from 3C per Decision 5.4 hybrid) |
+| Removing the current `AnalysisWorkstation` file at `deals/watchlist/[analysisId]/analysis-workstation.tsx` | 3F |
+| Cleanup of dead `/comparables` sub-route link in `admin/properties/[id]/page.tsx` and dead sub-tab links in `AnalysisWorkspaceNav` | 3E or 3F |
+
+### What 3D and 3E build on top
+
+**3D (Auto-persist infrastructure)** is independent of 3C and could land in parallel. It builds `useDebouncedSave`, `<SaveStatusDot>`, and the per-field server action wrapper. 3D's components do NOT depend on 3C's components; they touch different parts of the stack.
+
+**3E (New Workstation card layout)** is the consumer of everything 3C built. 3E.1 builds the Workstation header and the orchestrating page, importing components from `components/workstation/`. 3E.2-3E.4 build the top tile row using `<SubjectTileRow>` and `<DealStatStrip>`. 3E.5 builds the hero by extracting `<CompWorkspace>` from the modal (the deferred extraction per Decision 5.4 hybrid). 3E.6 builds the right column using `<DetailCard>`. 3E.7 builds the per-card modals using `<DetailModal>`. Without 3C, 3E would have to do all of this work itself; with 3C, 3E becomes a "compose existing pieces" task with clean prop interfaces already designed.
+
+---
+
 ## 2026-04-11 — Phase 1 Step 3B — Route Restructure
 
 Second sub-step of the Step 3 milestone. Mechanical-only: moves the canonical Watch List route to `/analysis`, the canonical Workstation route to `/analysis/[analysisId]`, and combines the legacy Pipeline + Closed Deals pages into a single `/action` route that dispatches on `?status=active|closed`. Mirrors the canonical `Intake → Screening → Analysis → Action` deal flow that drives the rest of Phase 1.
