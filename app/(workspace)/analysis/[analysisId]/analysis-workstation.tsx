@@ -1,14 +1,16 @@
-// Phase 1 Step 3E.1 — new Workstation skeleton.
+// Phase 1 Step 3E — new Workstation client.
 //
 // The canonical Analysis Workstation client component, built up
-// incrementally throughout 3E.2-3E.8 per WORKSTATION_CARD_SPEC.md.
-// At this point only the layout regions are stubbed; actual content
-// arrives in subsequent sub-tasks.
+// incrementally per WORKSTATION_CARD_SPEC.md. As of 3E.2 the header
+// bar is functional. Subsequent sub-tasks fill in the remaining
+// regions: top tile row (3E.3), deal stat strip (3E.4), hero comp
+// workspace (3E.5), right column collapsed cards (3E.6), per-card
+// detail modals (3E.7), cross-card cascades + polish (3E.8).
 //
 // Layout overview (per spec §2):
 //
 //   ┌─────────────────────────────────────────────────────────────┐
-//   │  HEADER BAR                                       (3E.2)    │
+//   │  HEADER BAR                                       (3E.2 ✓)  │
 //   ├─────────────────────────────────────────────────────────────┤
 //   │  TOP TILE ROW — MLS / Physical / QuickAnalysis / QuickStat │
 //   │                                                   (3E.3)    │
@@ -21,13 +23,13 @@
 //   │                                             │               │
 //   │                                  (3E.5)     │  (3E.6 + 3E.7)│
 //   └─────────────────────────────────────────────┴───────────────┘
-//
-// The skeleton renders dashed-box placeholders for each section so
-// the route loads without errors and each subsequent sub-task can
-// replace its placeholder with real content.
 
 "use client";
 
+import { useState } from "react";
+import Link from "next/link";
+import { markAnalysisCompleteAction } from "@/app/(workspace)/deals/actions";
+import { generateReportAction } from "@/app/(workspace)/reports/actions";
 import type { WorkstationData } from "@/lib/reports/types";
 
 type AnalysisWorkstationProps = {
@@ -37,11 +39,7 @@ type AnalysisWorkstationProps = {
 export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
   return (
     <section className="dw-section-stack-compact">
-      {/* HEADER BAR — 3E.2 */}
-      <div className="rounded border border-dashed border-slate-300 bg-slate-50 px-4 py-2 text-xs text-slate-500">
-        HEADER BAR (3E.2) — address, status badges, Mark Complete / Share /
-        Generate Report buttons
-      </div>
+      <WorkstationHeader data={data} />
 
       {/* TOP TILE ROW — 3E.3 */}
       <div className="rounded border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-xs text-slate-500">
@@ -64,13 +62,234 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
           RIGHT TILE COLUMN (3E.6 + 3E.7) — 9 collapsible detail cards
         </div>
       </div>
-
-      {/* Reference: analysis ID for verification while the skeleton is
-       *  being filled in. Removed in 3E.8 polish. */}
-      <div className="text-[10px] text-slate-400">
-        analysisId:{" "}
-        <span className="font-mono">{data.analysisId}</span>
-      </div>
     </section>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Header bar (3E.2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Format an analysis_completed_at ISO string as "M/D HH:MM" for the
+ *  header's compact "Completed 4/8 14:32" indicator. */
+function formatCompletedTimestamp(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const month = d.getMonth() + 1;
+  const day = d.getDate();
+  const hours = String(d.getHours()).padStart(2, "0");
+  const minutes = String(d.getMinutes()).padStart(2, "0");
+  return `${month}/${day} ${hours}:${minutes}`;
+}
+
+function WorkstationHeader({ data }: { data: WorkstationData }) {
+  // Local state for Mark Complete — server returns the new completedAt
+  // and we mirror it locally so the button label flips immediately
+  // without waiting for a page revalidation round-trip.
+  const [completedAt, setCompletedAt] = useState<string | null>(
+    data.analysis.analysisCompletedAt,
+  );
+  const [isMarkingComplete, setIsMarkingComplete] = useState(false);
+
+  // Local state for the Generate Report dialog. The dialog is a small
+  // inline modal — title input + Generate button. The legacy
+  // Workstation used the same pattern.
+  const [showReportDialog, setShowReportDialog] = useState(false);
+  const [reportTitle, setReportTitle] = useState("");
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+
+  const handleMarkComplete = async () => {
+    setIsMarkingComplete(true);
+    try {
+      const formData = new FormData();
+      formData.set("analysis_id", data.analysisId);
+      const result = await markAnalysisCompleteAction(formData);
+      if (result.error == null && result.completedAt) {
+        setCompletedAt(result.completedAt);
+      }
+    } finally {
+      setIsMarkingComplete(false);
+    }
+  };
+
+  const handleGenerateReport = async () => {
+    if (!reportTitle.trim()) return;
+    setIsGeneratingReport(true);
+    try {
+      const formData = new FormData();
+      formData.set("analysis_id", data.analysisId);
+      formData.set("property_id", data.propertyId);
+      formData.set("title", reportTitle.trim());
+      // generateReportAction redirects on success — no need to handle the
+      // result because the page navigates away.
+      await generateReportAction(formData);
+    } catch (err) {
+      // The action throws on validation failure or DB error. Surface to
+      // console for now; future polish could add a toast.
+      // eslint-disable-next-line no-console
+      console.error("[generateReport]", err);
+      setIsGeneratingReport(false);
+    }
+  };
+
+  const completedDisplay = formatCompletedTimestamp(completedAt);
+  const fullAddress = [
+    data.property.address,
+    [data.property.city, data.property.state, data.property.postalCode]
+      .filter(Boolean)
+      .join(" "),
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  return (
+    <header className="rounded-lg border border-slate-200 bg-white px-4 py-2 shadow-sm">
+      <div className="flex items-center gap-3">
+        {/* ── Left: Hub link ── */}
+        <Link
+          href={`/admin/properties/${data.propertyId}`}
+          className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 hover:text-slate-900"
+        >
+          ← Hub
+        </Link>
+
+        {/* ── Center: address (truncates on overflow) ── */}
+        <h1
+          className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900"
+          title={fullAddress}
+        >
+          {fullAddress || "Untitled property"}
+        </h1>
+
+        {/* ── Right: status badges + action buttons ── */}
+        <div className="flex shrink-0 items-center gap-1.5">
+          {/* MLS# chip */}
+          {data.listing?.listingId && (
+            <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px] text-slate-600">
+              MLS# {data.listing.listingId}
+            </span>
+          )}
+
+          {/* MLS status chip */}
+          {data.listing?.mlsStatus && (
+            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-700">
+              {data.listing.mlsStatus}
+            </span>
+          )}
+
+          {/* Strategy type chip */}
+          {data.analysis.strategyType && (
+            <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-blue-700">
+              {data.analysis.strategyType}
+            </span>
+          )}
+
+          {/* Completed timestamp (only when set) */}
+          {completedDisplay && (
+            <span className="text-[10px] text-emerald-700">
+              Completed {completedDisplay}
+            </span>
+          )}
+
+          {/* Active share pill — placeholder per Decision 5.4. The full
+           *  Partner Sharing card ships in Step 4. */}
+          {/* (no render in 3E.2) */}
+
+          {/* Divider before action buttons */}
+          <span className="mx-1 h-4 w-px bg-slate-200" aria-hidden="true" />
+
+          {/* Mark Complete / Update Complete */}
+          <button
+            type="button"
+            onClick={handleMarkComplete}
+            disabled={isMarkingComplete}
+            className={`rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors ${
+              completedAt
+                ? "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                : "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+            } disabled:opacity-50`}
+          >
+            {isMarkingComplete
+              ? "Saving..."
+              : completedAt
+                ? "Update Complete"
+                : "Mark Complete"}
+          </button>
+
+          {/* Share button — placeholder per Decision 5.4. The full
+           *  Partner Sharing flow ships in Step 4. */}
+          <button
+            type="button"
+            disabled
+            title="Partner sharing arrives in Step 4"
+            className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-400 cursor-not-allowed"
+          >
+            Share
+          </button>
+
+          {/* Generate Report */}
+          <button
+            type="button"
+            onClick={() => setShowReportDialog(true)}
+            className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100"
+          >
+            Generate Report
+          </button>
+        </div>
+      </div>
+
+      {/* Generate Report dialog (inline modal overlay) */}
+      {showReportDialog && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowReportDialog(false);
+          }}
+        >
+          <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-4 shadow-2xl">
+            <h2 className="text-sm font-bold uppercase tracking-[0.12em] text-slate-700">
+              Generate Report
+            </h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Create a frozen snapshot of this analysis. The report appears
+              in the Reports library and can be shared.
+            </p>
+            <label className="mt-3 block text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              Title
+            </label>
+            <input
+              type="text"
+              value={reportTitle}
+              onChange={(e) => setReportTitle(e.target.value)}
+              autoFocus
+              placeholder="e.g. 1005 Garfield — Initial Underwrite"
+              className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm text-slate-900"
+            />
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowReportDialog(false);
+                  setReportTitle("");
+                }}
+                disabled={isGeneratingReport}
+                className="rounded-md border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleGenerateReport}
+                disabled={isGeneratingReport || !reportTitle.trim()}
+                className="rounded-md border border-emerald-300 bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-200 disabled:opacity-50"
+              >
+                {isGeneratingReport ? "Generating..." : "Generate"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </header>
   );
 }
