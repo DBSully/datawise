@@ -225,6 +225,22 @@ export type WorkstationData = {
     bathroomsTotal: number | null;
     garageSpaces: number | null;
     lotSizeSqft: number;
+    /**
+     * NEW (Phase 1 Step 3A): per-level bed/bath breakdown for the
+     * Property Physical tile mini-grid in the new Workstation (Step 3E).
+     * Underlying columns already exist in property_physical
+     * (main_level_*, upper_level_*, lower_level_*, basement_level_*).
+     * The grid in WORKSTATION_CARD_SPEC.md §3.2 has 4 columns —
+     * Tot | Main | Up | Lo — so bedroomsLower/bathroomsLower collapse
+     * lower_level_* and basement_level_* into a single value via
+     * NULL-safe sum (NULL only if BOTH source values are NULL).
+     */
+    bedroomsMain: number | null;
+    bedroomsUpper: number | null;
+    bedroomsLower: number | null;
+    bathroomsMain: number | null;
+    bathroomsUpper: number | null;
+    bathroomsLower: number | null;
   } | null;
   listing: {
     listingId: string;

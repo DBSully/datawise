@@ -62,6 +62,27 @@ function toNum(v: unknown): number {
 }
 
 /**
+ * Sums two nullable numeric values with NULL semantics:
+ *   - both null    → null
+ *   - one null     → the other value
+ *   - both set     → sum
+ *
+ * Used by Phase 1 Step 3A to collapse property_physical's
+ * lower_level_* and basement_level_* columns into a single
+ * "Lower" value for the Property Physical tile bed/bath grid
+ * (per WORKSTATION_CARD_SPEC.md §3.2 Tile 2 — 4-column grid).
+ */
+function sumNullSafe(a: unknown, b: unknown): number | null {
+  const aNull = a === null || a === undefined;
+  const bNull = b === null || b === undefined;
+  if (aNull && bNull) return null;
+  const aNum = aNull ? 0 : Number(a);
+  const bNum = bNull ? 0 : Number(b);
+  if (!Number.isFinite(aNum) || !Number.isFinite(bNum)) return null;
+  return aNum + bNum;
+}
+
+/**
  * Loads all analysis data from Supabase and computes derived values.
  * Returns null if the property or analysis is not found.
  */
@@ -88,7 +109,19 @@ export async function loadWorkstationData(
       .maybeSingle(),
     supabase
       .from("property_physical")
-      .select("property_type, property_sub_type, structure_type, level_class_standardized, levels_raw, building_form_standardized, building_area_total_sqft, above_grade_finished_area_sqft, below_grade_total_sqft, below_grade_finished_area_sqft, below_grade_unfinished_area_sqft, year_built, bedrooms_total, bathrooms_total, garage_spaces")
+      .select(
+        "property_type, property_sub_type, structure_type, level_class_standardized, " +
+        "levels_raw, building_form_standardized, building_area_total_sqft, " +
+        "above_grade_finished_area_sqft, below_grade_total_sqft, " +
+        "below_grade_finished_area_sqft, below_grade_unfinished_area_sqft, " +
+        "year_built, bedrooms_total, bathrooms_total, garage_spaces, " +
+        // NEW (Phase 1 Step 3A): level-specific bed/bath columns for the
+        // Property Physical tile mini-grid in the new Workstation (3E).
+        "main_level_bedrooms, main_level_bathrooms, " +
+        "upper_level_bedrooms, upper_level_bathrooms, " +
+        "lower_level_bedrooms, lower_level_bathrooms, " +
+        "basement_level_bedrooms, basement_level_bathrooms"
+      )
       .eq("real_property_id", propertyId)
       .maybeSingle(),
     supabase
@@ -711,6 +744,19 @@ export async function loadWorkstationData(
       bathroomsTotal: physical.bathrooms_total,
       garageSpaces: physical.garage_spaces,
       lotSizeSqft: toNum(property.lot_size_sqft),
+      // NEW (Phase 1 Step 3A): per-level bed/bath breakdown for the
+      // Property Physical tile mini-grid in the new Workstation (3E).
+      // bedroomsLower / bathroomsLower collapse lower_level_* and
+      // basement_level_* into a single value via NULL-safe sum:
+      // - if both are null → null
+      // - if one is null → the other value
+      // - if both are set → the sum
+      bedroomsMain: physical.main_level_bedrooms ?? null,
+      bedroomsUpper: physical.upper_level_bedrooms ?? null,
+      bedroomsLower: sumNullSafe(physical.lower_level_bedrooms, physical.basement_level_bedrooms),
+      bathroomsMain: physical.main_level_bathrooms ?? null,
+      bathroomsUpper: physical.upper_level_bathrooms ?? null,
+      bathroomsLower: sumNullSafe(physical.lower_level_bathrooms, physical.basement_level_bathrooms),
     } : null,
     listing: listing ? {
       listingId: listing.listing_id as string,
