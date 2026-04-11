@@ -43,6 +43,45 @@ When Dan does the design polish pass, start with (a) — it's the smallest chang
 
 ---
 
+---
+
+## 2. Missing tile titles on MLS Info and Property Physical tiles
+
+**Surfaced:** 2026-04-11 during 3E.3.c (QuickStatusTile)
+**Status:** Open
+**Severity:** Cosmetic — visual consistency
+**Scope:** `components/workstation/subject-tile-row.tsx` (MLS Info tile + Property Physical tile)
+
+### The issue
+
+The `QUICK ANALYSIS` and `QUICK STATUS` tiles each have a small uppercase title at the top of the tile (e.g. "QUICK STATUS" in blue-600 text). The MLS Info and Property Physical tiles do NOT have titles — they just render the data grid directly. This creates visual inconsistency in the top tile row: 2 of the 4 tiles have titles, 2 don't.
+
+Dan's preference: every tile in the top row should have a small uppercase title for consistency.
+
+### Proposed titles
+
+| Tile | Title |
+|---|---|
+| MLS Info | `MLS DATA` |
+| Property Physical | `PROPERTY DATA` |
+| Quick Analysis | `QUICK ANALYSIS` (already has it) |
+| Quick Status | `QUICK STATUS` (already has it) |
+
+### The complication
+
+The MLS Info and Property Physical tiles live in `<SubjectTileRow>`, which is also consumed by the screening modal. Adding titles there changes the modal's visual appearance too. That's probably fine — the modal would also benefit from consistent tile titles — but it's a visual change to a daily-use surface.
+
+### Possible fixes
+
+- **(a) Add the titles directly to SubjectTileRow.** Both consumers (modal + Workstation) get the titles. Single change. The modal becomes slightly taller per tile.
+- **(b) Make the title optional via a prop.** `SubjectTileRowProps` gains optional `mlsTitle?: string` and `physicalTitle?: string` props. The Workstation passes them; the modal omits them. More flexibility, more prop surface.
+
+### Recommended next step
+
+(a) — add the titles directly in SubjectTileRow with the proposed labels. The modal benefits from the same consistency as the Workstation. Smallest change.
+
+---
+
 ## How to add new entries
 
 Append a new section below using the same template:

@@ -31,6 +31,7 @@ import Link from "next/link";
 import { markAnalysisCompleteAction } from "@/app/(workspace)/deals/actions";
 import { generateReportAction } from "@/app/(workspace)/reports/actions";
 import { QuickAnalysisTile } from "@/components/workstation/quick-analysis-tile";
+import { QuickStatusTile } from "@/components/workstation/quick-status-tile";
 import { SubjectTileRow } from "@/components/workstation/subject-tile-row";
 import { fmt, fmtNum } from "@/lib/reports/format";
 import type { WorkstationData } from "@/lib/reports/types";
@@ -61,6 +62,16 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
     (ma?.target_profit_manual as number | null) ?? null;
   const initialDaysHeldManual =
     (ma?.days_held_manual as number | null) ?? null;
+
+  // ── Quick Status initial values ─────────────────────────────────────
+  // Interest Level lives on analysis_pipeline; the other 3 dropdowns
+  // live on manual_analysis. The shared saveManualAnalysisFieldAction
+  // handles the cross-table routing internally.
+  const initialInterestLevel =
+    (data.pipeline?.interest_level as string | null) ?? null;
+  const initialCondition = (ma?.analyst_condition as string | null) ?? null;
+  const initialLocation = (ma?.location_rating as string | null) ?? null;
+  const initialNextStep = (ma?.next_step as string | null) ?? null;
 
   const p = data.physical;
 
@@ -147,17 +158,14 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
           autoDaysHeld={data.holding?.daysHeld ?? null}
         />
 
-        {/* TILE 4 — QUICK STATUS — 3E.3.c (placeholder for now) */}
-        <div
-          className="shrink-0 rounded border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-500"
-          style={{ maxWidth: 240 }}
-        >
-          TILE 4 — QUICK STATUS (3E.3.c)
-          <div className="mt-1 text-[10px]">
-            Interest / Condition / Location / Next Step dropdowns with
-            auto-persist
-          </div>
-        </div>
+        {/* TILE 4 — Quick Status (auto-persist) */}
+        <QuickStatusTile
+          analysisId={data.analysisId}
+          initialInterestLevel={initialInterestLevel}
+          initialCondition={initialCondition}
+          initialLocation={initialLocation}
+          initialNextStep={initialNextStep}
+        />
       </div>
 
       {/* DEAL STAT STRIP — 3E.4 */}
