@@ -1,24 +1,36 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 
 type AppChromeProps = {
   children: ReactNode;
 };
 
+type SectionTab = {
+  href: string;
+  label: string;
+  exact?: boolean;
+  // Optional custom matcher used when the default pathname-only check is
+  // insufficient (e.g. tabs that differ only by query string, like the
+  // /action Pipeline vs Closed pair which share `/action` and switch on
+  // `?status=`).
+  isActive?: (pathname: string, searchParams: URLSearchParams) => boolean;
+};
+
 type SectionConfig = {
   title: string;
   subtitle: string;
-  tabs: { href: string; label: string; exact?: boolean }[];
+  tabs: SectionTab[];
 };
 
 const primaryNav = [
   { href: "/home", label: "Home" },
   { href: "/intake", label: "Intake" },
   { href: "/screening", label: "Screening" },
-  { href: "/deals", label: "Deals" },
+  { href: "/analysis", label: "Analysis" },
+  { href: "/action", label: "Action" },
   { href: "/reports", label: "Reports" },
   { href: "/admin", label: "Admin" },
 ];
@@ -51,14 +63,35 @@ function getSectionConfig(pathname: string): SectionConfig {
     };
   }
 
-  if (pathname.startsWith("/deals")) {
+  if (pathname.startsWith("/analysis")) {
     return {
-      title: "Deals",
-      subtitle: "Human-promoted deals: evaluation, offers, and closings.",
+      title: "Analysis",
+      subtitle:
+        "Deep underwriting of promoted properties — comps, ARV, rehab, deal math.",
+      tabs: [{ href: "/analysis", label: "Watch List" }],
+    };
+  }
+
+  if (pathname.startsWith("/action")) {
+    return {
+      title: "Action",
+      subtitle:
+        "Deals being moved to closing — showings, offers, contract, close.",
       tabs: [
-        { href: "/deals/watchlist", label: "Watch List" },
-        { href: "/deals/pipeline", label: "Pipeline", exact: true },
-        { href: "/deals/closed", label: "Closed", exact: true },
+        {
+          href: "/action",
+          label: "Pipeline",
+          isActive: (p, sp) =>
+            (p === "/action" || p.startsWith("/action/")) &&
+            sp.get("status") !== "closed",
+        },
+        {
+          href: "/action?status=closed",
+          label: "Closed",
+          isActive: (p, sp) =>
+            (p === "/action" || p.startsWith("/action/")) &&
+            sp.get("status") === "closed",
+        },
       ],
     };
   }
@@ -89,7 +122,10 @@ function getSectionConfig(pathname: string): SectionConfig {
   };
 }
 
-function getPageLabel(pathname: string): string {
+function getPageLabel(
+  pathname: string,
+  searchParams: URLSearchParams,
+): string {
   if (pathname === "/home") return "Dashboard";
 
   if (pathname === "/intake/imports") return "Imports";
@@ -98,10 +134,11 @@ function getPageLabel(pathname: string): string {
   if (pathname === "/screening") return "Screening Queue";
   if (pathname.startsWith("/screening/")) return "Screening Batch";
 
-  if (pathname === "/deals/watchlist") return "Watch List";
-  if (pathname.startsWith("/deals/watchlist/")) return "Analysis Workstation";
-  if (pathname === "/deals/pipeline") return "Pipeline";
-  if (pathname === "/deals/closed") return "Closed";
+  if (pathname === "/analysis") return "Watch List";
+  if (pathname.startsWith("/analysis/")) return "Analysis Workstation";
+  if (pathname === "/action") {
+    return searchParams.get("status") === "closed" ? "Closed" : "Pipeline";
+  }
 
   if (pathname === "/reports") return "Report Library";
   if (pathname.startsWith("/reports/")) return "Report Detail";
@@ -119,9 +156,14 @@ function isPrimaryActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function isTabActive(pathname: string, href: string, exact?: boolean) {
-  if (exact) return pathname === href;
-  return pathname === href || pathname.startsWith(`${href}/`);
+function isTabActive(
+  pathname: string,
+  searchParams: URLSearchParams,
+  tab: SectionTab,
+) {
+  if (tab.isActive) return tab.isActive(pathname, searchParams);
+  if (tab.exact) return pathname === tab.href;
+  return pathname === tab.href || pathname.startsWith(`${tab.href}/`);
 }
 
 function primaryLinkClass(active: boolean) {
@@ -144,8 +186,10 @@ function tabLinkClass(active: boolean) {
 
 export function AppChrome({ children }: AppChromeProps) {
   const pathname = usePathname() ?? "/";
+  const rawSearchParams = useSearchParams();
+  const searchParams = rawSearchParams ?? new URLSearchParams();
   const section = getSectionConfig(pathname);
-  const pageLabel = getPageLabel(pathname);
+  const pageLabel = getPageLabel(pathname, searchParams);
 
   return (
     <div className="min-h-screen bg-[var(--dw-bg)] text-[var(--dw-text)]">
@@ -206,7 +250,7 @@ export function AppChrome({ children }: AppChromeProps) {
                 key={tab.href}
                 href={tab.href}
                 className={tabLinkClass(
-                  isTabActive(pathname, tab.href, tab.exact),
+                  isTabActive(pathname, searchParams, tab),
                 )}
               >
                 {tab.label}
