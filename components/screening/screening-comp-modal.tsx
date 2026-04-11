@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import type { MapPin } from "@/components/properties/comp-map";
 import { ArvBreakdownTooltip } from "@/components/screening/arv-breakdown-tooltip";
+import { DealStat } from "@/components/workstation/deal-stat";
 import {
   loadScreeningCompDataAction,
   loadCompDataByRunAction,
@@ -575,10 +576,11 @@ export function ScreeningCompModal({
         {/* Deal math summary strip — live-recalculated from picked comps */}
         {!loading && data && liveDeal && (
           <div className="flex items-center gap-4 border-b border-slate-100 bg-slate-50 px-4 py-2">
-            <DealStat label="ARV" value={$f(liveDeal.arv)} highlight />
-            <DealStat label="Max Offer" value={$f(liveDeal.maxOffer)} highlight />
-            <DealStat label="Offer%" value={fmtPct(liveDeal.offerPct)} />
+            <DealStat variant="inline" label="ARV" value={$f(liveDeal.arv)} highlight />
+            <DealStat variant="inline" label="Max Offer" value={$f(liveDeal.maxOffer)} highlight />
+            <DealStat variant="inline" label="Offer%" value={fmtPct(liveDeal.offerPct)} />
             <DealStat
+              variant="inline"
               label="Gap/sqft"
               value={
                 liveDeal.gapPerSqft != null
@@ -586,9 +588,10 @@ export function ScreeningCompModal({
                   : "—"
               }
             />
-            <DealStat label="Rehab" value={$f(data.rehabTotal)} />
+            <DealStat variant="inline" label="Rehab" value={$f(data.rehabTotal)} />
             {data.trendAnnualRate != null && (
               <DealStat
+                variant="inline"
                 label="Trend"
                 value={`${data.trendAnnualRate >= 0 ? "+" : ""}${(data.trendAnnualRate * 100).toFixed(1)}%`}
               />
@@ -1134,29 +1137,6 @@ export function ScreeningCompModal({
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
-
-function DealStat({
-  label,
-  value,
-  highlight,
-}: {
-  label: string;
-  value: string;
-  highlight?: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-[10px] uppercase tracking-wider text-slate-400">
-        {label}
-      </span>
-      <span
-        className={`text-xs font-semibold ${highlight ? "text-emerald-700" : "text-slate-900"}`}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
 
 function CopyMlsButton({
   label,

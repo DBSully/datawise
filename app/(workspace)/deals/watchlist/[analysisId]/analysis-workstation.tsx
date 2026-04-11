@@ -8,6 +8,7 @@ import type { MapPin, MapPinTooltipData } from "@/components/properties/comp-map
 import { ScreeningCompModal } from "@/components/screening/screening-comp-modal";
 import { ArvBreakdownTooltip } from "@/components/screening/arv-breakdown-tooltip";
 import { CostLine } from "@/components/workstation/cost-line";
+import { DealStat } from "@/components/workstation/deal-stat";
 import {
   TrendDirectionBadge,
   TrendTierColumn,
@@ -56,16 +57,6 @@ function fmtIsoDate(v: string | null | undefined): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v);
   if (!m) return "\u2014";
   return `${m[2]}/${m[3]}/${m[1].slice(2)}`;
-}
-
-/** Compact deal-stat pill used in the live-recalc summary strip. */
-function DealStat({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
-  return (
-    <div className="flex flex-col leading-tight">
-      <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-500">{label}</span>
-      <span className={`font-mono text-[13px] ${highlight ? "font-bold text-slate-900" : "text-slate-700"}`}>{value}</span>
-    </div>
-  );
 }
 
 function CardTitle({ children, action }: { children: ReactNode; action?: ReactNode }) {
