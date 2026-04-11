@@ -107,7 +107,17 @@ export default async function ScreeningQueuePage({
     query = query.eq("is_prime_candidate", true);
   }
   if (!showReviewed) {
-    query = query.is("review_action", null);
+    // Hide both:
+    //   1. Reviewed (passed/promoted) screening_results rows
+    //   2. Properties that already have an active or closed analysis
+    //      (i.e. on the watch list, in pipeline, or already closed).
+    // Without #2, re-screened watch list items reappear in the queue
+    // because the new screening_results row has review_action = NULL.
+    // The has_active_analysis column comes from the LEFT JOIN LATERAL
+    // added in supabase/migrations/20260410130500_interim_queue_filter.sql.
+    query = query
+      .is("review_action", null)
+      .is("has_active_analysis", false);
   }
   if (mlsStatusFilter !== "all") {
     query = query.eq("mls_status", mlsStatusFilter);
@@ -212,6 +222,12 @@ export default async function ScreeningQueuePage({
     promoted_analysis_id: r.promoted_analysis_id as string | null,
     comp_search_run_id: r.comp_search_run_id as string | null,
     review_action: r.review_action as string | null,
+    // Interim queue fix columns from the recreated analysis_queue_v
+    has_active_analysis: r.has_active_analysis as boolean | null,
+    active_analysis_id: r.active_analysis_id as string | null,
+    active_lifecycle_stage: r.active_lifecycle_stage as string | null,
+    active_interest_level: r.active_interest_level as string | null,
+    has_newer_screening_than_analysis: r.has_newer_screening_than_analysis as boolean | null,
   }));
 
   return (

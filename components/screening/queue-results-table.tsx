@@ -34,6 +34,15 @@ export type QueueResultRow = {
   promoted_analysis_id: string | null;
   comp_search_run_id: string | null;
   review_action: string | null;
+  // Added by the interim queue fix migration (20260410130500). These come
+  // from analysis_queue_v's LEFT JOIN LATERAL to find any active analysis
+  // for this property, plus a "has the latest screening run happened
+  // since the analysis was created" flag.
+  has_active_analysis: boolean | null;
+  active_analysis_id: string | null;
+  active_lifecycle_stage: string | null;
+  active_interest_level: string | null;
+  has_newer_screening_than_analysis: boolean | null;
 };
 
 type QueueResultsTableProps = {
@@ -176,12 +185,31 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
                     ) : null}
                   </td>
                   <td>
-                    {r.promoted_analysis_id ? (
+                    {/* Status badge logic — interim queue fix:
+                        Prefer active_analysis_id (always reflects the most
+                        current active analysis for this property) over
+                        promoted_analysis_id (which is per-row and NULL on
+                        re-screened rows). When the latest screening data
+                        is newer than the analysis was created, append a
+                        red dot indicator so the analyst can spot which
+                        watch list items have fresh information. */}
+                    {r.active_analysis_id ?? r.promoted_analysis_id ? (
                       <Link
-                        href={`/deals/watchlist/${r.promoted_analysis_id}`}
-                        className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800"
+                        href={`/deals/watchlist/${r.active_analysis_id ?? r.promoted_analysis_id}`}
+                        className="inline-flex items-center gap-1 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800 hover:bg-blue-200"
+                        title={
+                          r.has_newer_screening_than_analysis
+                            ? `Watch List (${r.active_lifecycle_stage ?? "active"}) — newer screening data available`
+                            : `Watch List (${r.active_lifecycle_stage ?? "active"})`
+                        }
                       >
                         Watch List
+                        {r.has_newer_screening_than_analysis && (
+                          <span
+                            className="inline-block h-1.5 w-1.5 rounded-full bg-red-500"
+                            aria-label="newer screening data available"
+                          />
+                        )}
                       </Link>
                     ) : r.review_action === "passed" ? (
                       <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
@@ -275,7 +303,10 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
         <ScreeningCompModal
           resultId={activeResultId}
           batchId={activeRow.screening_batch_id}
-          promotedAnalysisId={activeRow.promoted_analysis_id}
+          // Prefer active_analysis_id (interim queue fix) over per-row
+          // promoted_analysis_id so the modal correctly recognizes a
+          // re-screened watch list property as already promoted.
+          promotedAnalysisId={activeRow.active_analysis_id ?? activeRow.promoted_analysis_id}
           realPropertyId={activeRow.real_property_id}
           onClose={() => setActiveResultId(null)}
         />

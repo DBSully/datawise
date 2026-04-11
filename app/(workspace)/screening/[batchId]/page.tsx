@@ -190,6 +190,18 @@ export default async function BatchResultsPage({
         promoted_analysis_id: r.promoted_analysis_id as string | null,
         comp_search_run_id: r.comp_search_run_id as string | null,
         review_action: r.review_action as string | null,
+        // Interim queue fix columns from analysis_queue_v are not available
+        // here because this page queries screening_results directly (per-batch
+        // view, not "latest per property"). The batch detail page isn't
+        // affected by the re-screening bug — each batch has its own per-batch
+        // rows with intact review_action — so we pass null for these fields
+        // and the table falls back to promoted_analysis_id for the Watch List
+        // badge.
+        has_active_analysis: null,
+        active_analysis_id: null,
+        active_lifecycle_stage: null,
+        active_interest_level: null,
+        has_newer_screening_than_analysis: null,
       };
     })
     .filter((r) => {
