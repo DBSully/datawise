@@ -30,21 +30,130 @@ import { useState } from "react";
 import Link from "next/link";
 import { markAnalysisCompleteAction } from "@/app/(workspace)/deals/actions";
 import { generateReportAction } from "@/app/(workspace)/reports/actions";
+import { SubjectTileRow } from "@/components/workstation/subject-tile-row";
+import { fmt, fmtNum } from "@/lib/reports/format";
 import type { WorkstationData } from "@/lib/reports/types";
+
+/** Format an ISO date string ("YYYY-MM-DD" or full timestamp) as
+ *  mm/dd/yy without TZ shifts. Mirrors the legacy Workstation's
+ *  fmtIsoDate helper. */
+function fmtIsoDate(v: string | null | undefined): string {
+  if (!v) return "\u2014";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v);
+  if (!m) return "\u2014";
+  return `${m[2]}/${m[3]}/${m[1].slice(2)}`;
+}
 
 type AnalysisWorkstationProps = {
   data: WorkstationData;
 };
 
 export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
+  // ── Local Quick Analysis input state ────────────────────────────────────
+  // For 3E.3.a, the Quick Analysis tile uses local-only state (mirrors
+  // the screening modal's pattern). 3E.3.b replaces this with the
+  // auto-persisting <QuickAnalysisTile> built on top of 3D's
+  // useDebouncedSave + saveManualAnalysisFieldAction. Initial values
+  // come from the database via the manualAnalysis Record on
+  // WorkstationData.
+  const ma = data.manualAnalysis;
+  const initialArvManual = (ma?.arv_manual as number | null) ?? null;
+  const initialRehabManual = (ma?.rehab_manual as number | null) ?? null;
+  const initialTargetProfitManual =
+    (ma?.target_profit_manual as number | null) ?? null;
+
+  const [manualArvInput, setManualArvInput] = useState<string>(
+    initialArvManual != null ? String(initialArvManual) : "",
+  );
+  const [manualRehabInput, setManualRehabInput] = useState<string>(
+    initialRehabManual != null ? String(initialRehabManual) : "",
+  );
+  const [manualTargetProfitInput, setManualTargetProfitInput] =
+    useState<string>(
+      initialTargetProfitManual != null
+        ? String(initialTargetProfitManual)
+        : "",
+    );
+
+  const p = data.physical;
+
   return (
     <section className="dw-section-stack-compact">
       <WorkstationHeader data={data} />
 
-      {/* TOP TILE ROW — 3E.3 */}
-      <div className="rounded border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-xs text-slate-500">
-        TOP TILE ROW (3E.3) — MLS Info / Property Physical (with bed/bath
-        grid) / Quick Analysis / Quick Status
+      {/* TOP TILE ROW — 3E.3.a (3 tiles via SubjectTileRow + bed/bath grid).
+       *  Tile 4 (Quick Status) is still a stub below — added in 3E.3.c. */}
+      <SubjectTileRow
+        mlsInfo={{
+          mlsStatus: data.listing?.mlsStatus ?? "\u2014",
+          mlsNumber: data.listing?.listingId ?? "\u2014",
+          mlsChangeType: data.listing?.mlsMajorChangeType ?? "\u2014",
+          listDate: fmtIsoDate(data.listing?.listingContractDate),
+          origListPrice: fmt(data.listing?.originalListPrice),
+          ucDate: fmtIsoDate(data.listing?.purchaseContractDate),
+          listPrice: fmt(data.listing?.listPrice),
+          closeDate: fmtIsoDate(data.listing?.closeDate),
+        }}
+        physical={{
+          totalSf: fmtNum(p?.buildingSqft),
+          aboveSf: fmtNum(p?.aboveGradeSqft),
+          belowSf: fmtNum(p?.belowGradeTotalSqft),
+          basementFinSf: fmtNum(p?.belowGradeFinishedSqft),
+          beds: p?.bedroomsTotal != null ? String(p.bedroomsTotal) : "\u2014",
+          baths:
+            p?.bathroomsTotal != null ? fmtNum(p.bathroomsTotal, 1) : "\u2014",
+          garage:
+            p?.garageSpaces != null ? fmtNum(p.garageSpaces, 1) : "\u2014",
+          yearBuilt: p?.yearBuilt ?? null,
+          levels: p?.levelClass ?? "\u2014",
+          propertyType: p?.propertyType ?? "\u2014",
+          lotSf: fmtNum(p?.lotSizeSqft),
+          taxHoa: `${fmt(data.financials?.annualTax)} | ${fmt(data.financials?.annualHoa)}`,
+          // NEW in 3E.3.a — bed/bath level mini-grid populated from the
+          // per-level fields exposed by 3A's schema work.
+          bedBathLevels: p
+            ? {
+                bedsTotal: p.bedroomsTotal,
+                bedsMain: p.bedroomsMain,
+                bedsUpper: p.bedroomsUpper,
+                bedsLower: p.bedroomsLower,
+                bathsTotal: p.bathroomsTotal,
+                bathsMain: p.bathroomsMain,
+                bathsUpper: p.bathroomsUpper,
+                bathsLower: p.bathroomsLower,
+              }
+            : undefined,
+        }}
+        quickAnalysis={{
+          manualArvInput,
+          setManualArvInput,
+          arvPlaceholder:
+            initialArvManual != null
+              ? String(initialArvManual)
+              : data.arv.effective != null
+                ? String(Math.round(data.arv.effective))
+                : "\u2014",
+          manualRehabInput,
+          setManualRehabInput,
+          rehabPlaceholder:
+            initialRehabManual != null
+              ? String(initialRehabManual)
+              : data.rehab.effective != null
+                ? String(Math.round(data.rehab.effective))
+                : "\u2014",
+          manualTargetProfitInput,
+          setManualTargetProfitInput,
+          targetProfitPlaceholder:
+            initialTargetProfitManual != null
+              ? String(initialTargetProfitManual)
+              : "40,000",
+        }}
+      />
+
+      {/* TILE 4 — QUICK STATUS — 3E.3.c (placeholder for now) */}
+      <div className="rounded border border-dashed border-slate-300 bg-slate-50 px-4 py-2 text-xs text-slate-500">
+        TILE 4 — QUICK STATUS (3E.3.c) — Interest / Condition / Location /
+        Next Step dropdowns with auto-persist
       </div>
 
       {/* DEAL STAT STRIP — 3E.4 */}

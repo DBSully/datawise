@@ -50,6 +50,23 @@ export type SubjectTileRowMlsInfo = {
   closeDate: string;
 };
 
+/** Per-level bed/bath counts for the embedded mini-grid in the
+ *  Property Physical tile. Optional — when omitted, the mini-grid
+ *  doesn't render. The screening modal omits this (its
+ *  ScreeningCompData type doesn't expose per-level fields); the
+ *  new Workstation provides it from WorkstationData.physical
+ *  (per Phase 1 Step 3A's schema work). */
+export type SubjectTileRowBedBathLevels = {
+  bedsTotal: number | null;
+  bedsMain: number | null;
+  bedsUpper: number | null;
+  bedsLower: number | null;
+  bathsTotal: number | null;
+  bathsMain: number | null;
+  bathsUpper: number | null;
+  bathsLower: number | null;
+};
+
 export type SubjectTileRowPhysical = {
   totalSf: string;
   aboveSf: string;
@@ -63,6 +80,10 @@ export type SubjectTileRowPhysical = {
   propertyType: string;
   lotSf: string;
   taxHoa: string;
+  /** Optional bed/bath level breakdown — when present, the Property
+   *  Physical tile renders the embedded mini-grid below the main
+   *  fields per spec §3.2. */
+  bedBathLevels?: SubjectTileRowBedBathLevels;
 };
 
 export type SubjectTileRowQuickAnalysis = {
@@ -200,6 +221,14 @@ export function SubjectTileRow({
           <span className="font-bold text-slate-500">Tax/HOA</span>
           <span className="text-slate-900">{physical.taxHoa}</span>
         </div>
+
+        {/* Bed/bath level mini-grid (per spec §3.2). Only renders when
+         *  the consumer provides per-level data. The screening modal
+         *  omits this; the new Workstation in 3E populates it from
+         *  WorkstationData.physical (per Phase 1 Step 3A's schema work). */}
+        {physical.bedBathLevels && (
+          <BedBathLevelGrid levels={physical.bedBathLevels} />
+        )}
       </div>
 
       {/* Quick Analysis tile */}
@@ -250,6 +279,74 @@ export function SubjectTileRow({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BedBathLevelGrid — embedded mini-grid in the Property Physical tile
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Format a per-level bed/bath count for the mini-grid. Renders the
+ *  number as-is, or an em-dash for null/zero. Counts are integers
+ *  except baths which can have a `.5` (e.g. half bath). */
+function fmtLevelCount(v: number | null): string {
+  if (v == null) return "\u2014";
+  if (v === 0) return "\u2014";
+  // Render whole numbers without trailing zero, half-baths as "1.5"
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+}
+
+function BedBathLevelGrid({
+  levels,
+}: {
+  levels: SubjectTileRowBedBathLevels;
+}) {
+  return (
+    <div className="mt-2 inline-block rounded border border-slate-200 bg-white px-2 py-1">
+      <table className="border-collapse text-[10px]">
+        <thead>
+          <tr className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">
+            <th className="px-1 py-0 text-left"></th>
+            <th className="px-1.5 py-0 text-right">Tot</th>
+            <th className="px-1.5 py-0 text-right">Main</th>
+            <th className="px-1.5 py-0 text-right">Up</th>
+            <th className="px-1.5 py-0 text-right">Lo</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td className="px-1 py-0 font-bold text-slate-500">Bd</td>
+            <td className="px-1.5 py-0 text-right font-mono text-slate-900">
+              {fmtLevelCount(levels.bedsTotal)}
+            </td>
+            <td className="px-1.5 py-0 text-right font-mono text-slate-700">
+              {fmtLevelCount(levels.bedsMain)}
+            </td>
+            <td className="px-1.5 py-0 text-right font-mono text-slate-700">
+              {fmtLevelCount(levels.bedsUpper)}
+            </td>
+            <td className="px-1.5 py-0 text-right font-mono text-slate-700">
+              {fmtLevelCount(levels.bedsLower)}
+            </td>
+          </tr>
+          <tr>
+            <td className="px-1 py-0 font-bold text-slate-500">Ba</td>
+            <td className="px-1.5 py-0 text-right font-mono text-slate-900">
+              {fmtLevelCount(levels.bathsTotal)}
+            </td>
+            <td className="px-1.5 py-0 text-right font-mono text-slate-700">
+              {fmtLevelCount(levels.bathsMain)}
+            </td>
+            <td className="px-1.5 py-0 text-right font-mono text-slate-700">
+              {fmtLevelCount(levels.bathsUpper)}
+            </td>
+            <td className="px-1.5 py-0 text-right font-mono text-slate-700">
+              {fmtLevelCount(levels.bathsLower)}
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   );
 }
