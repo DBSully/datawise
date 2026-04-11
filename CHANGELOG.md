@@ -1,3 +1,142 @@
+## 2026-04-11 — Phase 1 Step 3A — Schema Preparation
+
+First sub-step of the Step 3 route restructure + Workstation rebuild milestone. Applies all schema and data-model changes the new Workstation card layout will need, in isolation, before any UI work begins. Includes the SECURITY DEFINER function audit deferred from Step 2.
+
+**This is purely additive — no UI changes, no route changes, no application behavior changes for the existing analyst.** The new fields and types are added but not yet consumed; they become load-bearing in 3E when the new Workstation cards are built.
+
+### Goals accomplished
+
+1. **Notes visibility model** — replaced the binary `is_public` boolean with a three-tier `visibility` enum (`internal` / `specific_partners` / `all_partners`) per `WORKSTATION_CARD_SPEC.md` Decision 8. Added the `visible_to_partner_ids` array column for the curated partner subset. Renamed the `'internal'` note category to `'workflow'` per Decision 8a. The old `is_public` column stays in place as a safety net through Step 3 — gets dropped in 3F.
+2. **`manual_analysis.next_step` column** — new free-form text column for the Quick Status tile (Tile 4) that ships in 3E. Starter option set lives in application code, not as a CHECK constraint, so the list can evolve without migrations.
+3. **Transaction engine 6-line restructure** — rewrote `transaction-engine.ts` to compute the 6-line breakdown from Decision 5 (Acquisition Title / Commission / Fee + Disposition Title / Commission Buyer / Commission Seller). New defaults preserve the prior 4.77% combined rate exactly (`0.003 + 0 + 0 + 0.0047 + 0.02 + 0.02 = 0.0477`), so existing `screening_results.transaction_total` values remain valid — no recompute or backfill needed. The deprecated `dispositionCommissions` field stays as a backwards-compat shim (computed as `buyer + seller`) so existing consumers don't break.
+4. **Cash Required schema extension** — cascaded the Decision 5 transaction restructure into the `cashRequired` calculation. Added `acquisitionCommission` (signed) and `acquisitionFee` (flat) line items. Emitted two new derived subtotals (`acquisitionSubtotal`, `carrySubtotal`) per `WORKSTATION_CARD_SPEC.md` §5.5. Existing `totalCashRequired` values are preserved unchanged because the new line items default to 0.
+5. **Bed/bath level fields in `WorkstationData.physical`** — exposed `property_physical`'s level-specific bed/bath columns (`main_level_*`, `upper_level_*`, `lower_level_*`, `basement_level_*`) through the workstation type. The new Property Physical tile mini-grid in 3E will read these to render the spec's 4-column grid (`Tot | Main | Up | Lo`). Used a NULL-safe sum helper to collapse `lower_level_*` and `basement_level_*` into a single `Lo` value.
+6. **SECURITY DEFINER function audit** (deferred from Step 2 per Decision 12.2) — ran the audit query, found exactly one non-whitelisted function (`rls_auto_enable`), investigated it via two follow-up queries (function body + event trigger wiring), and verified it as a defense-in-depth event trigger that auto-enables RLS on newly-created tables in the `public` schema. **No fix needed** — added to the audit whitelist for future runs.
+
+### Schema migrations (2 total — third was conditional on audit findings, not needed)
+
+**1. `20260411090000_step3a_notes_visibility_model.sql`** — adds `visibility` enum column with `CHECK (visibility IN ('internal', 'specific_partners', 'all_partners'))`, adds `visible_to_partner_ids uuid[]`, backfills `visibility` from `is_public` (`true → 'all_partners'`, `false → 'internal'`), marks `is_public` as deprecated via `COMMENT`, and renames `note_type = 'internal'` rows to `'workflow'`.
+
+   **DEFAULT 'all_partners' (not 'internal')** — intentional. The eventual target per the spec is for new notes to default to `'internal'`, but during the transition window (3A → 3E) the existing `addAnalysisNoteAction` only writes the OLD `is_public` column (which has `DEFAULT true = public`). Setting the new column's default to `'internal'` would create inconsistent rows for any note created via the existing code path during the transition. Setting it to `'all_partners'` keeps the two columns in sync. 3E will:
+   - Re-sync `visibility` from `is_public` for any drifted rows
+   - `ALTER COLUMN visibility SET DEFAULT 'internal'` to match the spec
+   - Ship the new Notes card that writes `visibility` directly
+
+**2. `20260411090100_step3a_next_step_column.sql`** — single `ALTER TABLE manual_analysis ADD COLUMN next_step text` (nullable, no DEFAULT, no CHECK). Storage target for the Quick Status tile.
+
+### Application code (3 workstreams, all TypeScript-only)
+
+**Transaction engine restructure** (`lib/screening/types.ts`, `lib/screening/strategy-profiles.ts`, `lib/screening/transaction-engine.ts`, `lib/reports/types.ts`):
+
+- `TransactionResult` and `TransactionDetail` types expanded with 6 new fields + 2 derived subtotals (`acquisitionTitle`, `acquisitionCommission`, `acquisitionFee`, `acquisitionSubtotal`, `dispositionTitle`, `dispositionCommissionBuyer`, `dispositionCommissionSeller`, `dispositionSubtotal`)
+- Old `dispositionCommissions` field kept as deprecated backwards-compat shim, computed as `buyer + seller`. Removed in 3F.
+- `TransactionConfig` expanded with 6 new rates; `DENVER_FLIP_V1.transaction` defaults updated. Old `dispositionCommissionRate` kept as optional deprecated field.
+- `transaction-engine.ts` `calculateTransaction()` rewritten to compute the 6-line breakdown. Returns the deprecated shim alongside the new fields.
+- **Math preservation property:** new defaults (`0.003 + 0 + 0 + 0.0047 + 0.02 + 0.02 = 0.0477`) produce the same total as old (`0.003 + 0.0047 + 0.04 = 0.0477`). Verified by running the existing Workstation against existing data — Trans waterfall line shows unchanged values.
+
+**Cash Required schema extension** (`lib/reports/types.ts`, `lib/analysis/load-workstation-data.ts`):
+
+- `WorkstationData.cashRequired` type extended with 4 new fields: `acquisitionCommission` (signed), `acquisitionFee`, `acquisitionSubtotal` (derived), `carrySubtotal` (derived)
+- Computation in `load-workstation-data.ts` reads `acquisitionCommission` and `acquisitionFee` from the transaction result, computes the two subtotals explicitly
+- Math preservation: when `acquisitionCommission = 0` and `acquisitionFee = 0` (DENVER_FLIP_V1 defaults), the new `totalCashRequired` is mathematically identical to the old per-line sum
+- Signed acquisition commission handled via plain `+` (negative reduces total naturally)
+
+**Bed/bath level fields** (`lib/reports/types.ts`, `lib/analysis/load-workstation-data.ts`):
+
+- `WorkstationData.physical` extended with 6 new nullable fields: `bedroomsMain`, `bedroomsUpper`, `bedroomsLower`, `bathroomsMain`, `bathroomsUpper`, `bathroomsLower`
+- New helper `sumNullSafe(a, b)` for NULL-safe addition (both null → null; one null → the other; both set → sum)
+- `property_physical` SELECT extended with 8 new column references (main / upper / lower / basement bed/bath columns)
+- `bedroomsLower` and `bathroomsLower` collapse `lower_level_*` and `basement_level_*` into a single value via `sumNullSafe` so the spec's 4-column grid (`Tot | Main | Up | Lo`) renders correctly
+
+### SECURITY DEFINER audit results
+
+The audit query found exactly one non-whitelisted SECURITY DEFINER function in the `public` schema:
+
+**`rls_auto_enable`** — a Postgres event trigger function (`RETURNS event_trigger`) wired up as event trigger `ensure_rls` on `ddl_command_end`, filtered to `CREATE TABLE / CREATE TABLE AS / SELECT INTO`. Iterates `pg_event_trigger_ddl_commands()` and runs `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` on every newly-created table in the `public` schema (system schemas explicitly excluded). Has proper error handling, sets `search_path = pg_catalog` for hardening, and does not read or write any user data.
+
+**Verdict: SAFE — defense-in-depth feature, not a security risk.** This function actually helped us during Steps 1 and 2: every time we created a new table (`organizations`, `profiles`), this event trigger auto-enabled RLS on it. Our migrations' explicit `ENABLE ROW LEVEL SECURITY` calls were redundant no-ops.
+
+**Treatment:** Added to the audit whitelist (`PHASE1_STEP3A_IMPLEMENTATION.md` §6 — joining `handle_new_auth_user`, `current_user_organization_id`, `set_updated_at`). No fix migration required.
+
+**Note for future reproducibility:** `rls_auto_enable` is installed in the production database but **not in our migration history**. It was installed either by Supabase automatically or via direct SQL at some point in the past. If we ever rebuild from migrations from scratch, this function wouldn't be recreated. Capturing it in a migration is a separate concern (out of scope for 3A) — flagging here for awareness.
+
+### Notable design decisions
+
+- **Backwards-compat shim pattern.** Both `TransactionResult` and `TransactionDetail` keep the old `dispositionCommissions` field as a deprecated backwards-compat field (computed as `buyer + seller`). This means **zero consumer changes** in 3A — every existing read of `transaction.dispositionCommissions` continues to work. New consumers in 3E read the buyer/seller fields directly. The shim is removed in 3F when the existing Workstation is fully retired.
+
+- **DEFAULT 'all_partners' vs 'internal'.** Setting the new `visibility` column's DEFAULT to `'all_partners'` instead of the spec's eventual `'internal'` was a deliberate transition-period choice to keep `is_public` and `visibility` in sync for any notes created via the existing form before 3E ships. Documented in §5 of the changelog entry above and in the migration file's header comment.
+
+- **Math preservation property.** Both Task 5 (transaction engine) and Task 6 (cashRequired) were designed so that under DENVER_FLIP_V1 defaults, the new computations produce **the exact same totals** as the old computations. This means existing `screening_results.transaction_total` values stay valid (no recompute needed) and the existing Workstation continues to render the same numbers in the Deal Math waterfall and Cash Required panel.
+
+- **NULL-safe collapse for the bed/bath grid.** The spec's 4-column grid collapses `property_physical.lower_level_*` and `basement_level_*` into a single "Lo" value. The new `sumNullSafe` helper handles all four NULL combinations cleanly, which is important because real-world properties have varied configurations (a finished basement with no separate "lower" level vs a property with both vs one with neither).
+
+- **Defense-in-depth pattern recovered: stale `.next` cache.** Mid-task during the Task 5 verification, I deleted the `.next` directory while Dan's dev server was running. This corrupted Turbopack's persistent cache and caused 500 errors on every workspace route. Recovered in 30 seconds by stopping the dev server, deleting `.next` cleanly, and restarting. Standing rule added: never delete `.next` while the dev server is running. (This was the same failure mode documented in `CLAUDE.md` Phase 3 §21.2 — should have been anticipated.)
+
+### Verification
+
+Per §9 of the implementation plan:
+
+**Schema verification (database):**
+- `analysis_notes.visibility` and `visible_to_partner_ids` columns exist with correct types and constraints
+- Backfill cross-check: all 15 existing notes had `is_public = true`, all 15 now have `visibility = 'all_partners'` (consistent)
+- `manual_analysis.next_step` column exists, nullable, no constraints
+- All Step 3A migrations recorded in `supabase_migrations.schema_migrations`
+
+**Type verification:** `npx tsc --noEmit` passes with zero errors after every code change
+
+**Existing analyst workflow regression check (the critical part):**
+- Sign in works
+- `/home`, `/screening`, `/intake/imports`, `/deals/watchlist` all load
+- Workstation renders fully with no missing sections
+- Deal Math waterfall shows unchanged values (Trans line in particular)
+- Cash Required panel shows unchanged total
+- Notes section displays correctly
+- Pipeline status save works
+- Manual override save via Overrides form works
+- Comp map renders, comp table shows selected comps
+- No console errors
+
+### What's deferred to later sub-steps
+
+| Out of scope | Belongs to |
+|---|---|
+| Any UI changes (the new fields are added but not yet consumed) | 3E |
+| Route restructure (`/deals/watchlist` → `/analysis`) | 3B |
+| Component extraction from ScreeningCompModal and current Workstation | 3C |
+| Auto-persist infrastructure (`useDebouncedSave`, `<SaveStatusDot>`, generic field action) | 3D |
+| Building the actual new Workstation cards | 3E |
+| Removing `analysis_notes.is_public` column | 3F |
+| Removing the `dispositionCommissions` deprecated shim from `TransactionResult`/`TransactionDetail` | 3F |
+| Re-syncing `visibility` from `is_public` for any drifted rows + changing DEFAULT to `'internal'` | 3E (when the new Notes card ships) |
+
+### Files touched in 3A
+
+**New (2):**
+- `supabase/migrations/20260411090000_step3a_notes_visibility_model.sql`
+- `supabase/migrations/20260411090100_step3a_next_step_column.sql`
+
+**Modified (4):**
+- `lib/screening/types.ts` — `TransactionResult` type expansion
+- `lib/screening/strategy-profiles.ts` — `TransactionConfig` type + `DENVER_FLIP_V1` defaults
+- `lib/screening/transaction-engine.ts` — `calculateTransaction` rewrite
+- `lib/reports/types.ts` — `TransactionDetail` + `cashRequired` + `physical` type extensions
+- `lib/analysis/load-workstation-data.ts` — `cashRequired` calc, `physical` shaping, `sumNullSafe` helper, extended `property_physical` SELECT
+
+**Reference docs updated:**
+- `PHASE1_STEP3A_IMPLEMENTATION.md` — audit findings recorded in §6.5; migration §4.1 updated with corrected DEFAULT rationale; Task 1 marked complete
+
+**Not modified — by design:**
+- Any UI component
+- Any route or page file
+- Existing analyst workflows (current Workstation, ScreeningCompModal, etc.)
+- `app/(workspace)/layout.tsx` (auth check stays until 3F)
+
+### What 3B builds on top
+
+3B (Route Restructure) is the next sub-step. Mechanical file moves with legacy redirects. No direct dependencies on 3A — but 3B will benefit from 3A being done first because the schema and data layer are now ready for the new Workstation. When 3E starts building the new card layout, all the needed fields are present in `WorkstationData`.
+
+---
+
 ## 2026-04-10 — Phase 1 Step 2 — RLS Scaffolding
 
 Second milestone of the Phase 5 restructure. Converts all 22 core tables from the temporary "dev authenticated full access" RLS policies to proper organization-scoped policies built on top of the Step 1 auth/profiles foundation. **Zero application code changes.**
