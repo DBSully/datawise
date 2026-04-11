@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
+import { signOutAction } from "@/app/auth/actions";
 
 type AppChromeProps = {
   children: ReactNode;
@@ -222,6 +223,14 @@ export function AppChrome({ children }: AppChromeProps) {
             <span className="rounded-md border border-slate-700 px-2 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-300">
               Denver MVP
             </span>
+            <form action={signOutAction}>
+              <button
+                type="submit"
+                className="rounded-md border border-slate-700 px-2 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-300 hover:bg-slate-900 hover:text-white"
+              >
+                Sign Out
+              </button>
+            </form>
           </div>
         </div>
       </header>

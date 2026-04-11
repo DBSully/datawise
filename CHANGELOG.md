@@ -1,3 +1,198 @@
+## 2026-04-11 — Phase 1 Step 3B — Route Restructure
+
+Second sub-step of the Step 3 milestone. Mechanical-only: moves the canonical Watch List route to `/analysis`, the canonical Workstation route to `/analysis/[analysisId]`, and combines the legacy Pipeline + Closed Deals pages into a single `/action` route that dispatches on `?status=active|closed`. Mirrors the canonical `Intake → Screening → Analysis → Action` deal flow that drives the rest of Phase 1.
+
+**Side-by-side rollout per Decision 6.6.** Both old and new URLs render the same UI throughout 3B-3E via thin re-export wrappers — `/deals/watchlist`, `/deals/watchlist/[id]`, `/deals/pipeline`, and `/deals/closed` continue to work as bookmark targets but are no longer surfaced in nav. In 3F the wrappers become hard `redirect()` calls.
+
+**Zero new schema, zero database changes, zero business-logic changes.** The Workstation client component itself was not touched — both new and old routes import the same `analysis-workstation.tsx` file. The 3E sub-step will diverge them by swapping the new route's import to a fresh component file, leaving the legacy wrapper untouched.
+
+### Goals accomplished
+
+1. **Canonical `/analysis` Watch List route** — replaces the previous stub redirect that sent `/analysis` to `/home`. New route imports the same `WatchListTable` the legacy `/deals/watchlist` page uses; the legacy file becomes a one-line `export { default } from "@/app/(workspace)/analysis/page"` re-export. Single source of truth, both URLs work.
+2. **Canonical `/analysis/[analysisId]` Workstation route** — new directory + page that loads `WorkstationData` and renders `AnalysisWorkstation` from the legacy path via absolute import. Legacy `/deals/watchlist/[analysisId]/page.tsx` becomes a thin re-export wrapper. Both URLs render identical Workstation UI.
+3. **Canonical `/action` route with `?status=` dispatch** — combines the legacy `PipelineSection` (active deals) and `ClosedDealsSection` into a single page that switches between two server-component branches based on `searchParams.status`. Default is `active` (Pipeline view); `?status=closed` shows the Closed Deals view. Both branches preserve the existing data shape, queries, and tables.
+4. **Legacy Pipeline and Closed wrappers** — `/deals/pipeline/page.tsx` is now `export { default } from "@/app/(workspace)/action/page"` (no query → defaults to active). `/deals/closed/page.tsx` is a tiny wrapper that hard-codes `?status=closed` via `Promise.resolve({ status: "closed" })` and delegates to the canonical page.
+5. **Two legacy `/analysis/*` redirect targets updated** — `analysis/analyses/page.tsx` and `analysis/properties/[id]/analyses/[analysisId]/page.tsx` previously chained through `/deals/watchlist` to reach the canonical Workstation. Now they redirect directly to `/analysis` and `/analysis/[id]` respectively, collapsing the redirect chain.
+6. **Navigation rebuild in `app-chrome.tsx`** — primary nav now reads `Home | Intake | Screening | Analysis | Action | Reports | Admin`. The `Deals` entry is **removed** per Decision 5.3. Two new section configs (Analysis with Watch List tab, Action with Pipeline + Closed tabs). Page label entries updated. The Action section's Pipeline / Closed tabs disambiguate by query string via a per-tab `isActive(pathname, searchParams)` callback wired through `useSearchParams()`.
+7. **Internal link sweep** — every `Link href="/deals/watchlist/..."`, `redirect("/deals/...")`, and per-id `revalidatePath` call across the codebase updated to point at the new canonical paths. 14 application files touched. Bare-path `revalidatePath("/deals/watchlist")` calls keep the legacy path AND add the new `/analysis` path so both routes get refreshed during the side-by-side period (per spec §5.7); the same pattern applies to `/deals/pipeline` ↔ `/action`.
+8. **Sign-out button** — small UX gap discovered during Task 7 verification. Added a `signOutAction` server action in `app/auth/actions.ts` that calls `supabase.auth.signOut()` and redirects to `/auth/sign-in`, plus a Sign Out button in the header next to the Denver MVP badge. Slipped into Task 8 alongside the CHANGELOG.
+
+### Side-by-side rollout pattern (the design that makes 3B safe)
+
+The pattern that lets 3B ship cleanly without any UI duplication or risk of divergence:
+
+| File | 3B treatment |
+|---|---|
+| `app/(workspace)/analysis/page.tsx` | NEW canonical implementation |
+| `app/(workspace)/deals/watchlist/page.tsx` | `export { default } from "@/app/(workspace)/analysis/page"` |
+| `app/(workspace)/analysis/[analysisId]/page.tsx` | NEW canonical implementation (imports `AnalysisWorkstation` from old path) |
+| `app/(workspace)/deals/watchlist/[analysisId]/page.tsx` | `export { default } from "@/app/(workspace)/analysis/[analysisId]/page"` |
+| `app/(workspace)/action/page.tsx` | NEW canonical with `?status=` dispatch |
+| `app/(workspace)/deals/pipeline/page.tsx` | `export { default } from "@/app/(workspace)/action/page"` |
+| `app/(workspace)/deals/closed/page.tsx` | Async wrapper that calls `ActionPage({ searchParams: Promise.resolve({ status: "closed" }) })` |
+
+Both URLs in each pair render the SAME default export. Zero code duplication, single source of truth, both routes work as bookmarks. In 3E when the new Workstation card layout ships, only the canonical `/analysis/[analysisId]/page.tsx` swaps its component import — the legacy wrapper continues importing the old component file untouched. The two routes diverge naturally without a single line of duplicated maintenance.
+
+In 3F the wrappers all become `redirect()` calls and the legacy directory is deleted.
+
+### Bonus interlude fix — `import_batch_rows` status index
+
+Committed between 3A and 3B (`fa1ee21`) to unblock a separate `/intake/imports` page failure: under resource contention the `import_batch_progress_v` view was hitting `statement_timeout` (`canceling statement due to statement timeout`) because the existing single-column index `ix_import_batch_rows_import_batch_id` only covered the JOIN key, forcing 73,267 heap fetches per page load to evaluate the `FILTER (WHERE processing_status = ...)` predicates.
+
+Fix: composite btree index `ix_import_batch_rows_batch_id_status` on `(import_batch_id, processing_status)` enables an index-only scan because both the JOIN key AND the FILTER column are present in the index. Result: ~178x speedup, view runtime drops from "timeout" to ~45ms with `Heap Fetches: 134/73,401`. Zero query plan disruption (the old index is still useful for queries that look up rows by `batch_id` without status filtering). ~5-10 MB additional disk footprint.
+
+This was the same flavor of issue as the screening queue ghost-entries fix between Step 2 and Step 3 — both surfaced as latent slow queries crossing a threshold under load. Pattern documented in the migration file's header comment block.
+
+### Application code changes
+
+**Phase A — three new canonical routes (Tasks 1-3):**
+- `app/(workspace)/analysis/page.tsx` — canonical Watch List (replaces stub redirect to `/home`)
+- `app/(workspace)/analysis/[analysisId]/page.tsx` — canonical Workstation (NEW directory)
+- `app/(workspace)/action/page.tsx` — canonical Action with `PipelineSection` + `ClosedDealsSection` server-component branches dispatched on `?status=` (NEW directory)
+- `app/(workspace)/deals/watchlist/page.tsx`, `app/(workspace)/deals/watchlist/[analysisId]/page.tsx`, `app/(workspace)/deals/pipeline/page.tsx`, `app/(workspace)/deals/closed/page.tsx` — all converted to thin re-export or async-wrapper form
+
+**Phase B — legacy redirect targets + nav (Tasks 4-5):**
+- `app/(workspace)/analysis/analyses/page.tsx` — `redirect("/deals/watchlist")` → `redirect("/analysis")`
+- `app/(workspace)/analysis/properties/[id]/analyses/[analysisId]/page.tsx` — `redirect(\`/deals/watchlist/${id}\`)` → `redirect(\`/analysis/${id}\`)`
+- `components/layout/app-chrome.tsx` — `primaryNav` reorder (Deals removed, Analysis + Action added between Screening and Reports), new section configs for `/analysis` and `/action`, new page label resolution including `?status=` awareness for Action, new `isActive` callback on `SectionTab` for query-param-driven tab matching, `useSearchParams()` wired into the AppChrome render
+
+**Phase C — internal link sweep (Task 6, 14 files):**
+- 4 component files (`screening/screening-comp-modal.tsx`, `screening/queue-results-table.tsx`, `screening/batch-results-table.tsx`, `properties/analysis-workspace-nav.tsx`)
+- 4 page/table files (`deals/watchlist/watch-list-table.tsx`, `deals/pipeline/pipeline-table.tsx`, `screening/[batchId]/[resultId]/page.tsx`, `admin/properties/[id]/page.tsx`, `home/page.tsx`)
+- 4 server-action files (`screening/actions.ts`, `analysis/properties/actions.ts`, `deals/watchlist/actions.ts`, `deals/pipeline/actions.ts`)
+- 1 substring sweep (`deals/actions.ts`) — 12+ redirect and revalidatePath calls migrated via `/deals/watchlist/` → `/analysis/`
+- 1 parent redirect (`deals/page.tsx`) — `redirect("/deals/watchlist")` → `redirect("/analysis")`
+
+**Phase D — verification + sign-out polish (Tasks 7-8):**
+- `app/auth/actions.ts` — NEW `signOutAction` server action
+- `components/layout/app-chrome.tsx` — Sign Out button in header
+
+### Notable design decisions
+
+- **`useSearchParams` for query-param tab matching.** The Action section's Pipeline / Closed tabs share the `/action` pathname and disambiguate via `?status=`. Default `isTabActive(pathname, href, exact?)` couldn't handle this because pathname-only matching can't tell the two tabs apart. Added an optional `isActive(pathname, searchParams)` callback to the `SectionTab` type and wired `useSearchParams()` into `AppChrome`. Safe to use here because `app/(workspace)/layout.tsx` is already async/dynamic (auth check), so `useSearchParams` doesn't dynamicize any otherwise-static routes.
+
+- **Async wrapper pattern for `/deals/closed`.** Unlike the watchlist and pipeline wrappers which are straight `export { default } from ...` re-exports, the closed-deals wrapper has to inject `?status=closed` because the canonical page defaults to active. Solved with a 4-line async wrapper that calls `ActionPage({ searchParams: Promise.resolve({ status: "closed" }) })`. Functionally identical to the re-export pattern but accommodates the parameter difference.
+
+- **Per-id `revalidatePath` calls in `deals/actions.ts` use substring replacement instead of keep-both.** The spec §5.7 "keep old + add new" pattern was followed for bare-path `revalidatePath("/deals/watchlist")` calls (small number, easy to add sibling lines), but `deals/actions.ts` had 12+ per-id calls in mixed indentation styles plus pre-existing duplicate calls (lines 503-506, 557-560 already revalidate the same URL twice from a previous edit). A literal substring replacement (`/deals/watchlist/` → `/analysis/`) achieved the goal cleanly without amplifying the existing duplication. Functionally equivalent because both pages are `force-dynamic` and never cache server-side.
+
+- **`Deals` removed from nav immediately, not deferred to 3F.** Decision 5.3. Stronger commitment to the new structure. Old routes still work as bookmarks via the wrapper pattern but disappear from primary nav and section configs. Analysts adjust to the new layout immediately.
+
+- **Workstation client component stays at the legacy path during 3B.** Both new and old routes import `AnalysisWorkstation` from `@/app/(workspace)/deals/watchlist/[analysisId]/analysis-workstation`. 3E creates a NEW Workstation component file at the new path; the new page swaps its import to it; the legacy wrapper continues importing the old file. Clean divergence with zero risk during 3B.
+
+- **`AnalysisWorkspaceNav` base URL updated despite generating dead links.** This component constructs tab links to `/comparables`, `/rehab-budget`, etc. sub-routes that don't exist under either `/deals/watchlist/[id]` OR `/analysis/[id]`. The nav is essentially broken sub-tab navigation from an earlier reorganization. For Task 6 the safe minimal change was to swap the base URL to match the new convention; cleanup of the dead links is deferred to 3E or 3F.
+
+### Verification
+
+Per §8 of the implementation plan, all checks passed:
+
+**Build verification:**
+- `npx tsc --noEmit` passes after every task's edits
+
+**Side-by-side route parity (both URLs render identical UI):**
+- `/analysis` and `/deals/watchlist` both load the Watch List
+- `/analysis/[id]` and `/deals/watchlist/[id]` both load the Workstation
+- `/action` and `/deals/pipeline` both load the active Pipeline
+- `/action?status=closed` and `/deals/closed` both load Closed Deals
+
+**Navigation:**
+- Primary nav reads `Home | Intake | Screening | Analysis | Action | Reports | Admin` — Deals removed
+- Section subheader for `/analysis` shows "Analysis / Watch List"; for `/action` flips between "Action / Pipeline" and "Action / Closed" based on `?status=`
+- Pipeline tab highlights when on `/action` (no query); Closed tab highlights when on `/action?status=closed` (per-tab `isActive` callback working as designed)
+
+**Internal links:**
+- Watch List row click → `/analysis/[id]`
+- Pipeline row click → `/analysis/[id]`
+- Promoting from screening modal → lands on `/analysis/[id]`
+- Closed Deals empty-state Pipeline link → navigates to `/action`
+- Pipeline empty-state Watch List link → navigates to `/analysis`
+- Home dashboard glance cards and section links all updated
+- `/deals` parent redirect → `/analysis`
+
+**Mutating workflows (regression check on the actions.ts files):**
+- Sign in / sign out works (Sign Out button verified)
+- Manual override save persists correctly
+- Notes add / display works
+- Pipeline status save works
+- Move to Pipeline transitions deal correctly
+- Promote from screening lands on the new Workstation
+- Generate Report works
+- No console errors
+
+**Existing analyst workflows unchanged:**
+- All read paths load (`/home`, `/screening`, `/intake/imports`, Workstation, comp map, `/admin/properties`, `/reports`)
+- No console errors
+- No 401/403, no obvious performance regression from 3B changes
+
+### Known issues surfaced (NOT 3B regressions, deferred to follow-up items)
+
+- **`/home` page is slow (~17 seconds on cold load).** Server-side timing shows `application-code: 16.8s`. Pre-existing performance issue — Task 6 only changed Link href values in `home/page.tsx`, not data fetching. Same flavor as the `import_batch_progress_v` timeout fix from earlier this session. Will eventually cross the 8s API timeout under load and start 500ing. **Investigation queued as the next item after this entry ships** — likely a missing index on one of the dashboard aggregations (`pipeline_v`, `watch_list_v`, unreviewed primes count, daily activity).
+- **Image aspect-ratio warning** on the DataWise logo. Cosmetic Next.js Image complaint. Lowest priority — easy one-line fix.
+- **No search-by-address or sort-by-completed-analysis on `/admin/properties`.** Surfaced during Task 7 verification; without these affordances it's hard to find a property that has analyses. Skipped Workstation parity test #6 because of this. To be addressed in 3E or 3F as a properties-list UX item.
+- **Pre-existing duplicate `revalidatePath` calls in `deals/actions.ts`** (lines 503-506, 557-560 revalidate the same URL twice). Out of scope for Task 6's link-update pass; safe to leave; can be cleaned up opportunistically when a future task touches those functions.
+
+### What's deferred to later sub-steps
+
+| Out of scope | Belongs to |
+|---|---|
+| Component extraction (`<CompWorkspace>`, `<DetailCard>`, etc.) | 3C |
+| Auto-persist infrastructure (`useDebouncedSave`, `<SaveStatusDot>`, generic field action) | 3D |
+| Building the new Workstation card layout per `WORKSTATION_CARD_SPEC.md` | 3E |
+| Deleting `app/(workspace)/deals/*` and converting wrappers to hard `redirect()` calls | 3F |
+| Cleanup of dead `/comparables` sub-route link in `admin/properties/[id]/page.tsx` and dead sub-tab links in `AnalysisWorkspaceNav` | 3E or 3F |
+| `/home` performance investigation | Next item after 3B |
+| `/admin/properties` search/filter/sort UX | 3E or later |
+
+### Files touched in 3B
+
+**New (4):**
+- `app/(workspace)/analysis/[analysisId]/page.tsx`
+- `app/(workspace)/action/page.tsx`
+- `app/auth/actions.ts`
+- `supabase/migrations/20260411090200_import_batch_rows_status_index.sql` (bonus interlude, committed before Task 1)
+
+**Modified — canonical implementations (1):**
+- `app/(workspace)/analysis/page.tsx` — replaced stub redirect with full Watch List page
+
+**Modified — legacy wrappers (4):**
+- `app/(workspace)/deals/watchlist/page.tsx`
+- `app/(workspace)/deals/watchlist/[analysisId]/page.tsx`
+- `app/(workspace)/deals/pipeline/page.tsx`
+- `app/(workspace)/deals/closed/page.tsx`
+
+**Modified — legacy redirect targets (3):**
+- `app/(workspace)/deals/page.tsx`
+- `app/(workspace)/analysis/analyses/page.tsx`
+- `app/(workspace)/analysis/properties/[id]/analyses/[analysisId]/page.tsx`
+
+**Modified — navigation (1):**
+- `components/layout/app-chrome.tsx`
+
+**Modified — internal link sweep (14):**
+- `components/screening/screening-comp-modal.tsx`
+- `components/screening/queue-results-table.tsx`
+- `components/screening/batch-results-table.tsx`
+- `components/properties/analysis-workspace-nav.tsx`
+- `app/(workspace)/deals/watchlist/watch-list-table.tsx`
+- `app/(workspace)/deals/pipeline/pipeline-table.tsx`
+- `app/(workspace)/screening/[batchId]/[resultId]/page.tsx`
+- `app/(workspace)/admin/properties/[id]/page.tsx`
+- `app/(workspace)/home/page.tsx`
+- `app/(workspace)/screening/actions.ts`
+- `app/(workspace)/analysis/properties/actions.ts`
+- `app/(workspace)/deals/watchlist/actions.ts`
+- `app/(workspace)/deals/pipeline/actions.ts`
+- `app/(workspace)/deals/actions.ts`
+
+**Reference docs:**
+- `PHASE1_STEP3B_IMPLEMENTATION.md` — implementation plan (drafted before execution)
+- `CHANGELOG.md` — this entry
+
+### What 3C builds on top
+
+3C (Component Extraction) is the next sub-step. Pulls shared components out of `ScreeningCompModal` and the current Workstation so the new Workstation in 3E can reuse them. 3C doesn't depend on 3B in any blocking way, but doing 3B first means the new `/analysis/[analysisId]` route is already live and 3E can build the new Workstation directly into it.
+
+---
+
 ## 2026-04-11 — Phase 1 Step 3A — Schema Preparation
 
 First sub-step of the Step 3 route restructure + Workstation rebuild milestone. Applies all schema and data-model changes the new Workstation card layout will need, in isolation, before any UI work begins. Includes the SECURITY DEFINER function audit deferred from Step 2.
