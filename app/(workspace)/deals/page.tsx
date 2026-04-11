@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function DealsPage() {
-  redirect("/deals/watchlist");
+  redirect("/analysis");
 }

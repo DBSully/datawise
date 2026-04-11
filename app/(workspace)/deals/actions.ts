@@ -232,9 +232,9 @@ export async function createAnalysisScenarioAction(formData: FormData) {
   }
 
   revalidatePath(`/admin/properties/${propertyId}`);
-  revalidatePath(`/deals/watchlist/${insertedAnalysis.id}`);
+  revalidatePath(`/analysis/${insertedAnalysis.id}`);
   redirect(
-    `/deals/watchlist/${insertedAnalysis.id}`,
+    `/analysis/${insertedAnalysis.id}`,
   );
 }
 
@@ -344,7 +344,7 @@ export async function saveManualAnalysisAction(
 
   revalidatePath(`/admin/properties/${propertyId}`);
   revalidatePath(
-    `/deals/watchlist/${activeAnalysis.id}`,
+    `/analysis/${activeAnalysis.id}`,
   );
 
   return {
@@ -404,7 +404,7 @@ export async function runComparableSearchAction(formData: FormData) {
 
   if (snapshotMode === "custom" && !isIsoDateString(customSnapshotDate)) {
     redirect(
-      `/deals/watchlist/${analysisId}?comp_error=${encodeURIComponent(
+      `/analysis/${analysisId}?comp_error=${encodeURIComponent(
         "A valid custom snapshot date is required.",
       )}`,
     );
@@ -441,17 +441,17 @@ export async function runComparableSearchAction(formData: FormData) {
     });
   } catch (error) {
     redirect(
-      `/deals/watchlist/${analysisId}?comp_error=${encodeURIComponent(
+      `/analysis/${analysisId}?comp_error=${encodeURIComponent(
         error instanceof Error ? error.message : "Comp search failed.",
       )}`,
     );
   }
 
   revalidatePath(`/admin/properties/${propertyId}`);
-  revalidatePath(`/deals/watchlist/${analysisId}`);
+  revalidatePath(`/analysis/${analysisId}`);
 
   redirect(
-    `/deals/watchlist/${analysisId}?comp_run=${encodeURIComponent(
+    `/analysis/${analysisId}?comp_run=${encodeURIComponent(
       "Comparable search saved successfully.",
     )}`,
   );
@@ -500,9 +500,9 @@ export async function toggleComparableCandidateSelectionAction(
   }
 
   revalidatePath(`/admin/properties/${propertyId}`);
-  revalidatePath(`/deals/watchlist/${analysisId}`);
+  revalidatePath(`/analysis/${analysisId}`);
   revalidatePath(
-    `/deals/watchlist/${analysisId}`,
+    `/analysis/${analysisId}`,
   );
 }
 
@@ -554,9 +554,9 @@ export async function toggleAsIsComparableCandidateSelectionAction(
   }
 
   revalidatePath(`/admin/properties/${propertyId}`);
-  revalidatePath(`/deals/watchlist/${analysisId}`);
+  revalidatePath(`/analysis/${analysisId}`);
   revalidatePath(
-    `/deals/watchlist/${analysisId}`,
+    `/analysis/${analysisId}`,
   );
 }
 
@@ -581,7 +581,7 @@ export async function addManualCompAction(formData: FormData) {
 
   if (!propertyId || !analysisId || !compSearchRunId || !mlsNumber) {
     redirect(
-      `/deals/watchlist/${analysisId}?comp_error=${encodeURIComponent(
+      `/analysis/${analysisId}?comp_error=${encodeURIComponent(
         "MLS number is required.",
       )}`,
     );
@@ -596,7 +596,7 @@ export async function addManualCompAction(formData: FormData) {
 
   if (listingError) {
     redirect(
-      `/deals/watchlist/${analysisId}?comp_error=${encodeURIComponent(
+      `/analysis/${analysisId}?comp_error=${encodeURIComponent(
         listingError.message,
       )}`,
     );
@@ -604,7 +604,7 @@ export async function addManualCompAction(formData: FormData) {
 
   if (!compListing) {
     redirect(
-      `/deals/watchlist/${analysisId}?comp_error=${encodeURIComponent(
+      `/analysis/${analysisId}?comp_error=${encodeURIComponent(
         `No listing found for MLS# ${mlsNumber}. The listing must exist in the database.`,
       )}`,
     );
@@ -620,7 +620,7 @@ export async function addManualCompAction(formData: FormData) {
 
   if (existing) {
     redirect(
-      `/deals/watchlist/${analysisId}?comp_error=${encodeURIComponent(
+      `/analysis/${analysisId}?comp_error=${encodeURIComponent(
         `MLS# ${mlsNumber} is already in the candidate list.`,
       )}`,
     );
@@ -722,17 +722,17 @@ export async function addManualCompAction(formData: FormData) {
 
   if (insertError) {
     redirect(
-      `/deals/watchlist/${analysisId}?comp_error=${encodeURIComponent(
+      `/analysis/${analysisId}?comp_error=${encodeURIComponent(
         insertError.message,
       )}`,
     );
   }
 
   revalidatePath(`/admin/properties/${propertyId}`);
-  revalidatePath(`/deals/watchlist/${analysisId}`);
+  revalidatePath(`/analysis/${analysisId}`);
 
   redirect(
-    `/deals/watchlist/${analysisId}?comp_run=${encodeURIComponent(
+    `/analysis/${analysisId}?comp_run=${encodeURIComponent(
       `MLS# ${mlsNumber} added as a comp.`,
     )}`,
   );
@@ -785,7 +785,7 @@ export async function addAnalysisNoteAction(formData: FormData) {
 
   if (analysis) {
     revalidatePath(
-      `/deals/watchlist/${analysisId}`,
+      `/analysis/${analysisId}`,
     );
   }
 }
@@ -821,7 +821,7 @@ export async function deleteAnalysisNoteAction(formData: FormData) {
 
     if (analysis) {
       revalidatePath(
-        `/deals/watchlist/${analysisId}`,
+        `/analysis/${analysisId}`,
       );
     }
   }
@@ -853,7 +853,7 @@ export async function markAnalysisCompleteAction(formData: FormData) {
 
   if (error) return { error: error.message };
 
-  revalidatePath(`/deals/watchlist/${analysisId}`);
+  revalidatePath(`/analysis/${analysisId}`);
   revalidatePath("/home");
 
   return { error: null, completedAt: new Date().toISOString() };
@@ -895,7 +895,7 @@ export async function savePipelineAction(formData: FormData) {
 
   if (analysis) {
     revalidatePath(
-      `/deals/watchlist/${analysisId}`,
+      `/analysis/${analysisId}`,
     );
   }
 }

@@ -116,7 +116,7 @@ export function PipelineTable({ rows }: { rows: PipelineRow[] }) {
       <div className="dw-card py-12 text-center">
         <p className="text-sm text-slate-500">
           No deals in the pipeline. Move deals from the{" "}
-          <Link href="/deals/watchlist" className="text-blue-600 hover:underline">
+          <Link href="/analysis" className="text-blue-600 hover:underline">
             Watch List
           </Link>{" "}
           when ready.
@@ -167,7 +167,7 @@ export function PipelineTable({ rows }: { rows: PipelineRow[] }) {
                 </td>
                 <td className="font-medium">
                   <Link
-                    href={`/deals/watchlist/${r.analysis_id}`}
+                    href={`/analysis/${r.analysis_id}`}
                     className="text-blue-700 hover:underline"
                   >
                     {r.unparsed_address}

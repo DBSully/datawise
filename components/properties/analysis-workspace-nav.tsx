@@ -28,7 +28,7 @@ export function AnalysisWorkspaceNav({
   analysisId,
   current,
 }: AnalysisWorkspaceNavProps) {
-  const base = `/deals/watchlist/${analysisId}`;
+  const base = `/analysis/${analysisId}`;
 
   return (
     <div className="dw-card-tight">

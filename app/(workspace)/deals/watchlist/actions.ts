@@ -31,6 +31,7 @@ export async function updateInterestLevelAction(
 
   if (error) throw new Error(error.message);
   revalidatePath("/deals/watchlist");
+  revalidatePath("/analysis");
 }
 
 // ---------------------------------------------------------------------------
@@ -55,6 +56,7 @@ export async function updateShowingStatusAction(
 
   if (error) throw new Error(error.message);
   revalidatePath("/deals/watchlist");
+  revalidatePath("/analysis");
 }
 
 // ---------------------------------------------------------------------------
@@ -79,6 +81,7 @@ export async function updateWatchListNoteAction(
 
   if (error) throw new Error(error.message);
   revalidatePath("/deals/watchlist");
+  revalidatePath("/analysis");
 }
 
 // ---------------------------------------------------------------------------
@@ -128,7 +131,9 @@ export async function passFromWatchListAction(
   }
 
   revalidatePath("/deals/watchlist");
+  revalidatePath("/analysis");
   revalidatePath("/deals/pipeline");
+  revalidatePath("/action");
   revalidatePath("/home");
 }
 
@@ -154,6 +159,8 @@ export async function moveToPipelineAction(
   if (error) throw new Error(error.message);
 
   revalidatePath("/deals/watchlist");
+  revalidatePath("/analysis");
   revalidatePath("/deals/pipeline");
+  revalidatePath("/action");
   revalidatePath("/home");
 }

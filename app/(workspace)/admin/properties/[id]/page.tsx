@@ -341,7 +341,7 @@ export default async function PropertyHubPage({
                     <td>{formatDateTime(analysis.updated_at)}</td>
                     <td>
                       <Link
-                        href={`/deals/watchlist/${analysis.id}`}
+                        href={`/analysis/${analysis.id}`}
                         className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-600 hover:text-slate-900"
                       >
                         Open
@@ -349,7 +349,7 @@ export default async function PropertyHubPage({
                     </td>
                     <td>
                       <Link
-                        href={`/deals/watchlist/${analysis.id}/comparables`}
+                        href={`/analysis/${analysis.id}/comparables`}
                         className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-600 hover:text-slate-900"
                       >
                         Open

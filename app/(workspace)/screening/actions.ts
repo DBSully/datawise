@@ -687,9 +687,10 @@ export async function promoteToAnalysisAction(
   revalidatePath("/screening");
   revalidatePath("/home");
   revalidatePath("/deals/watchlist");
+  revalidatePath("/analysis");
 
   if (openWorkstation) {
-    redirect(`/deals/watchlist/${analysis.id}`);
+    redirect(`/analysis/${analysis.id}`);
   }
 
   // Return result for modal to handle (close modal, stay on queue)

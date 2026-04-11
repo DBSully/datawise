@@ -918,7 +918,7 @@ export function ScreeningCompModal({
                   {selectedCount} comp{selectedCount !== 1 ? "s" : ""} picked
                 </div>
                 <a
-                  href={`/deals/watchlist/${promotedAnalysisId}`}
+                  href={`/analysis/${promotedAnalysisId}`}
                   className="rounded bg-blue-100 px-3 py-1.5 text-xs font-semibold text-blue-800 hover:bg-blue-200"
                 >
                   Open Analysis →

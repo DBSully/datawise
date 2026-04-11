@@ -195,7 +195,7 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
                         watch list items have fresh information. */}
                     {r.active_analysis_id ?? r.promoted_analysis_id ? (
                       <Link
-                        href={`/deals/watchlist/${r.active_analysis_id ?? r.promoted_analysis_id}`}
+                        href={`/analysis/${r.active_analysis_id ?? r.promoted_analysis_id}`}
                         className="inline-flex items-center gap-1 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800 hover:bg-blue-200"
                         title={
                           r.has_newer_screening_than_analysis

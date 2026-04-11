@@ -526,7 +526,7 @@ export function WatchListTable({ rows }: { rows: WatchListRow[] }) {
                     ) : (
                       <div className="flex items-center gap-1.5">
                         <Link
-                          href={`/deals/watchlist/${r.analysis_id}`}
+                          href={`/analysis/${r.analysis_id}`}
                           className="text-[10px] font-semibold text-blue-600 hover:underline"
                         >
                           Open
@@ -567,7 +567,7 @@ export function WatchListTable({ rows }: { rows: WatchListRow[] }) {
                     style={{ left: LEFT_ADDRESS, width: W_ADDRESS, minWidth: W_ADDRESS }}
                   >
                     <Link
-                      href={`/deals/watchlist/${r.analysis_id}`}
+                      href={`/analysis/${r.analysis_id}`}
                       className="block truncate text-blue-700 hover:underline"
                       title={r.unparsed_address}
                     >

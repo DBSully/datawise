@@ -300,7 +300,7 @@ export default async function DashboardPage() {
           label="Watch List"
           value={formatNumber(watchListCount ?? 0)}
           sublabel="active deals"
-          href="/deals/watchlist"
+          href="/analysis"
         />
         <GlanceCard
           label="Pipeline"
@@ -310,7 +310,7 @@ export default async function DashboardPage() {
               ? `${pipelineAlerts.length} need action`
               : "deals in progress"
           }
-          href="/deals/pipeline"
+          href="/action"
           accent={pipelineAlerts.length > 0 ? "red" : undefined}
         />
       </div>
@@ -328,7 +328,7 @@ export default async function DashboardPage() {
             Watch List — Needs Attention
           </h2>
           <Link
-            href="/deals/watchlist"
+            href="/analysis"
             className="text-xs text-blue-600 hover:underline"
           >
             View Watch List →
@@ -361,7 +361,7 @@ export default async function DashboardPage() {
                     </td>
                     <td className="font-medium">
                       <Link
-                        href={`/deals/watchlist/${r.analysis_id}`}
+                        href={`/analysis/${r.analysis_id}`}
                         className="text-blue-700 hover:underline"
                       >
                         {r.unparsed_address}
@@ -397,7 +397,7 @@ export default async function DashboardPage() {
                     </td>
                     <td>
                       <Link
-                        href={`/deals/watchlist/${r.analysis_id}`}
+                        href={`/analysis/${r.analysis_id}`}
                         className="text-[10px] text-blue-600 hover:underline"
                       >
                         Open
@@ -418,7 +418,7 @@ export default async function DashboardPage() {
             Pipeline — Action Required
           </h2>
           <Link
-            href="/deals/pipeline"
+            href="/action"
             className="text-xs text-blue-600 hover:underline"
           >
             View Pipeline →
@@ -438,7 +438,7 @@ export default async function DashboardPage() {
               >
                 <span className="text-sm text-red-800">{alert.reason}</span>
                 <Link
-                  href={`/deals/watchlist/${alert.analysis_id}`}
+                  href={`/analysis/${alert.analysis_id}`}
                   className="text-xs font-semibold text-red-700 hover:underline"
                 >
                   Open →
@@ -493,7 +493,7 @@ export default async function DashboardPage() {
                   </td>
                   <td className="px-2 py-1 font-medium text-slate-800">
                     {a.analysis_id ? (
-                      <Link href={`/deals/watchlist/${a.analysis_id}`} className="hover:underline">
+                      <Link href={`/analysis/${a.analysis_id}`} className="hover:underline">
                         {a.address}
                       </Link>
                     ) : (

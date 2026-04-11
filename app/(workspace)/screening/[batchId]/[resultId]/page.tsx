@@ -610,7 +610,7 @@ export default async function DealDetailPage({ params }: DealDetailPageProps) {
           <p className="text-sm text-slate-500">
             Promoted to{" "}
             <Link
-              href={`/deals/watchlist/${result.promoted_analysis_id}`}
+              href={`/analysis/${result.promoted_analysis_id}`}
               className="text-blue-600 hover:underline"
             >
               analysis →
