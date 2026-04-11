@@ -1,42 +1,12 @@
-import { notFound } from "next/navigation";
-import { unstable_noStore as noStore } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
-import { loadWorkstationData } from "@/lib/analysis/load-workstation-data";
-import { AnalysisWorkstation } from "./analysis-workstation";
+// Phase 1 Step 3B Task 2 — thin re-export wrapper.
+//
+// The canonical Workstation route now lives at
+// app/(workspace)/analysis/[analysisId]/page.tsx. This file is a
+// one-line wrapper so the legacy /deals/watchlist/[analysisId] URL
+// continues to work during the side-by-side transition (3B-3E).
+// Both URLs render identical UI from the same component.
+//
+// In Phase 1 Step 3F, this file becomes a redirect() to
+// /analysis/[analysisId].
 
-export const dynamic = "force-dynamic";
-
-type WatchlistDetailPageProps = {
-  params: Promise<{ analysisId: string }>;
-};
-
-export default async function WatchlistDetailPage({ params }: WatchlistDetailPageProps) {
-  noStore();
-  const { analysisId } = await params;
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  // Look up the property ID from the analysis record
-  const { data: analysis } = await supabase
-    .from("analyses")
-    .select("real_property_id")
-    .eq("id", analysisId)
-    .maybeSingle();
-
-  if (!analysis) notFound();
-
-  const propertyId = analysis.real_property_id;
-
-  const workstationData = await loadWorkstationData(
-    supabase,
-    user?.id ?? "",
-    propertyId,
-    analysisId,
-  );
-
-  if (!workstationData) notFound();
-
-  return <AnalysisWorkstation data={workstationData} />;
-}
+export { default } from "@/app/(workspace)/analysis/[analysisId]/page";
