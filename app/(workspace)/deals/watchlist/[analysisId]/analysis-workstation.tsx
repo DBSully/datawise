@@ -9,7 +9,7 @@ import { ScreeningCompModal } from "@/components/screening/screening-comp-modal"
 import { ArvBreakdownTooltip } from "@/components/screening/arv-breakdown-tooltip";
 import { CardTitle } from "@/components/workstation/card-title";
 import { CostLine } from "@/components/workstation/cost-line";
-import { DealStat } from "@/components/workstation/deal-stat";
+import { DealStatStrip } from "@/components/workstation/deal-stat-strip";
 import { RehabCard } from "@/components/workstation/rehab-card";
 import { SubjectTileRow } from "@/components/workstation/subject-tile-row";
 import {
@@ -591,17 +591,15 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
       />
 
       {/* Deal math summary strip — live-recalculated from Quick Analysis inputs */}
-      <div className="flex items-center gap-4 rounded border border-slate-200 bg-slate-50 px-4 py-2">
-        <DealStat label="ARV" value={fmt(liveDeal.arv)} highlight />
-        <DealStat label="Max Offer" value={fmt(liveDeal.maxOffer)} highlight />
-        <DealStat label="Offer%" value={fmtPct(liveDeal.offerPct)} />
-        <DealStat
-          label="Gap/sqft"
-          value={liveDeal.gapPerSqft != null ? `$${fmtNum(liveDeal.gapPerSqft)}` : "\u2014"}
-        />
-        <DealStat label="Rehab" value={fmt(liveDeal.rehabTotal)} />
-        <DealStat label="Target Profit" value={fmt(liveDeal.targetProfit)} />
-      </div>
+      <DealStatStrip
+        arv={liveDeal.arv}
+        maxOffer={liveDeal.maxOffer}
+        offerPct={liveDeal.offerPct}
+        gapPerSqft={liveDeal.gapPerSqft}
+        rehabTotal={liveDeal.rehabTotal}
+        targetProfit={liveDeal.targetProfit}
+        trendAnnualRate={d.trend?.blendedAnnualRate ?? null}
+      />
 
       {/* ================================================================== */}
       {/* MAIN 3-COLUMN LAYOUT — Left: financials / Center: valuation+comps / Right: rehab+controls */}

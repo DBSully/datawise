@@ -5,8 +5,8 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import type { MapPin } from "@/components/properties/comp-map";
 import { ArvBreakdownTooltip } from "@/components/screening/arv-breakdown-tooltip";
-import { DealStat } from "@/components/workstation/deal-stat";
 import { AddCompByMls } from "@/components/workstation/add-comp-by-mls";
+import { DealStatStrip } from "@/components/workstation/deal-stat-strip";
 import { ExpandSearchPanel } from "@/components/workstation/expand-search-panel";
 import { SubjectTileRow } from "@/components/workstation/subject-tile-row";
 import {
@@ -46,11 +46,6 @@ function fmtNum(v: number | null | undefined, d = 0) {
     minimumFractionDigits: d,
     maximumFractionDigits: d,
   });
-}
-
-function fmtPct(v: number | null | undefined) {
-  if (v == null) return "—";
-  return `${(v * 100).toFixed(1)}%`;
 }
 
 const PASS_REASONS = [
@@ -343,7 +338,7 @@ export function ScreeningCompModal({
     const gapPerSqft = listPrice > 0 && sqft > 0
       ? Math.round((arv - listPrice) / sqft)
       : null;
-    return { arv, maxOffer, offerPct, gapPerSqft };
+    return { arv, maxOffer, offerPct, gapPerSqft, rehabTotal, targetProfit };
   }, [data, manualArvInput, manualTargetProfitInput, manualRehabInput]);
 
   // Promote handler
@@ -483,62 +478,51 @@ export function ScreeningCompModal({
 
         {/* Deal math summary strip — live-recalculated from picked comps */}
         {!loading && data && liveDeal && (
-          <div className="flex items-center gap-4 border-b border-slate-100 bg-slate-50 px-4 py-2">
-            <DealStat variant="inline" label="ARV" value={$f(liveDeal.arv)} highlight />
-            <DealStat variant="inline" label="Max Offer" value={$f(liveDeal.maxOffer)} highlight />
-            <DealStat variant="inline" label="Offer%" value={fmtPct(liveDeal.offerPct)} />
-            <DealStat
-              variant="inline"
-              label="Gap/sqft"
-              value={
-                liveDeal.gapPerSqft != null
-                  ? `$${fmtNum(liveDeal.gapPerSqft)}`
-                  : "—"
-              }
-            />
-            <DealStat variant="inline" label="Rehab" value={$f(data.rehabTotal)} />
-            {data.trendAnnualRate != null && (
-              <DealStat
-                variant="inline"
-                label="Trend"
-                value={`${data.trendAnnualRate >= 0 ? "+" : ""}${(data.trendAnnualRate * 100).toFixed(1)}%`}
-              />
-            )}
-            <div className="ml-auto flex items-center gap-2 text-xs text-slate-400">
-              <span>
-                {compStats.count} comps
-                {compStats.avgDist != null && (
-                  <> · {fmtNum(compStats.avgDist, 2)} mi avg</>
-                )}
-                {compStats.avgScore != null && (
-                  <> · {fmtNum(compStats.avgScore, 1)} avg score</>
-                )}
-              </span>
-              <CopyMlsButton
-                label="Copy Selected"
-                mlsNumbers={[
-                  ...(data.mlsNumber ? [data.mlsNumber] : []),
-                  ...data.candidates
-                    .filter((c) => c.selected_yn)
-                    .map((c) => ({ mls: String(c.metrics_json.listing_id ?? ""), arv: (c.comp_listing_row_id ? data.arvByCompListingId[c.comp_listing_row_id]?.arv : null) ?? 0 }))
-                    .filter((x) => x.mls)
-                    .sort((a, b) => b.arv - a.arv)
-                    .map((x) => x.mls),
-                ]}
-              />
-              <CopyMlsButton
-                label="Copy All"
-                mlsNumbers={[
-                  ...(data.mlsNumber ? [data.mlsNumber] : []),
-                  ...data.candidates
-                    .map((c) => ({ mls: String(c.metrics_json.listing_id ?? ""), arv: (c.comp_listing_row_id ? data.arvByCompListingId[c.comp_listing_row_id]?.arv : null) ?? 0 }))
-                    .filter((x) => x.mls)
-                    .sort((a, b) => b.arv - a.arv)
-                    .map((x) => x.mls),
-                ]}
-              />
-            </div>
-          </div>
+          <DealStatStrip
+            arv={liveDeal.arv}
+            maxOffer={liveDeal.maxOffer}
+            offerPct={liveDeal.offerPct}
+            gapPerSqft={liveDeal.gapPerSqft}
+            rehabTotal={liveDeal.rehabTotal}
+            targetProfit={liveDeal.targetProfit}
+            trendAnnualRate={data.trendAnnualRate ?? null}
+            rightSlot={
+              <div className="flex items-center gap-2 text-xs text-slate-400">
+                <span>
+                  {compStats.count} comps
+                  {compStats.avgDist != null && (
+                    <> · {fmtNum(compStats.avgDist, 2)} mi avg</>
+                  )}
+                  {compStats.avgScore != null && (
+                    <> · {fmtNum(compStats.avgScore, 1)} avg score</>
+                  )}
+                </span>
+                <CopyMlsButton
+                  label="Copy Selected"
+                  mlsNumbers={[
+                    ...(data.mlsNumber ? [data.mlsNumber] : []),
+                    ...data.candidates
+                      .filter((c) => c.selected_yn)
+                      .map((c) => ({ mls: String(c.metrics_json.listing_id ?? ""), arv: (c.comp_listing_row_id ? data.arvByCompListingId[c.comp_listing_row_id]?.arv : null) ?? 0 }))
+                      .filter((x) => x.mls)
+                      .sort((a, b) => b.arv - a.arv)
+                      .map((x) => x.mls),
+                  ]}
+                />
+                <CopyMlsButton
+                  label="Copy All"
+                  mlsNumbers={[
+                    ...(data.mlsNumber ? [data.mlsNumber] : []),
+                    ...data.candidates
+                      .map((c) => ({ mls: String(c.metrics_json.listing_id ?? ""), arv: (c.comp_listing_row_id ? data.arvByCompListingId[c.comp_listing_row_id]?.arv : null) ?? 0 }))
+                      .filter((x) => x.mls)
+                      .sort((a, b) => b.arv - a.arv)
+                      .map((x) => x.mls),
+                  ]}
+                />
+              </div>
+            }
+          />
         )}
 
         {/* Body */}
