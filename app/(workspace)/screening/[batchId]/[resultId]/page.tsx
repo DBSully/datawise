@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { promoteAndOpenAction } from "../../actions";
+import { TrendDirectionBadge } from "@/components/workstation/trend-badges";
 
 export const dynamic = "force-dynamic";
 
@@ -299,7 +300,10 @@ export default async function DealDetailPage({ params }: DealDetailPageProps) {
                     ? "Confidence: Low"
                     : "Confidence: Fallback"}
               </span>
-              <TrendDirectionBadge direction={((result.trend_detail_json as Record<string, unknown> | null)?.direction as string) ?? "flat"} />
+              <TrendDirectionBadge
+                direction={((result.trend_detail_json as Record<string, unknown> | null)?.direction as string) ?? "flat"}
+                variant="prominent"
+              />
               {result.trend_is_fallback && (
                 <span className="text-xs text-red-600">
                   Insufficient comps — fixed {formatPercent(result.trend_annual_rate)}/yr applied
@@ -634,24 +638,6 @@ type TrendTierStatsJson = {
   psfAboveGradeLow: number | null; psfAboveGradeHigh: number | null;
   lowEnd?: TrendSegmentJson; highEnd?: TrendSegmentJson;
 };
-
-const DIRECTION_DISPLAY: Record<string, { label: string; color: string }> = {
-  strong_appreciation: { label: "Strong Appreciation", color: "bg-emerald-100 text-emerald-800" },
-  appreciating: { label: "Appreciating", color: "bg-emerald-50 text-emerald-700" },
-  flat: { label: "Flat", color: "bg-slate-100 text-slate-600" },
-  softening: { label: "Softening", color: "bg-amber-100 text-amber-800" },
-  declining: { label: "Declining", color: "bg-red-100 text-red-800" },
-  sharp_decline: { label: "Sharp Decline", color: "bg-red-200 text-red-900" },
-};
-
-function TrendDirectionBadge({ direction }: { direction: string }) {
-  const d = DIRECTION_DISPLAY[direction] ?? DIRECTION_DISPLAY.flat;
-  return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${d.color}`}>
-      {d.label}
-    </span>
-  );
-}
 
 function fmtRate(rate: number | null | undefined): string {
   if (rate == null) return "—";

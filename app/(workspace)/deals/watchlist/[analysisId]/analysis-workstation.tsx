@@ -8,6 +8,7 @@ import type { MapPin, MapPinTooltipData } from "@/components/properties/comp-map
 import { ScreeningCompModal } from "@/components/screening/screening-comp-modal";
 import { ArvBreakdownTooltip } from "@/components/screening/arv-breakdown-tooltip";
 import { CostLine } from "@/components/workstation/cost-line";
+import { TrendDirectionBadge } from "@/components/workstation/trend-badges";
 
 const CompMap = dynamic(
   () => import("@/components/properties/comp-map").then((m) => m.CompMap),
@@ -39,7 +40,6 @@ import type {
   FinancingDetail,
   ArvPerCompDetail,
   TrendTierStats,
-  TrendDirection,
   TrendData,
   WorkstationData,
 } from "@/lib/reports/types";
@@ -47,24 +47,6 @@ import type {
 // ---------------------------------------------------------------------------
 // Tiny sub-components
 // ---------------------------------------------------------------------------
-
-const DIRECTION_DISPLAY: Record<TrendDirection, { label: string; color: string }> = {
-  strong_appreciation: { label: "Strong Appreciation", color: "bg-emerald-100 text-emerald-700" },
-  appreciating: { label: "Appreciating", color: "bg-emerald-50 text-emerald-600" },
-  flat: { label: "Flat", color: "bg-slate-100 text-slate-600" },
-  softening: { label: "Softening", color: "bg-amber-100 text-amber-700" },
-  declining: { label: "Declining", color: "bg-red-100 text-red-700" },
-  sharp_decline: { label: "Sharp Decline", color: "bg-red-200 text-red-800" },
-};
-
-function TrendDirectionBadge({ direction }: { direction: TrendDirection }) {
-  const { label, color } = DIRECTION_DISPLAY[direction];
-  return (
-    <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold ${color}`}>
-      {label}
-    </span>
-  );
-}
 
 function fmtRate(rate: number | null): string {
   if (rate == null) return "\u2014";
