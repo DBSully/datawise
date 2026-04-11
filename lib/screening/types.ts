@@ -129,9 +129,62 @@ export type HoldingResult = {
 // ---------------------------------------------------------------------------
 
 export type TransactionResult = {
+  // ─── Acquisition side (paid out-of-pocket at closing) ───
+
+  /** Acquisition title/closing fee. */
   acquisitionTitle: number;
+
+  /**
+   * NEW (Decision 5): Signed acquisition commission.
+   * Positive = OOP at closing (analyst pays a fee, e.g. to a buyer's agent).
+   * Negative = credit at closing (analyst receives a credit).
+   * Default rate is 0, so this is 0 in normal flips.
+   */
+  acquisitionCommission: number;
+
+  /**
+   * NEW (Decision 5): Flat acquisition fee in dollars.
+   * E.g. wholesale assignment fee, service fee. Always positive.
+   * Default is $0, so this is 0 in normal flips.
+   */
+  acquisitionFee: number;
+
+  /** NEW (Decision 5): Sum of acquisition-side line items. Cash impact at purchase. */
+  acquisitionSubtotal: number;
+
+  // ─── Disposition side (deducted from sale proceeds, not OOP) ───
+
+  /** Disposition title/closing fee. */
   dispositionTitle: number;
+
+  /**
+   * NEW (Decision 5): Buyer-agent commission paid at sale.
+   * Replaces the combined dispositionCommissions field.
+   */
+  dispositionCommissionBuyer: number;
+
+  /**
+   * NEW (Decision 5): Seller-agent commission paid at sale.
+   * Replaces the combined dispositionCommissions field.
+   */
+  dispositionCommissionSeller: number;
+
+  /** NEW (Decision 5): Sum of disposition-side line items. Deducted from sale proceeds. */
+  dispositionSubtotal: number;
+
+  // ─── Backwards-compat (deprecated) ───
+
+  /**
+   * @deprecated Use dispositionCommissionBuyer + dispositionCommissionSeller.
+   * Kept as a backwards-compat shim for the existing Workstation and any
+   * other consumer that hasn't migrated yet. Computed automatically by
+   * the engine as buyer + seller. Will be removed in 3F.
+   */
   dispositionCommissions: number;
+
+  // ─── Total ───
+
+  /** Sum of all 6 line items (acquisitionSubtotal + dispositionSubtotal). */
   total: number;
 };
 

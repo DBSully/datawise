@@ -70,9 +70,34 @@ export type HoldingDetail = {
 };
 
 export type TransactionDetail = {
+  // ─── Acquisition side ───
   acquisitionTitle: number;
+  /** NEW (Decision 5): signed. */
+  acquisitionCommission: number;
+  /** NEW (Decision 5): flat dollars. */
+  acquisitionFee: number;
+  /** NEW (Decision 5): sum of acquisition-side line items. */
+  acquisitionSubtotal: number;
+
+  // ─── Disposition side ───
   dispositionTitle: number;
+  /** NEW (Decision 5): split from old combined dispositionCommissions. */
+  dispositionCommissionBuyer: number;
+  /** NEW (Decision 5): split from old combined dispositionCommissions. */
+  dispositionCommissionSeller: number;
+  /** NEW (Decision 5): sum of disposition-side line items. */
+  dispositionSubtotal: number;
+
+  // ─── Backwards-compat (deprecated) ───
+  /**
+   * @deprecated Use dispositionCommissionBuyer + dispositionCommissionSeller.
+   * Kept so the existing Workstation continues to compile and render.
+   * Will be removed in 3F.
+   */
   dispositionCommissions: number;
+
+  // ─── Total ───
+  /** Sum of all 6 line items. */
   total: number;
 };
 

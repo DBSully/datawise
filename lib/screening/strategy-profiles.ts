@@ -117,10 +117,45 @@ export type HoldingConfig = {
 export type TransactionConfig = {
   /** Acquisition title/closing as fraction of purchase price. */
   acquisitionTitleRate: number;
+
+  /**
+   * NEW (Decision 5): Signed acquisition commission as fraction of purchase price.
+   * Positive = OOP at closing; negative = credit at closing.
+   * Default 0 — most flips don't have an acquisition-side commission.
+   */
+  acquisitionCommissionRate: number;
+
+  /**
+   * NEW (Decision 5): Flat acquisition fee in dollars.
+   * E.g. wholesale assignment fee, service fee.
+   * Default 0 — most flips don't have a flat acquisition fee.
+   */
+  acquisitionFeeFlat: number;
+
   /** Disposition title/closing as fraction of sale price. */
   dispositionTitleRate: number;
-  /** Disposition agent commissions as fraction of ARV. */
-  dispositionCommissionRate: number;
+
+  /**
+   * NEW (Decision 5): Disposition buyer-agent commission as fraction of sale price.
+   * Replaces the old combined dispositionCommissionRate.
+   * Default 0.02 (2%) — split half of the previous 4% combined rate.
+   */
+  dispositionCommissionBuyerRate: number;
+
+  /**
+   * NEW (Decision 5): Disposition seller-agent commission as fraction of sale price.
+   * Replaces the old combined dispositionCommissionRate.
+   * Default 0.02 (2%) — split half of the previous 4% combined rate.
+   */
+  dispositionCommissionSellerRate: number;
+
+  /**
+   * @deprecated Use dispositionCommissionBuyerRate + dispositionCommissionSellerRate.
+   * Kept as a backwards-compat field for any code that still references the
+   * combined rate. Will be removed in 3F. The engine ignores this field —
+   * it computes commissions from the split rates above.
+   */
+  dispositionCommissionRate?: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -379,11 +414,19 @@ export const DENVER_FLIP_V1: FlipStrategyProfile = {
     utilityPerSqftMonthly: 0.08,
   },
 
-  // -- Transaction ----------------------------------------------------------
+  // -- Transaction (per WORKSTATION_CARD_SPEC.md Decision 5) ---------------
+  // Six configurable line items.
+  // Defaults preserve the prior 4.77% combined rate exactly:
+  //   0.003 + 0 + 0 + 0.0047 + 0.02 + 0.02 = 0.0477
+  // (was: 0.003 + 0.0047 + 0.04 = 0.0477)
+  // So existing screening_results.transaction_total values remain valid.
   transaction: {
-    acquisitionTitleRate: 0.003,
-    dispositionTitleRate: 0.0047,
-    dispositionCommissionRate: 0.04,
+    acquisitionTitleRate:            0.003,    // unchanged
+    acquisitionCommissionRate:       0,        // NEW — default 0 (no fee at acquisition)
+    acquisitionFeeFlat:              0,        // NEW — default $0 flat
+    dispositionTitleRate:            0.0047,   // unchanged
+    dispositionCommissionBuyerRate:  0.02,     // NEW — split from old 0.04
+    dispositionCommissionSellerRate: 0.02,     // NEW — split from old 0.04
   },
 
   // -- Financing ------------------------------------------------------------
