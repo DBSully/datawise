@@ -26,7 +26,18 @@ export default async function DashboardPage() {
   noStore();
   const supabase = await createClient();
 
-  // --- Section 1: Today at a Glance ---
+  // --- Section 1 + 2: Today at a Glance + Unreviewed Prime Candidates ---
+  //
+  // The "unreviewed primes" query against analysis_queue_v is the dominant
+  // cost on this page (~2.3s per call against the current data scale, see
+  // PERFORMANCE_FOLLOWUPS.md). Section 1 needs ALL unreviewed primes (to
+  // count them by MLS status); section 2 needs the top 10 (full columns).
+  // Both used to call analysis_queue_v separately for the same WHERE clause,
+  // doubling the cost. Now we issue a single query inside the Section 1
+  // Promise.all, fetching the section-2 column set + mls_status for ALL
+  // unreviewed primes ordered by est_gap_per_sqft DESC, and slice the result
+  // two ways in JS — section 1 = full result for the count, section 2 = top
+  // 10 for the table. Cuts queue-view calls per page load from 2 to 1.
 
   // Use Denver local midnight (UTC-6 standard / UTC-7 daylight) for "today"
   const nowLocal = new Date();
@@ -47,12 +58,16 @@ export default async function DashboardPage() {
       .select("unique_listing_count")
       .gte("created_at", todayIso)
       .eq("status", "complete"),
-    // Unreviewed prime candidates by MLS status
+    // Unreviewed prime candidates — fetched once, sliced for both section 1
+    // (count by mls_status) and section 2 (top 10 by est_gap_per_sqft)
     supabase
       .from("analysis_queue_v")
-      .select("id, mls_status")
+      .select(
+        "id, real_property_id, screening_batch_id, subject_address, subject_city, subject_property_type, subject_list_price, arv_aggregate, max_offer, est_gap_per_sqft, arv_comp_count, comp_search_run_id, promoted_analysis_id, mls_status",
+      )
       .eq("is_prime_candidate", true)
-      .is("review_action", null),
+      .is("review_action", null)
+      .order("est_gap_per_sqft", { ascending: false, nullsFirst: false }),
     // Active watch list
     supabase
       .from("watch_list_v")
@@ -82,19 +97,9 @@ export default async function DashboardPage() {
     unreviewedPrimeTotal++;
   }
 
-  // --- Section 2: Unreviewed Prime Candidates (top 10) ---
-
-  const { data: unreviewedPrimes } = await supabase
-    .from("analysis_queue_v")
-    .select(
-      "id, real_property_id, screening_batch_id, subject_address, subject_city, subject_property_type, subject_list_price, arv_aggregate, max_offer, est_gap_per_sqft, arv_comp_count, comp_search_run_id, promoted_analysis_id",
-    )
-    .eq("is_prime_candidate", true)
-    .is("review_action", null)
-    .order("est_gap_per_sqft", { ascending: false, nullsFirst: false })
-    .limit(10);
-
-  const primeRows = (unreviewedPrimes ?? []).map(
+  // Top 10 unreviewed primes for the table — sliced from the same result
+  // (already ordered by est_gap_per_sqft DESC by the SQL ORDER BY above).
+  const primeRows = (unreviewedPrimeRows ?? []).slice(0, 10).map(
     (r: Record<string, unknown>) => ({
       id: r.id as string,
       real_property_id: r.real_property_id as string,
