@@ -91,15 +91,36 @@ Two SQL migrations, plus possibly a third if the SECURITY DEFINER audit finds an
 -- the duration of Step 3 as a safety net so any code that still reads
 -- it doesn't break. It will be dropped in 3F after the new visibility
 -- model is verified working and no code references the old column.
+--
+-- ─── Why DEFAULT 'all_partners' (not 'internal') ───
+-- The eventual target per WORKSTATION_CARD_SPEC.md Decision 8 is for
+-- new notes to default to 'internal'. But during the transition window
+-- (3A through 3E), the existing addAnalysisNoteAction code only writes
+-- the OLD is_public column (which has DEFAULT true = public). If we
+-- set the new visibility column's DEFAULT to 'internal', any note
+-- created via the existing code path during the transition would have
+-- inconsistent values: is_public = true but visibility = 'internal'.
+--
+-- To minimize drift, we set the new column's DEFAULT to 'all_partners'
+-- so it matches the current is_public = true default. This means
+-- existing-code inserts during the transition produce consistent values.
+--
+-- 3E will:
+--   1. Re-sync visibility from is_public for any drifted rows that
+--      were created via the existing form's "uncheck public" path
+--   2. Change the DEFAULT to 'internal' to match the spec
+--   3. Ship the new Notes card that writes visibility directly
 
 -- ────────────────────────────────────────────────────────────────────
 -- Add the new visibility enum column
+-- DEFAULT 'all_partners' to match current is_public = true default
+-- (will be changed to 'internal' in 3E per the spec)
 -- ────────────────────────────────────────────────────────────────────
 
 ALTER TABLE public.analysis_notes
   ADD COLUMN IF NOT EXISTS visibility text
     CHECK (visibility IN ('internal', 'specific_partners', 'all_partners'))
-    DEFAULT 'internal';
+    DEFAULT 'all_partners';
 
 -- ────────────────────────────────────────────────────────────────────
 -- Add the partner-id array (used when visibility = 'specific_partners')
@@ -109,9 +130,13 @@ ALTER TABLE public.analysis_notes
   ADD COLUMN IF NOT EXISTS visible_to_partner_ids uuid[] DEFAULT NULL;
 
 -- ────────────────────────────────────────────────────────────────────
--- Backfill: convert is_public boolean to visibility enum
+-- Backfill: convert is_public boolean to visibility enum on existing rows
 -- is_public = true   → visibility = 'all_partners'
 -- is_public = false  → visibility = 'internal'
+--
+-- is_public is NOT NULL with default true (per migration
+-- 20260405100000_analysis_workspace_updates.sql), so the third branch
+-- below is unreachable for existing data. Kept as defensive.
 -- ────────────────────────────────────────────────────────────────────
 
 UPDATE public.analysis_notes
@@ -119,8 +144,7 @@ SET visibility = CASE
   WHEN is_public = true  THEN 'all_partners'
   WHEN is_public = false THEN 'internal'
   ELSE 'internal'
-END
-WHERE visibility IS NULL OR visibility = 'internal';
+END;
 
 -- Mark the old column as deprecated (will be dropped in 3F)
 COMMENT ON COLUMN public.analysis_notes.is_public IS
@@ -135,9 +159,12 @@ COMMENT ON COLUMN public.analysis_notes.is_public IS
 -- the topic intent (notes about how the analysis is being conducted)
 -- without the audience-flag conflation.
 --
--- This is a small UPDATE on the note_type column. The application
--- code change to update the NOTE_CATEGORIES constant ships in 3E
--- when the Notes card is rebuilt.
+-- Current data has 0 rows with note_type = 'internal' (verified in
+-- Step 3A planning), so this is a no-op for existing data — but it
+-- runs anyway to handle any future rows that might use the old value.
+--
+-- The application code change to update the NOTE_CATEGORIES constant
+-- ships in 3E when the Notes card is rebuilt.
 
 UPDATE public.analysis_notes
 SET note_type = 'workflow'
@@ -529,7 +556,8 @@ WHERE n.nspname = 'public'
     -- Whitelist: known SECURITY DEFINER functions we built and verified safe
     'handle_new_auth_user',           -- Step 1: profile auto-create
     'current_user_organization_id',   -- Step 2: RLS helper
-    'set_updated_at'                  -- Pre-existing trigger function
+    'set_updated_at',                 -- Pre-existing trigger function
+    'rls_auto_enable'                 -- Step 3A audit: defense-in-depth event trigger (verified 2026-04-11)
   )
 ORDER BY proname;
 ```
@@ -548,6 +576,25 @@ ORDER BY proname;
 
 The audit query is the **first task** in the ordered list (§7) — before any migrations or code changes. The result determines what Migration 3 looks like (or whether it's needed at all). I'll bring the findings to Dan before applying any fixes so he can review what's there.
 
+### 6.5 Audit findings — completed 2026-04-11
+
+**Result:** Exactly one non-whitelisted SECURITY DEFINER function in the `public` schema: **`rls_auto_enable`**.
+
+**Investigation:**
+- It's a Postgres event trigger function (`RETURNS event_trigger`)
+- Wired up as event trigger `ensure_rls` on `ddl_command_end`, filtered to `CREATE TABLE / CREATE TABLE AS / SELECT INTO`
+- Body iterates `pg_event_trigger_ddl_commands()` and runs `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` on every newly-created table in the `public` schema (system schemas explicitly excluded)
+- Has proper error handling (catches and logs exceptions without failing DDL)
+- `SET search_path = pg_catalog` (standard SECURITY DEFINER hardening)
+- **Does not read or write user data**
+- **Is not in the user request path** — only fires on DDL execution
+
+**Verdict:** ✅ SAFE — defense-in-depth feature, not a security risk. This function actually helped us during Steps 1 and 2: every time we created a new table (`organizations`, `profiles`), this event trigger auto-enabled RLS on it. Our migrations' explicit `ENABLE ROW LEVEL SECURITY` calls were redundant no-ops.
+
+**Treatment:** No fix needed. **Migration 3 is NOT required.** `rls_auto_enable` added to the audit whitelist (above) so future audits don't re-flag it.
+
+**Note for future reproducibility:** `rls_auto_enable` is installed in the production database but **not in our migration history**. It was installed either by Supabase automatically or via direct SQL at some point in the past. If we ever rebuild from migrations from scratch, this function wouldn't be recreated. Capturing it in a migration is a separate concern (out of scope for 3A) — flagging here for awareness.
+
 ---
 
 ## 7. Ordered Task List
@@ -556,9 +603,9 @@ Each task is independently committable. Per Decision 6.7 (one document per sub-s
 
 ### Phase A — Audit (1 commit, no DB changes)
 
-**Task 1:** Run the SECURITY DEFINER audit query in the Supabase dashboard. Document findings in this implementation plan as a new §6.5 (or in a follow-up commit). No code or schema changes yet.
-- Verification: query returns a clear list of any non-whitelisted functions
-- Output: a short report on findings, plus a recommendation for each (convert to SECURITY INVOKER / add org filter / defer)
+**Task 1:** ✅ COMPLETED 2026-04-11. Run the SECURITY DEFINER audit query in the Supabase dashboard. Findings documented in §6.5: **one function found (`rls_auto_enable`), verified safe, no fix needed, added to whitelist**. Migration 3 is NOT required.
+- Verification: query returned exactly one row, follow-up queries confirmed event-trigger nature
+- Result: defense-in-depth feature, no action required
 
 ### Phase B — Schema migrations (2-3 commits)
 
