@@ -11,6 +11,7 @@ import { CardTitle } from "@/components/workstation/card-title";
 import { CostLine } from "@/components/workstation/cost-line";
 import { DealStat } from "@/components/workstation/deal-stat";
 import { RehabCard } from "@/components/workstation/rehab-card";
+import { SubjectTileRow } from "@/components/workstation/subject-tile-row";
 import {
   TrendDirectionBadge,
   TrendTierColumn,
@@ -550,121 +551,44 @@ export function AnalysisWorkstation({ data }: { data: WorkstationData }) {
       {/* Mirrors the top of ScreeningCompModal for at-a-glance subject facts */}
       {/* and live recalc inputs that update the Deal Strip below.            */}
       {/* ================================================================== */}
-      <div className="flex gap-3">
-        {/* MLS Info tile */}
-        <div className="shrink-0 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-snug" style={{ maxWidth: 320 }}>
-          <div className="grid grid-cols-[auto_auto_16px_auto_auto] gap-x-2 gap-y-0.5">
-            <span className="font-bold text-slate-500">MLS Status</span>
-            <span className="text-slate-900">{d.listing?.mlsStatus ?? "\u2014"}</span>
-            <span />
-            <span className="font-bold text-slate-500">MLS#</span>
-            <span className="text-slate-900">{d.listing?.listingId ?? "\u2014"}</span>
-
-            <span className="font-bold text-slate-500">MLS Change</span>
-            <span className="text-slate-900">{d.listing?.mlsMajorChangeType ?? "\u2014"}</span>
-            <span />
-            <span className="font-bold text-slate-500">List Date</span>
-            <span className="text-slate-900">{fmtIsoDate(d.listing?.listingContractDate)}</span>
-
-            <span className="font-bold text-slate-500">Orig List Price</span>
-            <span className="text-slate-900">{fmt(d.listing?.originalListPrice)}</span>
-            <span />
-            <span className="font-bold text-slate-500">U/C Date</span>
-            <span className="text-slate-900">{fmtIsoDate(d.listing?.purchaseContractDate)}</span>
-
-            <span className="font-bold text-slate-500">List Price</span>
-            <span className="text-slate-900">{fmt(d.listing?.listPrice)}</span>
-            <span />
-            <span className="font-bold text-slate-500">Close Date</span>
-            <span className="text-slate-900">{fmtIsoDate(d.listing?.closeDate)}</span>
-          </div>
-        </div>
-
-        {/* Property Physical tile */}
-        <div className="shrink-0 rounded border border-slate-200 bg-slate-50 px-3 py-2" style={{ maxWidth: 400 }}>
-          <div className="grid grid-cols-[auto_auto_16px_auto_auto_16px_auto_auto] gap-x-2 gap-y-0.5 text-[11px] leading-snug">
-            {/* Row 1 */}
-            <span className="font-bold text-slate-500">Total SF</span>
-            <span className="text-slate-900">{fmtNum(p?.buildingSqft)}</span>
-            <span />
-            <span className="font-bold text-slate-500">Beds</span>
-            <span className="text-slate-900">{p?.bedroomsTotal ?? "\u2014"}</span>
-            <span />
-            <span className="font-bold text-slate-500">Type</span>
-            <span className="text-slate-900">{p?.propertyType ?? "\u2014"}</span>
-            {/* Row 2 */}
-            <span className="font-bold text-slate-500">Above SF</span>
-            <span className="text-slate-900">{fmtNum(p?.aboveGradeSqft)}</span>
-            <span />
-            <span className="font-bold text-slate-500">Baths</span>
-            <span className="text-slate-900">{p?.bathroomsTotal != null ? fmtNum(p.bathroomsTotal, 1) : "\u2014"}</span>
-            <span />
-            <span className="font-bold text-slate-500">Levels</span>
-            <span className="text-slate-900">{(d.subjectContext.levelsRaw as string | null) ?? p?.levelClass ?? "\u2014"}</span>
-            {/* Row 3 */}
-            <span className="font-bold text-slate-500">Below SF</span>
-            <span className="text-slate-900">{fmtNum(p?.belowGradeTotalSqft)}</span>
-            <span />
-            <span className="font-bold text-slate-500">Garage</span>
-            <span className="text-slate-900">{p?.garageSpaces != null ? fmtNum(p.garageSpaces, 1) : "\u2014"}</span>
-            <span />
-            <span className="font-bold text-slate-500">Year</span>
-            <span className={p?.yearBuilt && p.yearBuilt < 1950 ? "font-bold text-red-600" : "text-slate-900"}>{p?.yearBuilt ?? "\u2014"}</span>
-            {/* Row 4 */}
-            <span className="font-bold text-slate-500">Bsmt Fin</span>
-            <span className="text-slate-900">{fmtNum(p?.belowGradeFinishedSqft)}</span>
-            <span />
-            <span className="font-bold text-slate-500">Lot SF</span>
-            <span className="text-slate-900">{fmtNum(p?.lotSizeSqft)}</span>
-            <span />
-            <span className="font-bold text-slate-500">Tax/HOA</span>
-            <span className="text-slate-900">{fmt(d.financials?.annualTax)} | {fmt(d.financials?.annualHoa)}</span>
-          </div>
-        </div>
-
-        {/* Quick Analysis tile — live recalc, no persistence */}
-        <div className="shrink-0 rounded border border-blue-200 bg-blue-50/50 px-3 py-2" style={{ maxWidth: 360 }}>
-          <div className="mb-1.5 text-[9px] font-bold uppercase tracking-wider text-blue-600">Quick Analysis</div>
-          <div className="grid grid-cols-3 gap-x-2 gap-y-1">
-            <div>
-              <label className="block text-[9px] font-semibold uppercase tracking-wider text-slate-500">Manual ARV</label>
-              <input
-                type="text"
-                value={manualArvInput}
-                onChange={(e) => setManualArvInput(e.target.value)}
-                placeholder={liveDeal.arv ? `${liveDeal.arv.toLocaleString()}` : "\u2014"}
-                className="mt-0.5 w-[100px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
-              />
-            </div>
-            <div>
-              <label className="block text-[9px] font-semibold uppercase tracking-wider text-slate-500">Rehab Override</label>
-              <input
-                type="text"
-                value={manualRehabInput}
-                onChange={(e) => setManualRehabInput(e.target.value)}
-                placeholder={d.rehab.effective != null ? `${Math.round(d.rehab.effective).toLocaleString()}` : "\u2014"}
-                className="mt-0.5 w-[100px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
-              />
-            </div>
-            <div>
-              <label className="block text-[9px] font-semibold uppercase tracking-wider text-slate-500">Target Profit</label>
-              <input
-                type="text"
-                value={manualTargetProfitInput}
-                onChange={(e) => setManualTargetProfitInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Tab" && !e.shiftKey && copySelectedMlsBtnRef.current) {
-                    e.preventDefault();
-                    copySelectedMlsBtnRef.current.focus();
-                  }
-                }}
-                placeholder={d.dealMath?.targetProfit != null ? `${d.dealMath.targetProfit.toLocaleString()}` : "40,000"}
-                className="mt-0.5 w-[100px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
-              />
-            </div>
-          </div>
-        </div>
-      </div>
+      <SubjectTileRow
+        mlsInfo={{
+          mlsStatus: d.listing?.mlsStatus ?? "\u2014",
+          mlsNumber: d.listing?.listingId ?? "\u2014",
+          mlsChangeType: d.listing?.mlsMajorChangeType ?? "\u2014",
+          listDate: fmtIsoDate(d.listing?.listingContractDate),
+          origListPrice: fmt(d.listing?.originalListPrice),
+          ucDate: fmtIsoDate(d.listing?.purchaseContractDate),
+          listPrice: fmt(d.listing?.listPrice),
+          closeDate: fmtIsoDate(d.listing?.closeDate),
+        }}
+        physical={{
+          totalSf: fmtNum(p?.buildingSqft),
+          aboveSf: fmtNum(p?.aboveGradeSqft),
+          belowSf: fmtNum(p?.belowGradeTotalSqft),
+          basementFinSf: fmtNum(p?.belowGradeFinishedSqft),
+          beds: p?.bedroomsTotal != null ? String(p.bedroomsTotal) : "\u2014",
+          baths: p?.bathroomsTotal != null ? fmtNum(p.bathroomsTotal, 1) : "\u2014",
+          garage: p?.garageSpaces != null ? fmtNum(p.garageSpaces, 1) : "\u2014",
+          yearBuilt: p?.yearBuilt ?? null,
+          levels: (d.subjectContext.levelsRaw as string | null) ?? p?.levelClass ?? "\u2014",
+          propertyType: p?.propertyType ?? "\u2014",
+          lotSf: fmtNum(p?.lotSizeSqft),
+          taxHoa: `${fmt(d.financials?.annualTax)} | ${fmt(d.financials?.annualHoa)}`,
+        }}
+        quickAnalysis={{
+          manualArvInput,
+          setManualArvInput,
+          arvPlaceholder: liveDeal.arv ? `${liveDeal.arv.toLocaleString()}` : "\u2014",
+          manualRehabInput,
+          setManualRehabInput,
+          rehabPlaceholder: d.rehab.effective != null ? `${Math.round(d.rehab.effective).toLocaleString()}` : "\u2014",
+          manualTargetProfitInput,
+          setManualTargetProfitInput,
+          targetProfitPlaceholder: d.dealMath?.targetProfit != null ? `${d.dealMath.targetProfit.toLocaleString()}` : "40,000",
+          onTargetProfitTab: () => copySelectedMlsBtnRef.current?.focus(),
+        }}
+      />
 
       {/* Deal math summary strip — live-recalculated from Quick Analysis inputs */}
       <div className="flex items-center gap-4 rounded border border-slate-200 bg-slate-50 px-4 py-2">

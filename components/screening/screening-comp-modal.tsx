@@ -8,6 +8,7 @@ import { ArvBreakdownTooltip } from "@/components/screening/arv-breakdown-toolti
 import { DealStat } from "@/components/workstation/deal-stat";
 import { AddCompByMls } from "@/components/workstation/add-comp-by-mls";
 import { ExpandSearchPanel } from "@/components/workstation/expand-search-panel";
+import { SubjectTileRow } from "@/components/workstation/subject-tile-row";
 import {
   loadScreeningCompDataAction,
   loadCompDataByRunAction,
@@ -440,113 +441,43 @@ export function ScreeningCompModal({
           <div className="my-1.5 border-t border-slate-300" />
           {/* Property + MLS tiles side-by-side */}
           {data && (
-            <div className="flex gap-3">
-              {/* MLS Info tile */}
-              <div className="shrink-0 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-snug" style={{ maxWidth: 320 }}>
-                <div className="grid grid-cols-[auto_auto_16px_auto_auto] gap-x-2 gap-y-0.5">
-                  <span className="font-bold text-slate-500">MLS Status</span>
-                  <span className="text-slate-900">{data.mlsStatus ?? "—"}</span>
-                  <span />
-                  <span className="font-bold text-slate-500">MLS#</span>
-                  <span className="text-slate-900">{data.mlsNumber ?? "—"}</span>
-
-                  <span className="font-bold text-slate-500">MLS Change</span>
-                  <span className="text-slate-900">{data.mlsChangeType ?? "—"}</span>
-                  <span />
-                  <span className="font-bold text-slate-500">List Date</span>
-                  <span className="text-slate-900">{data.listDate ?? "—"}</span>
-
-                  <span className="font-bold text-slate-500">Orig List Price</span>
-                  <span className="text-slate-900">{$f(data.originalListPrice)}</span>
-                  <span />
-                  <span className="font-bold text-slate-500">U/C Date</span>
-                  <span className="text-slate-900">{data.ucDate ?? "—"}</span>
-
-                  <span className="font-bold text-slate-500">List Price</span>
-                  <span className="text-slate-900">{$f(data.subjectListPrice)}</span>
-                  <span />
-                  <span className="font-bold text-slate-500">Close Date</span>
-                  <span className="text-slate-900">{data.closeDate ?? "—"}</span>
-                </div>
-              </div>
-              {/* Property Physical tile */}
-              <div className="shrink-0 rounded border border-slate-200 bg-slate-50 px-3 py-2" style={{ maxWidth: 400 }}>
-                <div className="grid grid-cols-[auto_auto_16px_auto_auto_16px_auto_auto] gap-x-2 gap-y-0.5 text-[11px] leading-snug">
-                  {/* Row 1 */}
-                  <span className="font-bold text-slate-500">Total SF</span>
-                  <span className="text-slate-900">{fmtNum(data.subjectBuildingSqft)}</span>
-                  <span />
-                  <span className="font-bold text-slate-500">Beds</span>
-                  <span className="text-slate-900">{data.bedsTotal ?? "—"}</span>
-                  <span />
-                  <span className="font-bold text-slate-500">Type</span>
-                  <span className="text-slate-900">{data.propertyType ?? "—"}</span>
-                  {/* Row 2 */}
-                  <span className="font-bold text-slate-500">Above SF</span>
-                  <span className="text-slate-900">{fmtNum(data.aboveGradeSqft)}</span>
-                  <span />
-                  <span className="font-bold text-slate-500">Baths</span>
-                  <span className="text-slate-900">{data.bathsTotal != null ? fmtNum(data.bathsTotal) : "—"}</span>
-                  <span />
-                  <span className="font-bold text-slate-500">Levels</span>
-                  <span className="text-slate-900">{data.levelsRaw ?? "—"}</span>
-                  {/* Row 3 */}
-                  <span className="font-bold text-slate-500">Below SF</span>
-                  <span className="text-slate-900">{fmtNum(data.belowGradeTotalSqft)}</span>
-                  <span />
-                  <span className="font-bold text-slate-500">Garage</span>
-                  <span className="text-slate-900">{data.garageSpaces != null ? fmtNum(data.garageSpaces) : "—"}</span>
-                  <span />
-                  <span className="font-bold text-slate-500">Year</span>
-                  <span className={data.yearBuilt && data.yearBuilt < 1950 ? "font-bold text-red-600" : "text-slate-900"}>{data.yearBuilt ?? "—"}</span>
-                  {/* Row 4 */}
-                  <span className="font-bold text-slate-500">Bsmt Fin</span>
-                  <span className="text-slate-900">{fmtNum(data.belowGradeFinishedSqft)}</span>
-                  <span />
-                  <span className="font-bold text-slate-500">Lot SF</span>
-                  <span className="text-slate-900">{fmtNum(data.lotSizeSqft)}</span>
-                  <span />
-                  <span className="font-bold text-slate-500">Tax/HOA</span>
-                  <span className="text-slate-900">{$f(data.annualPropertyTax)} | {$f(data.annualHoaDues)}</span>
-                </div>
-              </div>
-              {/* Quick Analysis tile */}
-              <div className="shrink-0 rounded border border-blue-200 bg-blue-50/50 px-3 py-2" style={{ maxWidth: 360 }}>
-                <div className="mb-1.5 text-[9px] font-bold uppercase tracking-wider text-blue-600">Quick Analysis</div>
-                <div className="grid grid-cols-3 gap-x-2 gap-y-1">
-                  <div>
-                    <label className="block text-[9px] font-semibold uppercase tracking-wider text-slate-500">Manual ARV</label>
-                    <input
-                      type="text"
-                      value={manualArvInput}
-                      onChange={(e) => setManualArvInput(e.target.value)}
-                      placeholder={liveDeal ? `${liveDeal.arv.toLocaleString()}` : "—"}
-                      className="mt-0.5 w-[100px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[9px] font-semibold uppercase tracking-wider text-slate-500">Rehab Override</label>
-                    <input
-                      type="text"
-                      value={manualRehabInput}
-                      onChange={(e) => setManualRehabInput(e.target.value)}
-                      placeholder={data.rehabTotal != null ? `${Math.round(data.rehabTotal).toLocaleString()}` : "—"}
-                      className="mt-0.5 w-[100px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[9px] font-semibold uppercase tracking-wider text-slate-500">Target Profit</label>
-                    <input
-                      type="text"
-                      value={manualTargetProfitInput}
-                      onChange={(e) => setManualTargetProfitInput(e.target.value)}
-                      placeholder={data.targetProfit != null ? `${data.targetProfit.toLocaleString()}` : "40,000"}
-                      className="mt-0.5 w-[100px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
+            <SubjectTileRow
+              mlsInfo={{
+                mlsStatus: data.mlsStatus ?? "—",
+                mlsNumber: data.mlsNumber ?? "—",
+                mlsChangeType: data.mlsChangeType ?? "—",
+                listDate: data.listDate ?? "—",
+                origListPrice: $f(data.originalListPrice),
+                ucDate: data.ucDate ?? "—",
+                listPrice: $f(data.subjectListPrice),
+                closeDate: data.closeDate ?? "—",
+              }}
+              physical={{
+                totalSf: fmtNum(data.subjectBuildingSqft),
+                aboveSf: fmtNum(data.aboveGradeSqft),
+                belowSf: fmtNum(data.belowGradeTotalSqft),
+                basementFinSf: fmtNum(data.belowGradeFinishedSqft),
+                beds: data.bedsTotal != null ? String(data.bedsTotal) : "—",
+                baths: data.bathsTotal != null ? fmtNum(data.bathsTotal) : "—",
+                garage: data.garageSpaces != null ? fmtNum(data.garageSpaces) : "—",
+                yearBuilt: data.yearBuilt ?? null,
+                levels: data.levelsRaw ?? "—",
+                propertyType: data.propertyType ?? "—",
+                lotSf: fmtNum(data.lotSizeSqft),
+                taxHoa: `${$f(data.annualPropertyTax)} | ${$f(data.annualHoaDues)}`,
+              }}
+              quickAnalysis={{
+                manualArvInput,
+                setManualArvInput,
+                arvPlaceholder: liveDeal ? `${liveDeal.arv.toLocaleString()}` : "—",
+                manualRehabInput,
+                setManualRehabInput,
+                rehabPlaceholder: data.rehabTotal != null ? `${Math.round(data.rehabTotal).toLocaleString()}` : "—",
+                manualTargetProfitInput,
+                setManualTargetProfitInput,
+                targetProfitPlaceholder: data.targetProfit != null ? `${data.targetProfit.toLocaleString()}` : "40,000",
+              }}
+            />
           )}
         </div>
 
