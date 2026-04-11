@@ -66,6 +66,19 @@ function trendTone(v: number | null): Tone {
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Override flags from the parent. The strip computes per-stat
+ *  override states internally per the cascade rules in spec §3.3:
+ *  - arv → ARV manual; Max Offer / Offer% / Gap-sqft cascading
+ *  - rehab → Rehab manual; Max Offer / Offer% cascading
+ *  - targetProfit → Target Profit manual; Max Offer / Offer% cascading
+ *  - daysHeld → no Deal Stat Strip implication (cascades into the
+ *    Holding card instead, handled in 3E.6) */
+export type DealStatStripManualOverrides = {
+  arv?: boolean;
+  rehab?: boolean;
+  targetProfit?: boolean;
+};
+
 type DealStatStripProps = {
   arv: number | null;
   maxOffer: number | null;
@@ -76,6 +89,12 @@ type DealStatStripProps = {
   targetProfit: number | null;
   /** Decimal — 0.05 means 5%/yr. When null the Trend pill is hidden entirely. */
   trendAnnualRate: number | null;
+  /** Per-spec §3.3 + Decision 6.1: per-value override indicators on
+   *  the strip. Each flag means the corresponding Quick Analysis input
+   *  has a manual value set; the strip computes which downstream stats
+   *  also need the cascading indicator. Modal consumers omit this
+   *  prop (no Quick Analysis tile in the legacy modal flow). */
+  manualOverrides?: DealStatStripManualOverrides;
   /** Optional right-aligned content (used by the modal for comp count
    *  text and Copy MLS buttons). The strip wraps it in `ml-auto` so the
    *  consumer doesn't need to set positioning itself. */
@@ -90,6 +109,7 @@ export function DealStatStrip({
   rehabTotal,
   targetProfit,
   trendAnnualRate,
+  manualOverrides,
   rightSlot,
 }: DealStatStripProps) {
   const trendDisplay =
@@ -97,22 +117,56 @@ export function DealStatStrip({
       ? `${trendAnnualRate >= 0 ? "+" : ""}${(trendAnnualRate * 100).toFixed(1)}%/yr`
       : null;
 
+  // Per-stat override resolution per spec §3.3 cascade rules.
+  const arvManual = manualOverrides?.arv ?? false;
+  const rehabManual = manualOverrides?.rehab ?? false;
+  const targetProfitManual = manualOverrides?.targetProfit ?? false;
+  const anyArvAffectingOverride = arvManual || rehabManual || targetProfitManual;
+
+  // ARV is only directly overridden by arv_manual.
+  const arvOverride = arvManual ? "manual" : "none";
+  // Max Offer = ARV - costs - target profit. Cascades from any Quick
+  // Analysis override that touches a component.
+  const maxOfferOverride = anyArvAffectingOverride ? "cascading" : "none";
+  // Offer% derives from Max Offer (which derives from ARV/Rehab/Target)
+  // — same cascade as Max Offer.
+  const offerPctOverride = anyArvAffectingOverride ? "cascading" : "none";
+  // Gap/sqft = (ARV - listPrice) / sqft. Cascades only when ARV is
+  // overridden — Rehab and Target Profit don't affect Gap.
+  const gapOverride = arvManual ? "cascading" : "none";
+  // Rehab pill renders the user's override directly (manual) or the
+  // computed value (none).
+  const rehabOverride = rehabManual ? "manual" : "none";
+  // Target Profit pill: same logic.
+  const targetProfitPillOverride = targetProfitManual ? "manual" : "none";
+
   return (
     <div className="flex items-center gap-4 rounded border border-slate-200 bg-slate-50 px-4 py-2">
-      <DealStat label="ARV" value={fmt(arv)} highlight />
-      <DealStat label="Max Offer" value={fmt(maxOffer)} highlight />
+      <DealStat label="ARV" value={fmt(arv)} highlight override={arvOverride} />
+      <DealStat
+        label="Max Offer"
+        value={fmt(maxOffer)}
+        highlight
+        override={maxOfferOverride}
+      />
       <DealStat
         label="Offer%"
         value={fmtPct(offerPct)}
         tone={offerPctTone(offerPct)}
+        override={offerPctOverride}
       />
       <DealStat
         label="Gap/sqft"
         value={gapPerSqft != null ? `$${fmtNum(gapPerSqft)}` : "\u2014"}
         tone={gapPerSqftTone(gapPerSqft)}
+        override={gapOverride}
       />
-      <DealStat label="Rehab" value={fmt(rehabTotal)} />
-      <DealStat label="Target Profit" value={fmt(targetProfit)} />
+      <DealStat label="Rehab" value={fmt(rehabTotal)} override={rehabOverride} />
+      <DealStat
+        label="Target Profit"
+        value={fmt(targetProfit)}
+        override={targetProfitPillOverride}
+      />
       {trendDisplay != null && (
         <DealStat
           label="Trend"

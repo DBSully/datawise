@@ -26,11 +26,16 @@
 
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { markAnalysisCompleteAction } from "@/app/(workspace)/deals/actions";
 import { generateReportAction } from "@/app/(workspace)/reports/actions";
-import { QuickAnalysisTile } from "@/components/workstation/quick-analysis-tile";
+import { DealStatStrip } from "@/components/workstation/deal-stat-strip";
+import {
+  QuickAnalysisTile,
+  parseDollarInput,
+  parseIntInput,
+} from "@/components/workstation/quick-analysis-tile";
 import { QuickStatusTile } from "@/components/workstation/quick-status-tile";
 import { SubjectTileRow } from "@/components/workstation/subject-tile-row";
 import { fmt, fmtNum } from "@/lib/reports/format";
@@ -72,6 +77,99 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
   const initialCondition = (ma?.analyst_condition as string | null) ?? null;
   const initialLocation = (ma?.location_rating as string | null) ?? null;
   const initialNextStep = (ma?.next_step as string | null) ?? null;
+
+  // ── Lifted Quick Analysis input state ──────────────────────────────
+  // The 4 numeric inputs in the Quick Analysis tile are owned at this
+  // level (not inside QuickAnalysisTile) so the parent can compute the
+  // liveDeal memo from the live values and feed it to the Deal Stat
+  // Strip + the right-column cards. This is the cross-card cascade
+  // requirement from §6.6/§6.8 of the 3E plan and the proactive fix
+  // for the legacy "Deal Math card doesn't reflect Quick Analysis"
+  // bug Dan surfaced during 3D testing.
+  const [arvInput, setArvInput] = useState<string>(
+    initialArvManual != null ? String(initialArvManual) : "",
+  );
+  const [rehabInput, setRehabInput] = useState<string>(
+    initialRehabManual != null ? String(initialRehabManual) : "",
+  );
+  const [targetProfitInput, setTargetProfitInput] = useState<string>(
+    initialTargetProfitManual != null
+      ? String(initialTargetProfitManual)
+      : "",
+  );
+  const [daysHeldInput, setDaysHeldInput] = useState<string>(
+    initialDaysHeldManual != null ? String(initialDaysHeldManual) : "",
+  );
+
+  // ── liveDeal memo ──────────────────────────────────────────────────
+  // Recomputes synchronously on every keystroke in Quick Analysis.
+  // Mirrors the screening modal's liveDeal pattern but reads from
+  // WorkstationData fields instead of ScreeningCompData. The right-
+  // column cards in 3E.6 will read from this memo too (via props).
+  const liveDeal = useMemo(() => {
+    const parsedArv = parseDollarInput(arvInput);
+    const parsedRehab = parseDollarInput(rehabInput);
+    const parsedTargetProfit = parseDollarInput(targetProfitInput);
+    const parsedDaysHeld = parseIntInput(daysHeldInput);
+
+    const arv = parsedArv ?? data.arv.effective ?? 0;
+    const rehabTotal = parsedRehab ?? data.rehab.effective ?? 0;
+    const targetProfit =
+      parsedTargetProfit ?? data.dealMath?.targetProfit ?? 40_000;
+
+    // Holding total: server-computed value if no override; if Days
+    // Held is overridden, scale the server's per-day rate by the new
+    // day count. This is the simplest cascade — full recomputation
+    // (re-running holding-engine) belongs in 3E.8 polish if needed.
+    const serverDaysHeld = data.holding?.daysHeld ?? null;
+    const serverHoldTotal = data.holding?.total ?? 0;
+    const dailyHoldTotal = data.holding?.dailyTotal ?? 0;
+    const holdTotal =
+      parsedDaysHeld != null && parsedDaysHeld > 0
+        ? Math.round(dailyHoldTotal * parsedDaysHeld)
+        : serverHoldTotal;
+
+    const transactionTotal = data.transaction?.total ?? 0;
+    const financingTotal = data.financing?.total ?? 0;
+
+    const costs =
+      rehabTotal + holdTotal + transactionTotal + financingTotal + targetProfit;
+    const maxOffer = Math.round(arv - costs);
+
+    const listPrice = data.listing?.listPrice ?? 0;
+    const offerPct =
+      listPrice > 0 ? Math.round((maxOffer / listPrice) * 10000) / 10000 : null;
+
+    const sqft = data.physical?.buildingSqft ?? 0;
+    const gapPerSqft =
+      listPrice > 0 && sqft > 0 ? Math.round((arv - listPrice) / sqft) : null;
+
+    return {
+      arv,
+      maxOffer,
+      offerPct,
+      gapPerSqft,
+      rehabTotal,
+      targetProfit,
+      holdTotal,
+      transactionTotal,
+      financingTotal,
+      // Track the parsed override values so cards downstream can detect
+      // which fields are user-overridden vs auto-computed.
+      arvManual: parsedArv != null,
+      rehabManual: parsedRehab != null,
+      targetProfitManual: parsedTargetProfit != null,
+      daysHeldManual: parsedDaysHeld != null,
+      // Effective days held (used by Holding card headline cascade)
+      daysHeld: parsedDaysHeld ?? serverDaysHeld ?? 0,
+    };
+  }, [
+    arvInput,
+    rehabInput,
+    targetProfitInput,
+    daysHeldInput,
+    data,
+  ]);
 
   const p = data.physical;
 
@@ -145,16 +243,20 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
           }}
         />
 
-        {/* TILE 3 — Quick Analysis (auto-persist) */}
+        {/* TILE 3 — Quick Analysis (auto-persist, controlled by parent) */}
         <QuickAnalysisTile
           analysisId={data.analysisId}
-          initialArvManual={initialArvManual}
-          initialRehabManual={initialRehabManual}
-          initialTargetProfitManual={initialTargetProfitManual}
-          initialDaysHeldManual={initialDaysHeldManual}
+          arvInput={arvInput}
+          setArvInput={setArvInput}
+          rehabInput={rehabInput}
+          setRehabInput={setRehabInput}
+          targetProfitInput={targetProfitInput}
+          setTargetProfitInput={setTargetProfitInput}
+          daysHeldInput={daysHeldInput}
+          setDaysHeldInput={setDaysHeldInput}
           autoArv={data.arv.effective}
           autoRehab={data.rehab.effective}
-          autoTargetProfit={null}
+          autoTargetProfit={data.dealMath?.targetProfit ?? null}
           autoDaysHeld={data.holding?.daysHeld ?? null}
         />
 
@@ -168,11 +270,22 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
         />
       </div>
 
-      {/* DEAL STAT STRIP — 3E.4 */}
-      <div className="rounded border border-dashed border-slate-300 bg-slate-50 px-4 py-2 text-xs text-slate-500">
-        DEAL STAT STRIP (3E.4) — ARV / Max Offer / Offer% / Gap-sqft / Rehab
-        / Target Profit / Trend, with override indicators
-      </div>
+      {/* DEAL STAT STRIP — 3E.4 (live values from liveDeal memo +
+       *  per-spec override indicators driven by Quick Analysis flags). */}
+      <DealStatStrip
+        arv={liveDeal.arv}
+        maxOffer={liveDeal.maxOffer}
+        offerPct={liveDeal.offerPct}
+        gapPerSqft={liveDeal.gapPerSqft}
+        rehabTotal={liveDeal.rehabTotal}
+        targetProfit={liveDeal.targetProfit}
+        trendAnnualRate={data.trend?.blendedAnnualRate ?? null}
+        manualOverrides={{
+          arv: liveDeal.arvManual,
+          rehab: liveDeal.rehabManual,
+          targetProfit: liveDeal.targetProfitManual,
+        }}
+      />
 
       {/* HERO + RIGHT COLUMN — 3E.5 + 3E.6 */}
       <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 320px" }}>

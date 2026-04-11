@@ -23,24 +23,30 @@
 // is Workstation-specific and consumes 3D's auto-persist primitives
 // directly.
 //
+// AS OF 3E.4 — controlled component pattern. The 4 input strings
+// live in the parent (the Workstation) so the parent can compute
+// liveDeal from the live inputs and feed it to the Deal Stat Strip
+// + the right-column cards. The tile receives values + setters as
+// props. The auto-persist hooks still live INSIDE the tile because
+// the save callbacks are field-specific.
+//
 // Empty input semantics (per spec): clearing a field reverts to the
 // auto-computed value. The placeholder shows the current auto value
 // at all times. The persisted value is null when the input is empty.
 
 "use client";
 
-import { useState } from "react";
 import { useDebouncedSave } from "@/lib/auto-persist/use-debounced-save";
 import { saveManualAnalysisFieldAction } from "@/lib/auto-persist/save-manual-analysis-field-action";
 import { SaveStatusDot } from "@/components/workstation/save-status-dot";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Input parsers
+// Input parsers — exported so the parent can also compute liveDeal
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Parse a dollar input (allows commas, $ sign, whitespace). Empty
  *  string returns null. Non-numeric returns null. */
-function parseDollarInput(s: string): number | null {
+export function parseDollarInput(s: string): number | null {
   const cleaned = s.replace(/[,$\s]/g, "");
   if (cleaned === "") return null;
   const n = Number(cleaned);
@@ -49,7 +55,7 @@ function parseDollarInput(s: string): number | null {
 
 /** Parse an integer input (allows commas, whitespace). Empty string
  *  returns null. Non-numeric returns null. */
-function parseIntInput(s: string): number | null {
+export function parseIntInput(s: string): number | null {
   const cleaned = s.replace(/[,\s]/g, "");
   if (cleaned === "") return null;
   const n = parseInt(cleaned, 10);
@@ -57,17 +63,20 @@ function parseIntInput(s: string): number | null {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Props
+// Props (controlled component as of 3E.4)
 // ─────────────────────────────────────────────────────────────────────────────
 
 type QuickAnalysisTileProps = {
   analysisId: string;
-  /** Initial values from data.manualAnalysis (loaded from the database
-   *  on the server). The tile's input state is initialized from these. */
-  initialArvManual: number | null;
-  initialRehabManual: number | null;
-  initialTargetProfitManual: number | null;
-  initialDaysHeldManual: number | null;
+  /** Controlled input strings owned by the parent. */
+  arvInput: string;
+  setArvInput: (s: string) => void;
+  rehabInput: string;
+  setRehabInput: (s: string) => void;
+  targetProfitInput: string;
+  setTargetProfitInput: (s: string) => void;
+  daysHeldInput: string;
+  setDaysHeldInput: (s: string) => void;
   /** Auto-computed values to show as placeholders when the
    *  corresponding manual override is not set. The placeholder
    *  reflects "what would happen if you cleared this input". */
@@ -88,33 +97,20 @@ type QuickAnalysisTileProps = {
 
 export function QuickAnalysisTile({
   analysisId,
-  initialArvManual,
-  initialRehabManual,
-  initialTargetProfitManual,
-  initialDaysHeldManual,
+  arvInput,
+  setArvInput,
+  rehabInput,
+  setRehabInput,
+  targetProfitInput,
+  setTargetProfitInput,
+  daysHeldInput,
+  setDaysHeldInput,
   autoArv,
   autoRehab,
   autoTargetProfit,
   autoDaysHeld,
   onTargetProfitTab,
 }: QuickAnalysisTileProps) {
-  // Each input is controlled state holding the raw user-entered string.
-  // The parsed numeric value is what gets passed to useDebouncedSave.
-  const [arvInput, setArvInput] = useState<string>(
-    initialArvManual != null ? String(initialArvManual) : "",
-  );
-  const [rehabInput, setRehabInput] = useState<string>(
-    initialRehabManual != null ? String(initialRehabManual) : "",
-  );
-  const [targetProfitInput, setTargetProfitInput] = useState<string>(
-    initialTargetProfitManual != null
-      ? String(initialTargetProfitManual)
-      : "",
-  );
-  const [daysHeldInput, setDaysHeldInput] = useState<string>(
-    initialDaysHeldManual != null ? String(initialDaysHeldManual) : "",
-  );
-
   const arvSave = useDebouncedSave(parseDollarInput(arvInput), async (value) => {
     await saveManualAnalysisFieldAction({
       analysisId,

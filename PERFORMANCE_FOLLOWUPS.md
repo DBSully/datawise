@@ -148,3 +148,39 @@ async function timed<T>(label: string, p: PromiseLike<T>): Promise<T> {
 ```
 
 Wrap each query with `timed("label", supabase.from(...).select(...))` and read the dev server log.
+
+---
+
+## 2. `/screening` page loading time investigation needed
+
+**Status:** Open — surfaced 2026-04-11 by Dan during 3E.4 testing
+**Severity:** Unknown — needs measurement before triaging
+
+### The observation
+
+Dan noted during 3E.4 verification that the `/screening` page feels slow to load. Has not been measured yet — the observation is qualitative.
+
+### Why this might matter
+
+`/screening` is the daily-work fallback during 3E execution per Decision 5.1 (drop side-by-side). The new Workstation is being built up incrementally throughout 3E and is "viewable but in-progress" until 3E.7 ships the per-card modals. If a sub-task ships broken, the screening modal at `/screening` is the only fully-functional surface for property review. Slow loading there is more impactful than usual right now.
+
+### Likely suspects
+
+`/screening/page.tsx` reads from `analysis_queue_v`, the same view that drove the `/home` slowness in entry 1 above. The view does `DISTINCT ON (real_property_id) ... ORDER BY real_property_id, created_at DESC` over `screening_results` with two `LEFT JOIN LATERAL` subqueries per row. The `/screening` page likely calls it without the `is_prime_candidate=true AND review_action IS NULL` filter that `/home` uses, which means it materializes the full queue (not just unreviewed primes), so it's potentially even slower than `/home` was at ~5s.
+
+### Recommended next step
+
+Same diagnostic as for `/home`: drop in temporary timing instrumentation around each Supabase query in `app/(workspace)/screening/page.tsx`, reload, read the per-query timings from the dev server console. Then triage:
+
+- If `analysis_queue_v` is the dominant cost, both this entry AND entry 1 above point at the same root cause. Resolving entry 1 (the cache-table pattern) would automatically fix this entry too.
+- If a different query is the bottleneck (e.g., `screening_batches`, the activity log, or a batch metadata join), the fix is independent.
+
+### When to revisit
+
+Apply the proper fix when:
+
+1. A measurement confirms the slowness is real (not just perceived)
+2. AND the bottleneck is identified
+3. AND it's not blocked by the new Workstation work in 3E (don't sidetrack the 3E build)
+
+Per Dan's call during 3E.4: "make a reminder to explore Screening page loading time, but let's not get sidetracked." This entry is the reminder.
