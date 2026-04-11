@@ -1,0 +1,68 @@
+-- Phase 1 — Interlude fix between Step 3A and Step 3B
+--
+-- Add composite btree index on import_batch_rows (import_batch_id,
+-- processing_status) to fix statement timeout on the
+-- import_batch_progress_v view under resource contention.
+--
+-- ─── The bug being fixed ───
+-- The /intake/imports page reads from import_batch_progress_v, which
+-- aggregates row counts per batch grouped by processing_status:
+--
+--   SELECT b.*,
+--     count(*) FILTER (WHERE processing_status = 'processed'),
+--     count(*) FILTER (WHERE processing_status = 'validated'),
+--     count(*) FILTER (WHERE processing_status = 'processing_error'),
+--     count(*) FILTER (WHERE processing_status = 'validation_error')
+--   FROM import_batches b
+--   LEFT JOIN import_batch_rows r ON r.import_batch_id = b.id
+--   GROUP BY b.id, ...
+--
+-- The existing single-column index ix_import_batch_rows_import_batch_id
+-- (from migration 20260324134703) lets Postgres find rows by batch_id
+-- quickly. But for each row, the planner still has to fetch the heap
+-- tuple to read processing_status for the FILTER predicates. With
+-- 73,267 rows in import_batch_rows on a micro compute tier, that's
+-- 73k heap fetches per page load. Under any concurrent load (the
+-- analyst using the app while a commit was in progress, autovacuum
+-- running, etc.) this exceeds Supabase's default 8-second
+-- statement_timeout for the API roles and the page returns a 500.
+--
+-- Manifested as a runtime error in app/(workspace)/intake/imports/page.tsx
+-- line 124: "canceling statement due to statement timeout".
+--
+-- ─── The fix ───
+-- A composite btree index on (import_batch_id, processing_status)
+-- lets Postgres do an index-only scan: both the JOIN key AND the
+-- FILTER column are present in the index, so no heap fetch is needed
+-- to evaluate the FILTER predicates. Roughly an order of magnitude
+-- faster — should drop the view's runtime from several seconds to
+-- well under a second under contention.
+--
+-- ─── Why this isn't redundant with the existing index ───
+-- The single-column index ix_import_batch_rows_import_batch_id is
+-- still valuable for queries that look up rows by batch_id without
+-- caring about status (e.g., the row processor in the import pipeline).
+-- The new composite index is specifically optimized for the
+-- group-by-status aggregation pattern used by the view.
+--
+-- Both indexes coexist; Postgres's planner picks whichever is best
+-- per query.
+--
+-- ─── Side effect (positive) ───
+-- Any other query that filters by (import_batch_id, processing_status)
+-- also speeds up — including the screening pipeline's row processor
+-- which iterates WHERE import_batch_id = X AND processing_status = 'validated'.
+--
+-- ─── Cost ───
+-- ~5-10 MB of disk space (73k rows × ~64 bytes per index entry).
+-- Trivial. No query plan disruption.
+--
+-- ─── This is NOT a Step 3A regression ───
+-- None of the Step 3A changes touched the imports page or the
+-- import_batches / import_batch_rows tables. This is a pre-existing
+-- slow query that crossed the timeout edge under load. Fixing it now
+-- as a small interlude commit (same shape as the interim queue fix
+-- between Step 2 and Step 3).
+
+CREATE INDEX IF NOT EXISTS ix_import_batch_rows_batch_id_status
+  ON public.import_batch_rows (import_batch_id, processing_status);
