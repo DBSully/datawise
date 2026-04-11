@@ -1,7 +1,7 @@
 # Phase 1 — Step 3E — New Workstation Card Layout
 
 > **Goal:** Build the new Analysis Workstation per `WORKSTATION_CARD_SPEC.md`. **Largest single piece of work in Step 3.** Decomposed into 8 internal sub-tasks (3E.1 through 3E.8) so each piece is independently verifiable. Per Dan's call (locked Decision 5.1), the side-by-side rollout from master plan Decision 6.6 is dropped — the legacy Workstation file gets deleted in 3E.1 and only the new Workstation exists from that point onward. Daily underwriting work during 3E falls back to the screening modal at `/screening` (which is independent of the Workstation).
-> **Status:** DRAFT — awaiting Dan's review before execution (5.1 already locked; 5.2-5.7 pending)
+> **Status:** READY TO EXECUTE — all 7 decisions locked (5.1 dropped side-by-side; 5.2 filename; 5.3 read-only modals first; 5.4 Partner Sharing stub; 5.5 ship Notes DEFAULT migration in 3E.7; 5.6 pre-locked override indicator; 5.7 per-sub-task smoke test)
 > **Authority:** `WORKSTATION_CARD_SPEC.md` (locked, all 9 master decisions resolved) + `PHASE1_STEP3_MASTER_PLAN.md` §3E (sub-step decomposition + Decisions 6.1, 6.7) + completion of 3A, 3B, 3C, 3D. Master plan Decision 6.6 (side-by-side rollout) is **superseded** by 3E plan Decision 5.1.
 > **Date:** 2026-04-11
 > **Risk level:** Highest in Step 3. Mitigation: internal sub-step ordering means each piece is verifiable in isolation, per-sub-task smoke testing catches regressions early, and the screening modal at `/screening` remains the daily-work fallback for property review. The Workstation itself is only available in its in-progress state during 3E.
@@ -401,7 +401,28 @@ This is the deferred Task 9 from 3C — the spec called for extracting `<CompWor
 
 ### 6.6 — 3E.6: Right column collapsed cards
 
-9 `<DetailCard>` instances stacked vertically in a column on the right side of the layout. Each card reads from `WorkstationData` to compute its headline/context strings. Clicking a card calls `onExpand` which sets state in the parent to open the corresponding modal — but the modals don't exist yet (3E.7 builds them). For 3E.6, clicking a card just toggles a placeholder modal that says "<Card name> modal coming in 3E.7".
+9 `<DetailCard>` instances stacked vertically in a column on the right side of the layout. Each card computes its headline/context strings from a combination of `WorkstationData` (server-loaded) AND **live state from the Quick Analysis tile** (per the cross-card cascade requirement — see the call-out below). Clicking a card calls `onExpand` which sets state in the parent to open the corresponding modal — but the modals don't exist yet (3E.7 builds them). For 3E.6, clicking a card just toggles a placeholder modal that says "<Card name> modal coming in 3E.7".
+
+**🚨 Known legacy bug 3E.6 must NOT replicate:** the legacy Workstation has a "Deal Math" card whose displayed values come from server-loaded `d.dealMath` instead of the live `liveDeal` memo computed from Quick Analysis inputs. So in the legacy Workstation, typing a Manual ARV updates the Deal Stat Strip (which reads from `liveDeal`) but **not** the Deal Math card (which reads from server data). Dan surfaced this during Step 3D testing.
+
+The new Workstation **proactively avoids this** because:
+1. The spec doesn't have a standalone "Deal Math" card — its content is split across the Deal Stat Strip (3E.4) + ARV card + Cash Required card + Holding/Trans card.
+2. Every one of those cards must compute its **headline from live state** (the same `liveDeal` memo the Deal Stat Strip uses), not from server-loaded `d.dealMath`/`d.cashRequired`/`d.holding`/etc.
+
+**Explicit requirement for 3E.6 implementation:** the parent component (the new `AnalysisWorkstation` in `app/(workspace)/analysis/[analysisId]/analysis-workstation.tsx`) must hoist the `liveDeal` computation to its top level and pass derived headline values down to each `<DetailCard>` as props. Cards must NOT read directly from `data.dealMath`, `data.cashRequired`, etc. for any value that depends on Quick Analysis overrides — they must read from the parent's hoisted live state.
+
+**Cards affected by this requirement** (each must reflect Quick Analysis cascade):
+- **ARV card** — headline = `liveDeal.arv` (responds to Manual ARV)
+- **Rehab card** — headline = `liveDeal.rehabTotal` (responds to Rehab Override + Condition cascade)
+- **Holding & Transaction card** — headline = `liveDeal.holdingTotal + liveDeal.transactionTotal` (responds to Days Held)
+- **Cash Required card** — headline = `liveDeal.totalCashRequired` (responds to ARV / Rehab / Days Held cascade through Max Offer)
+- **Financing card** — headline = `liveDeal.financingTotal` (responds to manual rate/LTV/points cascade — NOT in Quick Analysis but in Financing card modal)
+
+**Cards unaffected** (read directly from `WorkstationData` since their headlines don't depend on Quick Analysis):
+- **Price Trend card** — pure market data
+- **Pipeline Status card** — pipeline state, not deal math
+- **Notes card** — note count
+- **Partner Sharing card** — share state (stub)
 
 **The 9 cards** (sorted in the spec's order):
 1. ARV
@@ -447,13 +468,19 @@ Each modal is its own commit (9 sub-commits inside 3E.7).
 
 ### 6.8 — 3E.8: Cross-card cascades + polish
 
-The final sub-task wires up the cross-card cascades and does final visual polish.
+The final sub-task verifies all cross-card cascades work end-to-end and does final visual polish. Most of the cascade infrastructure is already in place by 3E.6 (the parent hoists `liveDeal` and passes derived headlines down) — 3E.8's job is to **verify each cascade chain** and fix any gaps where a card's headline still reads from server data instead of live state.
 
-**Cross-card cascades:**
-- **Days Held in Quick Analysis → Holding & Transaction card** — when the analyst types a Days Held value in the Quick Analysis tile, the Holding & Transaction card's headline `Hold $X · Trans $Y` should recompute synchronously to reflect the new days. This requires the card's headline computation to read from the live `liveDeal` state in the parent, not from the server-loaded data alone.
-- **Manual ARV → ARV card** — when the analyst types a Manual ARV, the ARV card's headline updates to show the new effective ARV.
-- **Rehab Override → Rehab card** — when the analyst types a Rehab Override, the Rehab card's headline shows the override value AND the modal banner appears.
-- **Condition (Quick Status) → Rehab card** — when the analyst changes Condition, the auto rehab calculation updates (via the condition multiplier) UNLESS Rehab Override is set. The Rehab card's collapsed headline reflects the new value.
+**Cross-card cascades to verify:**
+- **Manual ARV (Quick Analysis) → ARV card headline + Cash Required card headline (via Max Offer cascade) + Deal Stat Strip indicators** — when the analyst types a Manual ARV, all three reflect the new effective ARV synchronously.
+- **Rehab Override (Quick Analysis) → Rehab card headline + Rehab card modal banner + Cash Required card headline (rehab cascades through Max Offer)** — when set, the Rehab card's collapsed headline shows the override value, the modal shows the override banner, and Cash Required reflects the new Max Offer.
+- **Days Held (Quick Analysis) → Holding & Transaction card headline + Cash Required card headline** — Holding total recomputes with the new day count; Cash Required reflects the new holding line.
+- **Target Profit (Quick Analysis) → Deal Stat Strip + Cash Required card headline (via Max Offer cascade)** — Max Offer = ARV − costs − Target Profit; changing Target Profit changes Max Offer changes Cash Required.
+- **Condition (Quick Status) → Rehab card headline (via the condition multiplier)** — when the analyst changes Condition, the auto rehab calculation updates UNLESS Rehab Override is set in Quick Analysis. The Rehab card's collapsed headline reflects the new value.
+- **Manual rate/LTV/Points (Financing card modal) → Financing card headline + Cash Required card headline** — financing changes flow through the loan amount and origination cost cascades.
+
+**Verification approach:** open the Workstation, type a value into one Quick Analysis input, and watch which cards in the right column update. Every card whose headline depends on that value must reflect it synchronously. If any card stays stale, it's reading from server data instead of live state — fix by routing it through the parent's `liveDeal` memo.
+
+**This is the proactive fix for the legacy "Deal Math card doesn't reflect Quick Analysis" bug Dan surfaced during Step 3D testing.** The legacy Workstation had this bug because its Deal Math card read from `d.dealMath` (server) instead of `liveDeal` (computed). The new Workstation's design avoids this by structuring every card to receive its headline from the parent's hoisted live state.
 
 **Keyboard navigation polish:**
 - Tab order: header → tile row → deal stat strip → hero → right column cards
@@ -617,17 +644,17 @@ The legacy Workstation file deletion that originally lived in 3F is now part of 
 
 🟢 **5.1 — DECIDED: Drop side-by-side rollout.** Per Dan's call, supersedes master plan Decision 6.6. The legacy Workstation file at `app/(workspace)/deals/watchlist/[analysisId]/analysis-workstation.tsx` is deleted in 3E.1. The 3B re-export wrapper at `/deals/watchlist/[analysisId]/page.tsx` is preserved throughout 3E (both URLs serve the new Workstation via the wrapper) and only converts to a hard redirect in 3F. The screening modal at `/screening` remains the daily-work fallback for property review during 3E since it's independent of the Workstation. Reasoning: only one user, project in active development, complexity reduction (~1-2 fewer commits, smaller 3F, cleaner mental model) outweighs the loss of Workstation fallback during the multi-day 3E execution.
 
-🟡 **5.2 — Filename for the new Workstation client.** Recommendation: (a) `analysis-workstation.tsx` (same name as the legacy file, different directory). With the legacy file deleted in 3E.1, there's no naming collision concern.
+🟢 **5.2 — DECIDED: (a) `analysis-workstation.tsx`.** Same name as the legacy file. With the legacy file deleted in 3E.1, there's no naming collision concern. Signals "this IS the canonical Workstation" — the new one inherits the canonical name.
 
-🟡 **5.3 — Per-card modal order in 3E.7.** Recommendation: (a) read-only first (ARV → Cash Required → Price Trend), then editing modals (Rehab → Holding/Trans → Financing → Pipeline → Notes → Partner Sharing).
+🟢 **5.3 — DECIDED: (a) read-only modals first.** Order in 3E.7: ARV → Cash Required → Price Trend → Rehab → Holding/Trans → Financing → Pipeline → Notes → Partner Sharing. Establishes the DetailModal usage pattern across 3 read-only cards before any editing UI is wired.
 
-🟡 **5.4 — Realtime in 3E.7's Partner Sharing card.** Recommendation: (b) ship a STUB in 3E.7, defer the full Partner Sharing card to Step 4.
+🟢 **5.4 — DECIDED: (b) ship a STUB in 3E.7, defer the full Partner Sharing card to Step 4.** The full feature requires new tables (`analysis_shares`, `partner_analysis_versions`, `partner_feedback`), new server actions, an email integration via Resend, and Realtime subscriptions — all of which are Step 4 scope. 3E.7's Partner Sharing card is a placeholder so the layout reserves the slot, but the implementation is deferred. The header Share button is also a placeholder for the same reason.
 
-🟡 **5.5 — Notes card visibility model migration timing.** Recommendation: (a) ship the DEFAULT change in 3E.7's Notes card commit.
+🟢 **5.5 — DECIDED: (a) ship the DEFAULT change with the 3E.7 Notes card commit.** A small `ALTER COLUMN visibility SET DEFAULT 'internal'` migration lands alongside the new Notes card modal that writes the `visibility` field directly. Removes a piece of "transition period" cruft as soon as the new Notes UI exists.
 
-🟡 **5.6 — Override indicator visual treatment.** Pre-locked at master plan level (Decision 6.1: A + B combined). Surfacing for visibility only — no decision needed.
+🟢 **5.6 — Pre-locked at master plan level** (Decision 6.1: A + B combined). Manually-overridden values render in `indigo-700` + `ᴹ` superscript; cascading values render in `indigo-500`.
 
-🟡 **5.7 — Test verification cadence.** Recommendation: (a) per-sub-task manual smoke test. **More important than ever** since there's no Workstation fallback if a sub-task ships broken.
+🟢 **5.7 — DECIDED: (a) per-sub-task manual smoke test.** 3E is high-risk and 8 sub-tasks deep. **Especially important now** that side-by-side has been dropped — there's no Workstation fallback if a sub-task ships broken, so catching regressions immediately is the only defense. The screening modal at `/screening` remains available for property review during the smoke-test gap between sub-tasks.
 
 **Pre-locked at master plan / spec level (no decision needed in 3E):**
 - 🟢 **Decision 1** — `Share` is a header action button AND a right-column card
@@ -642,7 +669,7 @@ The legacy Workstation file deletion that originally lived in 3F is now part of 
 - 🟢 **Decision 8** — Three-tier notes visibility model
 - 🟢 **Decision 9** — Use Supabase Realtime in Phase 1 (deferred to Step 4 per Decision 5.4 above)
 
-Lock the remaining open decisions (5.2-5.5, 5.7) by reviewing this draft and saying "5.2: a, 5.3: a, 5.4: b, 5.5: a, 5.7: a" or by overriding any of my recommendations.
+All decisions locked 2026-04-11. Ready to execute.
 
 ---
 
