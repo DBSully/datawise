@@ -1,3 +1,127 @@
+## 2026-04-11 — Phase 1 Step 3D — Auto-Persist Infrastructure
+
+Fourth sub-step of the Step 3 milestone. Build the "no Save buttons, every edit persists immediately" pattern that the new Workstation in 3E depends on (Decision 2 in `WORKSTATION_CARD_SPEC.md`). Three deliverables: a TypeScript discriminated-union server action, a custom React hook with a race-safe state machine, and a small visual indicator.
+
+**Pure additive infrastructure — no existing analyst workflow touches it.** Zero database migrations. Zero changes to the current Workstation, the screening modal, or any existing UI. The new code sits alongside the existing `saveManualAnalysisAction` (the bulk form action) and will be consumed by the new Quick Analysis tile + Quick Status tile + Financing card in 3E.3 onward.
+
+### Goals accomplished
+
+1. **Discriminated union types module (Task 1, file: `lib/auto-persist/field-types.ts`)** — A TypeScript discriminated union covering every field the new Workstation will persist via auto-save. Each variant pairs a field name with the exact value type that field accepts, so passing the wrong shape for a given field is a compile-time error. Tight 11-field allow-list per Decision 5.3: 4 Quick Analysis numeric overrides + 3 Quick Status manual fields + 3 Financing percentage overrides + 1 Interest Level (the only field on `analysis_pipeline`). The union is split into named sub-types (`QuickAnalysisFieldUpdate`, `QuickStatusManualFieldUpdate`, `FinancingFieldUpdate`, `PipelineFieldUpdate`) so each tile's owned fields are easy to grep for.
+
+2. **Generic per-field server action (Task 1, file: `lib/auto-persist/save-manual-analysis-field-action.ts`)** — A single `saveManualAnalysisFieldAction({ analysisId, field, value })` that takes the discriminated union input and writes one column on one row. Per Decision 5.2, the caller never thinks about which table — internal routing via a `FIELD_TABLE` map dispatches to either `manual_analysis` or `analysis_pipeline`. The map is typed as `Record<AnalysisFieldName, ...>` which **forces exhaustive coverage of the union at compile time** — adding a field to the union without adding it to the map (or vice versa) is a typecheck error. The action does auth check → defensive allow-list check → ownership check → upsert → revalidatePath. Errors are thrown (not returned) so the hook can catch them in try/catch and transition to the "error" state.
+
+3. **`useDebouncedSave` hook (Task 2, file: `lib/auto-persist/use-debounced-save.ts`)** — The single auto-persist primitive every input in 3E will build on top of. Watches a value, debounces save calls (default 500ms), returns a state machine `idle | saving | saved | error`. The hook does NOT manage the value itself — the input is the source of truth via normal `useState`. The hook only watches the value and triggers debounced saves. Five correctness invariants explicitly addressed in the implementation (these are the easy-to-miss bugs that would otherwise surface as confusing UX in 3E):
+
+   - **First-render skip** via `isFirstRender` ref — initial value comes from loaded data, not a user edit; firing a save on mount would be redundant.
+   - **Request counter** via `requestIdRef` — every save captures `myRequestId = ++ref` and only updates state if `ref.current === myRequestId` on resolve. Stale resolves from superseded saves become no-ops, even if they land out of order.
+   - **Debounce cancellation** at the start of every effect body — newer keystroke supersedes the older debounce timer. Coalesces fast typing into a single save.
+   - **Fade timer cancellation** at the start of every effect body — if the user types again during the "saved" green fade, the fade is cancelled and the new edit cycle takes over.
+   - **Unmount cleanup** via a second `useEffect` with empty deps — bumps the request counter to a `UNMOUNTED_REQUEST_ID` sentinel (-1) so any in-flight save's resolve callback compares unequal to the live counter and gets ignored. Also clears both timers.
+
+4. **`SaveStatusDot` indicator (Task 3, file: `components/workstation/save-status-dot.tsx`)** — A small (8px) inline status circle that visualizes the current save state. Color mapping per spec §3.2: slate (idle) → amber (saving) → emerald (saved, fades after 1s) → slate (idle); red (error) with hover tooltip showing the actual server error message. Pure presentational with no state of its own. Accessible via `role="status"` + `aria-label` + `title` tooltip.
+
+5. **Test harness page (Task 4, files: `app/(workspace)/dev/auto-persist-test/page.tsx` + `auto-persist-test-client.tsx`)** — A dev-only page that wires all three primitives to a real database row so we could verify the state machine visually before 3E lands. Server component picks the user's most recently updated analysis automatically; client component renders 3 test inputs covering both target tables and both value types (Target Profit number on `manual_analysis`, Next Step string on `manual_analysis`, Interest Level string on `analysis_pipeline`). **DELETE THIS PAGE in Step 3F as part of cleanup** — the `dev/` subdirectory marker makes it easy to find at deletion time.
+
+### Smoke test results — all 11 transitions verified
+
+Per §9 of the implementation plan, every state transition was verified manually in the test harness:
+
+| # | Transition | Result |
+|---|---|---|
+| 1 | Initial mount → no save fires (first-render skip) | ✓ |
+| 2 | Type a value → 500ms debounce → amber → emerald → slate fade | ✓ |
+| 3 | Save success → fade emerald → idle exactly 1s later | ✓ |
+| 4 | Fast typing → only one save fires (debounce coalesces) | ✓ |
+| 5 | Mid-fade edit → fade cancels, new edit cycle takes over | ✓ |
+| 6 | Empty input → persists value: null (column becomes NULL) | ✓ |
+| 7 | String dropdown change → same cycle for discrete values | ✓ |
+| 8 | Cross-table routing → interest_level lands on analysis_pipeline | ✓ |
+| 9 | Network error → red dot + tooltip with error message | ✓ |
+| 10 | Unmount during save → no React setState warnings | ✓ |
+| 11 | Reload persistence → new values loaded from database | ✓ |
+
+The hook's race-safety invariants all hold under real browser conditions.
+
+### Notable design decisions
+
+- **The discriminated union + `Record<AnalysisFieldName, ...>` compile-time check.** This is the strongest typecheck-time guarantee available without runtime tests. The union forces every variant to declare a value type; the `FIELD_TABLE` map forces every variant in the union to have a routing entry. Adding a new field requires editing both files, and the compiler catches drift in either direction. No need for unit tests on the type-level invariants — TypeScript proves them.
+
+- **Throw vs return for action errors.** The action `throw`s on failure (auth, allow-list, ownership, upsert) instead of returning an error union. This works cleanly with the hook's `try/catch` pattern: `catch (err) { setStatus("error"); setErrorMessage(err.message); }`. Returning a union would force every consumer to check `result.ok` and the hook wouldn't be able to use try/catch. Server actions in Next.js support both patterns; throw was simpler for this use case.
+
+- **Internal field→table routing instead of an explicit `table` parameter** (Decision 5.2). The caller passes `{ field: "interest_level", value: "Hot" }` and the action knows to write to `analysis_pipeline.interest_level`. The discriminated union ensures type safety on the value type. The internal routing keeps the API minimal and matches the spec's mental model: "set this field on this analysis, the system handles the storage detail". 3E call sites become: `saveManualAnalysisFieldAction({ analysisId, field: "arv_manual", value: 1125000 })`. No table parameter to remember.
+
+- **Tight 11-field allow-list** (Decision 5.3). Adding a field is one entry to the discriminated union + one entry to the `FIELD_TABLE` map — both are required by the compiler. Forces a deliberate decision each time. Catches typos at compile time via the union (a typo in the field name doesn't typecheck). The cost of adding a new field in 3E if we discover one we missed is negligible.
+
+- **The hook does NOT manage the value itself.** The input is the source of truth via normal `useState` in the parent. The hook just watches the value and triggers debounced saves. This means every consumer in 3E uses a familiar React pattern — controlled input with `useState`, plus one extra hook call. No custom state management semantics.
+
+- **Save callback captured in a ref** so the effect doesn't re-fire when the parent passes a new function reference each render. The dependency list is just `value` plus the timing options. Critical for stability — without this, every parent re-render would create a new save callback object, which would change the effect's deps, which would trigger a new effect run, which could fire spurious saves.
+
+- **Test harness page lives in `app/(workspace)/dev/`** instead of `app/dev/` or another location. Two reasons: (1) it inherits the workspace layout's auth check so unsigned users can't accidentally access it, and (2) the `dev/` subdirectory inside the workspace is a clear "delete in 3F" marker — when 3F runs, anyone (or future-Claude) can grep for `app/(workspace)/dev/` and remove the entire directory in one operation.
+
+### Files touched in 3D
+
+**New (5):**
+- `lib/auto-persist/field-types.ts` — discriminated union + sub-types + `AnalysisFieldName` + `SaveAnalysisFieldInput`
+- `lib/auto-persist/save-manual-analysis-field-action.ts` — generic server action with internal field→table routing
+- `lib/auto-persist/use-debounced-save.ts` — custom React hook with the 5-invariant state machine
+- `components/workstation/save-status-dot.tsx` — visual indicator
+- `app/(workspace)/dev/auto-persist-test/page.tsx` — test harness server component (deleted in 3F)
+- `app/(workspace)/dev/auto-persist-test/auto-persist-test-client.tsx` — test harness client component (deleted in 3F)
+
+**Modified (1):**
+- `CHANGELOG.md` — this entry
+
+**Reference docs:**
+- `PHASE1_STEP3D_IMPLEMENTATION.md` — implementation plan (drafted before execution, all 5 decisions locked in the planning commit)
+
+**Not modified — by design:**
+- Any existing server action — `saveManualAnalysisAction` (the bulk form action) stays untouched and continues to power the current Workstation's Overrides form, the RehabCard's Save button, and the screening modal's Quick Analysis tile through 3E. Retired in 3F.
+- Any existing UI component — no consumer until 3E
+- Any database migration — `manual_analysis.next_step` was already added in 3A; everything else uses existing columns
+- Any route file or `page.tsx` other than the dev test harness
+- Navigation, the home page, the screening modal, or the current Workstation
+- The `/home` performance fix (untouched)
+- `lib/analysis/load-workstation-data.ts` (read-side; 3D is write-side)
+
+### What's deferred to later sub-steps
+
+| Out of scope | Belongs to |
+|---|---|
+| Wiring auto-persist into the new Quick Analysis tile (4 numeric inputs) | 3E.3 |
+| Wiring auto-persist into the new Quick Status tile (4 dropdowns) | 3E.3 |
+| Wiring auto-persist into the Financing card modal (3 percentage inputs) | 3E.7 |
+| Building override indicators on the Deal Stat Strip (manual ᴹ superscript) | 3E.4 |
+| Migrating existing form-based saves in the current Workstation | Never — current Workstation gets retired in 3F |
+| Removing the existing `saveManualAnalysisAction` bulk form action | 3F (when the current Workstation is deleted) |
+| Deleting the test harness page | 3F |
+| Realtime sync between two browser tabs editing the same field | Out of scope for Phase 1 |
+| Optimistic concurrency / version stamps | Out of scope; LWW is acceptable for single-user workloads |
+
+### What 3E builds on top
+
+3E.3 (the new top tile row, specifically the Quick Analysis and Quick Status tiles) is the first 3E sub-task that consumes 3D. Each of the 4 numeric fields in the Quick Analysis tile becomes:
+
+```typescript
+const [arvInput, setArvInput] = useState<string>(initialFromData);
+const arvNumber = parseDollarInput(arvInput);
+const { status, errorMessage } = useDebouncedSave(arvNumber, async (v) =>
+  saveManualAnalysisFieldAction({ analysisId, field: "arv_manual", value: v }),
+);
+
+return (
+  <div className="flex items-center gap-1">
+    <input value={arvInput} onChange={(e) => setArvInput(e.target.value)} />
+    <SaveStatusDot status={status} errorMessage={errorMessage} />
+  </div>
+);
+```
+
+Same shape for Rehab Override / Target Profit / Days Held / and the 4 Quick Status dropdowns. 3E.7 (per-card modals) uses the same pattern for the Financing card's Rate% / LTV% / Points% fields.
+
+The infrastructure is now stable, race-safe, and verified. 3E is unblocked.
+
+---
+
 ## 2026-04-11 — Phase 1 Step 3C — Component Extraction
 
 Third sub-step of the Step 3 milestone. Extract the components the new Workstation in 3E will reuse, without changing any existing user-visible behavior. After 3C, both `ScreeningCompModal` and the current `AnalysisWorkstation` continue to work exactly as before, but they now share underlying components from a new `components/workstation/` directory that 3E will plug into.
