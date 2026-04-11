@@ -106,6 +106,12 @@ type SubjectTileRowProps = {
   mlsInfo: SubjectTileRowMlsInfo;
   physical: SubjectTileRowPhysical;
   quickAnalysis: SubjectTileRowQuickAnalysis;
+  /** When false, the Quick Analysis tile is omitted from the row.
+   *  Used by the new Workstation in 3E.3.b which renders its own
+   *  auto-persisting <QuickAnalysisTile> separately. The screening
+   *  modal omits this prop (defaulting to true) so its built-in
+   *  local-only Quick Analysis tile keeps rendering unchanged. */
+  showQuickAnalysis?: boolean;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -116,6 +122,7 @@ export function SubjectTileRow({
   mlsInfo,
   physical,
   quickAnalysis,
+  showQuickAnalysis = true,
 }: SubjectTileRowProps) {
   const handleTargetProfitKeyDown = quickAnalysis.onTargetProfitTab
     ? (e: KeyboardEvent<HTMLInputElement>) => {
@@ -231,7 +238,10 @@ export function SubjectTileRow({
         )}
       </div>
 
-      {/* Quick Analysis tile */}
+      {/* Quick Analysis tile (conditionally rendered — omitted by the
+       *  new Workstation which renders its own auto-persisting
+       *  <QuickAnalysisTile> separately per 3E.3.b). */}
+      {showQuickAnalysis && (
       <div
         className="shrink-0 rounded border border-blue-200 bg-blue-50/50 px-3 py-2"
         style={{ maxWidth: 360 }}
@@ -279,6 +289,7 @@ export function SubjectTileRow({
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }
