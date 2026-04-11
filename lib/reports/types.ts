@@ -332,8 +332,33 @@ export type WorkstationData = {
     rehabFromLoan: number;
     rehabOutOfPocket: number;
     acquisitionTitle: number;
+    /**
+     * NEW (Phase 1 Step 3A — Decision 5 cascade): signed acquisition
+     * commission. Positive = OOP at closing; negative = credit at
+     * closing (reduces cash required). Default 0 in DENVER_FLIP_V1.
+     */
+    acquisitionCommission: number;
+    /**
+     * NEW (Phase 1 Step 3A — Decision 5 cascade): flat acquisition fee
+     * in dollars. Always positive. Default 0 in DENVER_FLIP_V1.
+     */
+    acquisitionFee: number;
     holdingTotal: number;
     interestCost: number;
+    /**
+     * NEW (Phase 1 Step 3A — WORKSTATION_CARD_SPEC.md §5.5 derived):
+     * sum of acquisition-side line items
+     * (down payment + acq title + acq commission + acq fee + origination).
+     * Cash impact at closing.
+     */
+    acquisitionSubtotal: number;
+    /**
+     * NEW (Phase 1 Step 3A — WORKSTATION_CARD_SPEC.md §5.5 derived):
+     * sum of project-carry line items
+     * (rehab OOP + holding total + interest cost).
+     * Cash needed during the hold period.
+     */
+    carrySubtotal: number;
     totalCashRequired: number;
   } | null;
 };

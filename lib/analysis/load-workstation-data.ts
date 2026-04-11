@@ -597,16 +597,32 @@ export async function loadWorkstationData(
     const rehabFromLoan = Math.min(effectiveRehab, loanAvailableForRehab);
     const rehabOutOfPocket = Math.max(0, effectiveRehab - loanAvailableForRehab);
     const acquisitionTitle = transResult?.acquisitionTitle ?? 0;
+    // NEW (Phase 1 Step 3A — Decision 5 cascade):
+    // Acquisition Commission is signed (negative = credit at closing).
+    // Acquisition Fee is always positive (flat dollars).
+    // Both default to 0 in DENVER_FLIP_V1, so existing totalCashRequired
+    // values are preserved unchanged for analyses using the default profile.
+    const acquisitionCommission = transResult?.acquisitionCommission ?? 0;
+    const acquisitionFee = transResult?.acquisitionFee ?? 0;
     const holdingTotal = holdResult?.total ?? 0;
     const interestCost = finResult.interestCost;
 
-    const totalCashRequired =
+    // Acquisition section: paid at closing, cash impact at purchase
+    // (per WORKSTATION_CARD_SPEC.md §5.5)
+    const acquisitionSubtotal =
       downPayment +
       acquisitionTitle +
-      originationCost +
+      acquisitionCommission +  // signed — negative reduces total
+      acquisitionFee +
+      originationCost;
+
+    // Project carry section: paid through the hold period
+    const carrySubtotal =
       rehabOutOfPocket +
       holdingTotal +
       interestCost;
+
+    const totalCashRequired = acquisitionSubtotal + carrySubtotal;
 
     cashRequired = {
       purchasePrice,
@@ -619,8 +635,12 @@ export async function loadWorkstationData(
       rehabFromLoan,
       rehabOutOfPocket,
       acquisitionTitle,
+      acquisitionCommission,
+      acquisitionFee,
       holdingTotal,
       interestCost,
+      acquisitionSubtotal,
+      carrySubtotal,
       totalCashRequired,
     };
   }
