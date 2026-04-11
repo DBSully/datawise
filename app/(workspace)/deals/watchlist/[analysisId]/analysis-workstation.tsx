@@ -8,7 +8,10 @@ import type { MapPin, MapPinTooltipData } from "@/components/properties/comp-map
 import { ScreeningCompModal } from "@/components/screening/screening-comp-modal";
 import { ArvBreakdownTooltip } from "@/components/screening/arv-breakdown-tooltip";
 import { CostLine } from "@/components/workstation/cost-line";
-import { TrendDirectionBadge } from "@/components/workstation/trend-badges";
+import {
+  TrendDirectionBadge,
+  TrendTierColumn,
+} from "@/components/workstation/trend-badges";
 
 const CompMap = dynamic(
   () => import("@/components/properties/comp-map").then((m) => m.CompMap),
@@ -39,7 +42,6 @@ import type {
   TransactionDetail,
   FinancingDetail,
   ArvPerCompDetail,
-  TrendTierStats,
   TrendData,
   WorkstationData,
 } from "@/lib/reports/types";
@@ -47,11 +49,6 @@ import type {
 // ---------------------------------------------------------------------------
 // Tiny sub-components
 // ---------------------------------------------------------------------------
-
-function fmtRate(rate: number | null): string {
-  if (rate == null) return "\u2014";
-  return `${rate >= 0 ? "+" : ""}${(rate * 100).toFixed(1)}%`;
-}
 
 /** Format an ISO date string ("YYYY-MM-DD" or full timestamp) as mm/dd/yy without TZ shifts. */
 function fmtIsoDate(v: string | null | undefined): string {
@@ -67,58 +64,6 @@ function DealStat({ label, value, highlight }: { label: string; value: string; h
     <div className="flex flex-col leading-tight">
       <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-500">{label}</span>
       <span className={`font-mono text-[13px] ${highlight ? "font-bold text-slate-900" : "text-slate-700"}`}>{value}</span>
-    </div>
-  );
-}
-
-function TrendTierColumn({ label, radius, rate, stats }: {
-  label: string;
-  radius: number;
-  rate: number | null;
-  stats: TrendTierStats | null;
-}) {
-  const cc = stats?.compCount ?? 0;
-  return (
-    <div className="space-y-1 text-[10px]">
-      <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400">
-        {label} <span className="font-normal">({cc} comps &le;{radius} mi)</span>
-      </div>
-      <div className="flex justify-between">
-        <span className="text-slate-400">Rate</span>
-        <span className={`font-mono ${rate != null && rate < 0 ? "text-red-600" : "text-slate-600"}`}>{fmtRate(rate)}/yr</span>
-      </div>
-      {/* Segments */}
-      {stats?.lowEnd && stats.lowEnd.compCount > 0 && (
-        <div className="flex justify-between">
-          <span className="text-slate-400">Low 25th ({stats.lowEnd.compCount})</span>
-          <span className="font-mono text-slate-600">{fmtRate(stats.lowEnd.rate)}</span>
-        </div>
-      )}
-      {stats?.highEnd && stats.highEnd.compCount > 0 && (
-        <div className="flex justify-between">
-          <span className="text-slate-400">High 75th ({stats.highEnd.compCount})</span>
-          <span className="font-mono text-slate-600">{fmtRate(stats.highEnd.rate)}</span>
-        </div>
-      )}
-      {/* Ranges */}
-      {stats && stats.salePriceLow != null && stats.salePriceHigh != null && (
-        <div className="flex justify-between">
-          <span className="text-slate-400">Price</span>
-          <span className="font-mono text-slate-500">{fmt(stats.salePriceLow)}&ndash;{fmt(stats.salePriceHigh)}</span>
-        </div>
-      )}
-      {stats && stats.psfBuildingLow != null && stats.psfBuildingHigh != null && (
-        <div className="flex justify-between">
-          <span className="text-slate-400">PSF Bldg</span>
-          <span className="font-mono text-slate-500">${fmtNum(stats.psfBuildingLow, 0)}&ndash;${fmtNum(stats.psfBuildingHigh, 0)}</span>
-        </div>
-      )}
-      {stats && stats.psfAboveGradeLow != null && stats.psfAboveGradeHigh != null && (
-        <div className="flex justify-between">
-          <span className="text-slate-400">PSF AG</span>
-          <span className="font-mono text-slate-500">${fmtNum(stats.psfAboveGradeLow, 0)}&ndash;${fmtNum(stats.psfAboveGradeHigh, 0)}</span>
-        </div>
-      )}
     </div>
   );
 }
