@@ -1,3 +1,99 @@
+## 2026-04-10 — Phase 1 Step 2 — RLS Scaffolding
+
+Second milestone of the Phase 5 restructure. Converts all 22 core tables from the temporary "dev authenticated full access" RLS policies to proper organization-scoped policies built on top of the Step 1 auth/profiles foundation. **Zero application code changes.**
+
+### Goals accomplished
+
+1. **Helper function** `public.current_user_organization_id()` — returns the authenticated user's org id from their profile row. `STABLE` + `SECURITY DEFINER` + `SET search_path = public` for performance and hardening. Used by every RLS policy and by every `organization_id` column DEFAULT.
+2. **`organization_id` column on all 22 core tables** — added nullable, backfilled to DataWiseRE, then constrained to `NOT NULL` + `FK to organizations ON DELETE RESTRICT` + `DEFAULT public.current_user_organization_id()` + dedicated btree index.
+3. **88 new org-scoped RLS policies** — four per table (SELECT / INSERT / UPDATE / DELETE), each filtering by `organization_id = current_user_organization_id()`. All 22 "dev authenticated full access" policies dropped (including the 3 legacy valuation-named policies still attached to the renamed comparable tables).
+4. **All 13 views recreated with `security_invoker = true`** — views now respect the calling user's RLS policies instead of bypassing them via the view owner's privileges. Metadata-only change via `ALTER VIEW ... SET`, no view definition rewrites.
+5. **Zero application code changes.** The `DEFAULT current_user_organization_id()` clause on every table means existing `INSERT` statements auto-populate `organization_id` from the calling user's profile. No screening engine, comp loader, analysis action, or server action needed to be touched.
+
+### Schema (Phase A) — five migrations
+
+**1. `20260410130000_step2_helper_and_columns.sql`** — Creates `current_user_organization_id()` and adds a nullable `organization_id uuid` column to all 22 core tables. Pure additive. Dev policies still in effect, no behavioral change.
+
+**2. `20260410130100_step2_backfill_organization_id.sql`** — Populates `organization_id` = DataWiseRE's id on every existing row across all 22 tables. Original version wrapped all 22 UPDATEs in a single `DO $$` block and **timed out** (`SQLSTATE 57014`) because Postgres treats a DO block as one statement and the cumulative wall time on ~1.27M rows exceeded `statement_timeout`. Rewritten to use individual top-level `UPDATE` statements, each getting its own statement timeout window. Post-apply verification: `null_count = 0` on all 22 tables.
+
+**3. `20260410130200_step2_constrain_organization_id.sql`** — `ALTER COLUMN ... SET NOT NULL` + `SET DEFAULT public.current_user_organization_id()` + `ADD FOREIGN KEY ... REFERENCES organizations ON DELETE RESTRICT` + `CREATE INDEX IF NOT EXISTS ..._organization_id_idx` on all 22 tables. Ran in well under the expected 1-3 minute window. Total new index footprint: ~50-100 MB.
+
+**4. `20260410130300_step2_switch_policies_to_org_scoped.sql`** — **The policy switch.** Wrapped in explicit `BEGIN` / `COMMIT` for atomicity (supabase CLI doesn't wrap migrations in transactions by default). Drops 22 dev policies + 3 legacy valuation-named drops. Creates 88 new org-scoped policies. Three expected `NOTICE` messages confirmed the legacy policy naming: the comparable tables' dev policies were named after the pre-rename `valuation_*` names, so the `comparable_*` DROP POLICY IF EXISTS calls were harmless no-ops.
+
+**5. `20260410130400_step2_views_security_invoker.sql`** — `ALTER VIEW ... SET (security_invoker = true)` on all 13 views. Metadata-only, sub-second runtime.
+
+### Notable incidents
+
+**Statement timeout on the backfill.** First version of Migration 2 wrapped all 22 UPDATEs in a `DO $$ ... $$;` block, which Postgres executed as a single statement under one `statement_timeout`. The real data scale was much larger than I'd estimated (737k rows in `comparable_search_candidates`, ~1.27M rows total), so the migration exceeded the timeout and rolled back. Fix: split into individual top-level UPDATE statements. **Lesson captured in the commit message and in the migration file comment block** so future-us doesn't repeat this pattern on bulk-update migrations.
+
+**Supabase disk exhaustion cooldown.** The backfill migration's MVCC dead-row overhead pushed the project's disk usage to 97.6% of the 8 GB Pro plan quota and triggered a 4-hour auto-scale cooldown. During the cooldown the project went into a partially read-only state and the Supabase CLI started failing with `25006 cannot execute GRANT ROLE in a read-only transaction`. Resolved by waiting out the cooldown, after which Supabase auto-scaled the disk to 12 GB. **Post-incident: spend cap removed to prevent future throttling during bulk operations**, and a comprehensive reference document (`SUPABASE_USAGE_CONSIDERATIONS.md`) was created capturing the data scale baseline, over-usage pricing math, compute tier comparison, early warning signs, and incident recovery playbook.
+
+**User-error gotcha during verification.** While walking through the §8.2 verification checklist, Dan initially reported that the "manual override" save was silently failing. Investigation revealed the test was using the current Workstation's **Quick Analysis tile** (which is a local-only what-if scratchpad in the pre-Decision-2 design) instead of the **Overrides form** (which has a Save button and actually persists to `manual_analysis`). Save via the Overrides form worked correctly under the new RLS. The Quick Analysis / Overrides ambiguity is exactly the UX trap that Decision 2 in `WORKSTATION_CARD_SPEC.md` resolves by consolidating all persistent overrides into a single auto-persist tile in the new design. Step 3 will ship that consolidation.
+
+### Notable design decisions
+
+- **The `DEFAULT current_user_organization_id()` clause is the magic** that lets Step 2 ship with zero application code changes. Every existing `INSERT` statement across the codebase continues to work unchanged — `organization_id` is auto-populated from the calling user's profile row. Without this pattern we'd have needed to touch every server action that writes to any core table.
+- **Individual top-level UPDATEs instead of a DO block** for the backfill. Each statement gets its own `statement_timeout`, avoiding the cumulative-time issue. Pattern documented in the migration file comments as a reference for future bulk operations.
+- **Explicit `BEGIN` / `COMMIT` on the policy switch.** Supabase CLI doesn't wrap migrations in transactions by default (verified via the `SET LOCAL` warnings in Migrations 2 and 3). Without an explicit transaction, a partial policy switch would have been possible if any `CREATE POLICY` had failed mid-migration. The explicit block makes the whole switch atomic.
+- **Four policies per table instead of one `FOR ALL`.** Granular SELECT/INSERT/UPDATE/DELETE policies are easier to audit and easier to relax selectively in Step 4 (partners will get SELECT on some tables but not UPDATE/DELETE). Slightly more boilerplate now; much more flexibility later.
+- **`ALTER VIEW SET (security_invoker = true)` instead of DROP + RECREATE** for the view migration. Metadata-only change that preserves view definitions and referenced oids, avoiding the need to copy view definitions that have evolved across several migrations.
+- **Rollback script saved before Migration 4 runs.** `supabase/rollback/step2_migration4_rollback.sql` is an operational artifact (gitignored via `supabase/rollback/`) that would restore the dev policies instantly if anything had broken after the policy switch. Not needed — Migration 4 applied cleanly — but was ready as a one-command recovery path.
+
+### Verification
+
+Per §8 of the implementation plan:
+
+- **22 tables have `organization_id` NOT NULL + FK + index + DEFAULT** (queries in §4.1, §4.3)
+- **88 new org-scoped policies present** (4 per table × 22 tables) and **0 dev policies remaining** (query in §4.4)
+- **13 views have `security_invoker = true`** (query in §4.5)
+- **Helper function returns DataWiseRE org id** for Dan's authenticated session (simulated-JWT test)
+- **Every read path works** — `/home`, `/screening`, `/deals/watchlist`, Workstation, comp map, `/admin/properties`, `/reports`
+- **Every write path works** — notes INSERT, pipeline upsert, manual_analysis upsert (via Overrides form), screening comp selection toggle
+- **Counts unchanged** — `real_properties`, `screening_results`, `analyses`, `mls_listings` row counts match pre-Step-2 numbers
+- **No console errors, no 401/403, no performance regression** — app feels identical to pre-Step-2
+
+### SECURITY DEFINER function audit — deferred to Step 3
+
+Per Decision 12.2 in the implementation plan, SECURITY DEFINER functions in the `public` schema were flagged for audit but the actual fix is deferred to Step 3. The audit query in §8.1 surfaces any `prosecdef = true` functions other than the whitelist (`handle_new_auth_user`, `current_user_organization_id`, `set_updated_at`). Any findings should be converted to `SECURITY INVOKER` or given explicit org filtering in their function body, during Step 3.
+
+### What's NOT done in Step 2 (deferred to later steps)
+
+| Out of scope | Belongs to |
+|---|---|
+| Route restructure (`/deals/watchlist` → `/analysis`, etc.) | Step 3 — Route Restructure |
+| Building the new Workstation card layout per `WORKSTATION_CARD_SPEC.md` | Step 3 — Route Restructure |
+| Quick Analysis / Overrides consolidation (fixes the user-error gotcha) | Step 3 — Route Restructure |
+| `analysis_shares`, `partner_analysis_versions`, `partner_feedback` tables | Step 4 — Partner Portal MVP |
+| Partner-role RLS policies (sharing scoped reads) | Step 4 — Partner Portal MVP |
+| SECURITY DEFINER function audit/fix | Step 3 — Route Restructure |
+| Removing the layout-level auth check at `app/(workspace)/layout.tsx:16` | After Step 3 proves proxy enforcement in production use |
+
+### Tag
+
+`phase1-step2-complete` — created on the commit that ships this changelog entry. Use this tag to return to this exact state if Step 3 or Step 4 work needs to be rolled back without losing the multi-tenancy / RLS foundation.
+
+### Files touched in this milestone
+
+**New (7):**
+- `supabase/migrations/20260410130000_step2_helper_and_columns.sql`
+- `supabase/migrations/20260410130100_step2_backfill_organization_id.sql`
+- `supabase/migrations/20260410130200_step2_constrain_organization_id.sql`
+- `supabase/migrations/20260410130300_step2_switch_policies_to_org_scoped.sql`
+- `supabase/migrations/20260410130400_step2_views_security_invoker.sql`
+- `PHASE1_STEP2_IMPLEMENTATION.md`
+- `SUPABASE_USAGE_CONSIDERATIONS.md`
+
+**Modified (1):**
+- `.gitignore` — added `supabase/rollback/` to exclude operational artifacts
+
+**Not modified — this is the design goal of Step 2:**
+- Any application code (server actions, route handlers, components, libs)
+- Any existing migration
+- Any UI component
+- Any business logic (screening engines, comp loaders, analysis math)
+
+---
+
 ## 2026-04-10 — Phase 1 Step 1 — Auth & Profiles Foundation
 
 First concrete milestone of the Phase 5 restructure. Establishes the multi-tenancy and user-profile foundation that all subsequent Phase 1 work (RLS scaffolding, route restructure, partner portal) will build on top of. Zero changes to existing business logic, route handling, or UI components — Step 1 is purely additive.
