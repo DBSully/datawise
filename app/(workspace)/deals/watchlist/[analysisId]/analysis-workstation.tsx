@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import type { MapPin, MapPinTooltipData } from "@/components/properties/comp-map";
 import { ScreeningCompModal } from "@/components/screening/screening-comp-modal";
 import { ArvBreakdownTooltip } from "@/components/screening/arv-breakdown-tooltip";
+import { CostLine } from "@/components/workstation/cost-line";
 
 const CompMap = dynamic(
   () => import("@/components/properties/comp-map").then((m) => m.CompMap),
@@ -136,18 +137,6 @@ function TrendTierColumn({ label, radius, rate, stats }: {
           <span className="font-mono text-slate-500">${fmtNum(stats.psfAboveGradeLow, 0)}&ndash;${fmtNum(stats.psfAboveGradeHigh, 0)}</span>
         </div>
       )}
-    </div>
-  );
-}
-
-function CostLine({ label, value, sub, negative }: { label: string; value: string; sub?: string; negative?: boolean }) {
-  return (
-    <div className="flex items-baseline justify-between gap-2 py-[1px]">
-      <span className="text-slate-500 truncate">{label}</span>
-      <div className="text-right shrink-0">
-        <span className={`font-mono ${negative ? "text-red-600" : "text-slate-700"}`}>{value}</span>
-        {sub && <span className="ml-1 text-[10px] text-slate-400">{sub}</span>}
-      </div>
     </div>
   );
 }
