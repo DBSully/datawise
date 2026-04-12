@@ -764,10 +764,8 @@ export async function addAnalysisNoteAction(formData: FormData) {
   const noteType = textValue(formData, "note_type") || "general";
   const noteBody = textValue(formData, "note_body");
   // 3E.7.h: the new NotesCardModal passes `visibility` directly.
-  // Compute is_public from it for backwards compat (is_public is
-  // deprecated per 3A and gets dropped in 3F).
+  // The is_public column was dropped in 3F — only visibility remains.
   const visibility = textValue(formData, "visibility") || "internal";
-  const isPublic = visibility === "all_partners";
 
   if (!analysisId || !noteBody) return;
 
@@ -775,7 +773,6 @@ export async function addAnalysisNoteAction(formData: FormData) {
     analysis_id: analysisId,
     note_type: noteType,
     note_body: noteBody,
-    is_public: isPublic,
     visibility,
   });
 

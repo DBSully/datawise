@@ -1,3 +1,48 @@
+## 2026-04-12 — Phase 1 Step 4 — Partner Portal MVP
+
+Phase 1's #1 priority feature. The complete analyst-shares-with-partner → partner-views-and-adjusts → analyst-sees-feedback-in-real-time loop.
+
+### The loop that shipped
+
+1. **Analyst shares** an analysis from the Workstation (Partner Sharing card or header Share button)
+2. **Partner opens the link** without login — sees the full analysis: property physical, comp map + table, deal stats, ARV/Rehab/Price Trend cards
+3. **Partner submits feedback** (Interested / Schedule Showing / Request Discussion / Pass) — requires sign-in
+4. **Analyst sees it LIVE** via Supabase Realtime — the Partner Sharing card's headline + expanded modal update instantly
+5. **Partner visits `/portal`** — their Workspace dashboard shows all shared deals organized by status lanes (New / Watching / Interested / Passed / All)
+
+### What shipped (6 sub-steps)
+
+| Sub-step | What |
+|---|---|
+| **4A** | 3 new tables (`analysis_shares`, `partner_analysis_versions`, `partner_feedback`) + 16 RLS policies + Realtime publication |
+| **4B** | Share server actions (`createAnalysisShareAction`, `revokeAnalysisShareAction`, `markFeedbackReadAction`) + email placeholder (Resend deferred) |
+| **4C** | Partner Sharing card full implementation — add-share form, active shares list with feedback badges, Copy Link button, header Share button, revoke with confirm |
+| **4D** | Partner-facing route at `/portal/deals/[shareToken]` — service-role data loader for view-without-login, property physical tile, deal stat strip, full comp workspace (server-loaded to bypass RLS), 3 read-only detail cards, action buttons with feedback persistence |
+| **4E** | Realtime subscriptions — `useShareRealtime` hook subscribes to `analysis_shares` + `partner_feedback` changes, auto-refreshes the Partner Sharing card headline + modal |
+| **4F** | Auto-link trigger (extends `handle_new_auth_user` to set `shared_with_user_id` on matching shares) + Partner Workspace dashboard at `/portal/` with status lane tabs + per-deal summary cards |
+
+### Key architecture decisions
+
+- **Service-role client for partner view** (`lib/supabase/service.ts`). Partners view WITHOUT login (Decision 4.3), so the authenticated client can't load data. The share_token is the authorization boundary — same security model as Google Docs share links. The service-role key never appears in client code.
+- **Server-loaded comp data for partner view.** The initial attempt loaded comp data client-side via `loadCompDataByRunAction`, but the RLS blocked unauthenticated access. Fixed by loading comp data in `loadPartnerViewData` (server-side, service-role) and passing it as a prop.
+- **Real `portal/` directory, not `(portal)` route group.** Route groups don't create URL segments — `app/(portal)/deals/[token]` served at `/deals/[token]`, not `/portal/deals/[token]`. Fixed by using a real directory.
+- **Auto-link via trigger, not application code.** The `handle_new_auth_user` trigger auto-links pending shares by email on registration. This works regardless of which UI path the user signs up through.
+
+### Bug fix included
+
+- **`addAnalysisNoteAction` still referenced dropped `is_public` column.** The 3F migration dropped the column but the insert statement in `deals/actions.ts` still included it. Fixed by removing the `is_public` field from the insert — only `visibility` is written now.
+
+### Deferred items
+
+- Email delivery via Resend (`RESEND_PLACEHOLDER` in `lib/partner-portal/share-actions.ts`)
+- Partner Quick Analysis sandbox (private overrides → `partner_analysis_versions`)
+- Partner comp picking (private selection set → `partner_analysis_versions.selected_comp_ids`)
+- Visibility-filtered notes in the partner view
+- Partner profile page at `/portal/profile`
+- Second-degree sharing (`share_forwards` table — Phase 2)
+
+---
+
 ## 2026-04-11 — Phase 1 Step 3F — Cleanup (Step 3 Complete)
 
 Final sub-step of Step 3. Mechanical cleanup: convert legacy URL wrappers to hard redirects, drop the deprecated `analysis_notes.is_public` column, remove the `dispositionCommissions` backwards-compat shim, delete dead files, and retire the layout-level auth check.
