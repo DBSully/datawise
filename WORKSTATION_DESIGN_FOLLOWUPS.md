@@ -663,6 +663,82 @@ Could be a ~half-day feature addition. High operational value for analysts manag
 
 ---
 
+## 17. Listing agent relationship tracking — interaction history across deals
+
+**Surfaced:** 2026-04-12
+**Status:** Open — feature branch / future phase, not a design tweak
+**Severity:** Feature — significant new capability with its own data model
+**Scope:** New `agents` + `agent_interactions` tables, Workstation integration, cross-deal queries
+
+### Dan's insight
+
+Real estate is a relationship business. The listing agent on a property isn't just a name in the MLS data — they're someone the analyst may have a history with. Have we shown one of their listings before? Have we made an offer on a property they listed last year? Did they counter? Were they responsive? Knowing the relationship context before picking up the phone changes how the analyst approaches the deal.
+
+Dan tracked these interactions in detail in a previous system. This is a known high-value workflow that was lost in the transition to the web platform.
+
+### What the analyst needs
+
+When viewing a property in the Workstation, the analyst should see:
+
+```
+┌──────────────────────────────────────────────────┐
+│ 📞 Listing Agent: Sarah Chen, RE/MAX Alliance    │
+│                                                  │
+│ Our history with this agent:                     │
+│  • 3 properties shown (2 in 2025, 1 in 2026)    │
+│  • 1 offer submitted (742 Pearl St, Jan 2026)    │
+│    → Countered, ultimately passed                │
+│  • Agent responsiveness: Fast (avg <2hr reply)   │
+│                                                  │
+│ Other active listings by this agent: 4           │
+│  1220 Grant St ($725K) · 890 Vine St ($680K)...  │
+└──────────────────────────────────────────────────┘
+```
+
+### Data model (sketch)
+
+This is a real schema addition, not just a UI change:
+
+**`agents` table** — canonical agent records (deduplicated from MLS data):
+- `id`, `name`, `brokerage`, `email`, `phone`, `mls_agent_id`
+- Multiple MLS listings may reference the same agent; deduplication logic needed
+
+**`agent_interactions` table** — analyst's interaction log per agent per deal:
+- `id`, `agent_id`, `analysis_id`, `interaction_type` (showing_scheduled, showing_completed, offer_submitted, offer_countered, offer_accepted, offer_rejected, phone_call, email_sent, etc.)
+- `interaction_date`, `notes`, `outcome`
+- Builds over time as the analyst works deals
+
+**Derived queries:**
+- "All interactions with this agent across all deals" — agent relationship summary
+- "Other active listings by this agent" — cross-reference mls_listings by agent
+- "Agent responsiveness" — derived from interaction timestamps (time between showing_scheduled and agent response)
+
+### Where it appears
+
+- **Workstation:** a new card or section showing the listing agent + relationship summary. Could be part of the MLS Info tile or a standalone "Agent" card.
+- **Screening queue:** a column or badge indicating "known agent" (we've interacted with them before) vs "new agent"
+- **Pipeline / Action:** agent contact info + interaction log for active deals
+
+### Relationship to existing data
+
+- `mls_listings` already has agent fields (`listing_agent_name`, `listing_agent_id`, etc. — exact column names depend on the MLS import profile)
+- The data is there for the CURRENT listing agent; what's missing is the historical interaction tracking and the cross-deal relationship view
+
+### Recommended approach
+
+This is a **feature branch** — its own mini-project, not a design polish item. Estimated scope:
+- Schema: 2 new tables + RLS + migrations (~1 day)
+- Agent deduplication logic from MLS data (~1 day)
+- Interaction logging UI (integrated into Pipeline/Action workflow) (~2 days)
+- Workstation agent card + relationship summary (~1 day)
+- Cross-deal agent query and display (~1 day)
+
+Total: ~5-7 days as a dedicated feature. Could be Phase 2 or a parallel track alongside the Partner Portal.
+
+**Note from Dan:** "I tracked these things in detail in a previous version." — the legacy MS Access system had agent tracking. The business logic and interaction types are well-understood from prior use. The web implementation is new infrastructure for an established workflow.
+
+---
+
 ## How to add new entries
 
 Append a new section below using the same template:
