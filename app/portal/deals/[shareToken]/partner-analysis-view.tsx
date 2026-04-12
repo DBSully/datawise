@@ -28,7 +28,9 @@
 
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
+import type { MapPin } from "@/components/properties/comp-map";
+import { CompWorkspace } from "@/components/workstation/comp-workspace";
 import { SubjectTileRow } from "@/components/workstation/subject-tile-row";
 import { DealStatStrip } from "@/components/workstation/deal-stat-strip";
 import { DetailCard } from "@/components/workstation/detail-card";
@@ -37,6 +39,7 @@ import { ArvCardModal } from "@/app/(workspace)/analysis/[analysisId]/arv-card-m
 import { PriceTrendCardModal } from "@/app/(workspace)/analysis/[analysisId]/price-trend-card-modal";
 import { fmt, fmtNum } from "@/lib/reports/format";
 import type { WorkstationData } from "@/lib/reports/types";
+import type { PartnerCompData } from "@/lib/partner-portal/load-partner-view-data";
 
 /** Format an ISO date string as mm/dd/yy without TZ shifts. */
 function fmtIsoDate(v: string | null | undefined): string {
@@ -48,6 +51,7 @@ function fmtIsoDate(v: string | null | undefined): string {
 
 type PartnerAnalysisViewProps = {
   workstationData: WorkstationData;
+  compData: PartnerCompData | null;
   share: {
     id: string;
     analysisId: string;
@@ -68,6 +72,7 @@ type PartnerAnalysisViewProps = {
 
 export function PartnerAnalysisView({
   workstationData: data,
+  compData: serverCompData,
   share,
   partnerVersion,
 }: PartnerAnalysisViewProps) {
@@ -78,6 +83,75 @@ export function PartnerAnalysisView({
   // For MVP, use the analyst's deal math values. Partner overrides
   // (Quick Analysis sandbox) ship in a subsequent 4D commit.
   const dealMath = data.dealMath;
+
+  // ── Comp data from server (loaded via service-role client, no
+  //    client-side fetch needed — avoids RLS issues for unauthenticated
+  //    partner views per Decision 4.3) ──
+  const compMapPins = useMemo<MapPin[]>(() => {
+    if (!serverCompData) return [];
+    const pins: MapPin[] = [];
+    const subjectSqft = serverCompData.subjectBuildingSqft ?? 0;
+    const subjectListPrice = serverCompData.subjectListPrice ?? 0;
+    if (serverCompData.subjectLat && serverCompData.subjectLng) {
+      pins.push({
+        id: "subject",
+        lat: serverCompData.subjectLat,
+        lng: serverCompData.subjectLng,
+        label: serverCompData.subjectAddress,
+        tooltipData: {
+          listPrice: subjectListPrice || null,
+          sqft: subjectSqft || null,
+          gapPerSqft: serverCompData.estGapPerSqft,
+        },
+        type: "subject",
+      });
+    }
+    for (const c of serverCompData.candidates) {
+      const m = c.metrics_json;
+      const lat = Number(m.latitude);
+      const lng = Number(m.longitude);
+      if (!lat || !lng || !Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      const compSqft = Number(m.building_area_total_sqft) || null;
+      const compNetPrice = Number(m.net_price) || Number(m.close_price) || 0;
+      const perCompGapPerSqft =
+        subjectSqft > 0 && compNetPrice > 0 && subjectListPrice > 0
+          ? Math.round((compNetPrice - subjectListPrice) / subjectSqft) : null;
+      const compArvDetail = c.comp_listing_row_id
+        ? serverCompData.arvByCompListingId[c.comp_listing_row_id] ?? null : null;
+      pins.push({
+        id: c.id,
+        lat, lng,
+        label: String(m.address ?? "—"),
+        tooltipData: {
+          closePrice: compNetPrice || null,
+          impliedArv: compArvDetail?.arv ?? null,
+          closeDate: m.close_date ? String(m.close_date).slice(0, 10) : null,
+          sqft: compSqft,
+          sqftDelta: compSqft && subjectSqft ? subjectSqft - compSqft : null,
+          sqftDeltaPct: compSqft && subjectSqft ? (subjectSqft - compSqft) / subjectSqft : null,
+          ppsf: (m.ppsf as number) ?? null,
+          distance: (c.distance_miles as number) ?? null,
+          gapPerSqft: perCompGapPerSqft,
+        },
+        type: c.selected_yn ? "selected" : "candidate",
+      });
+    }
+    return pins;
+  }, [serverCompData]);
+
+  const compStats = useMemo(() => {
+    if (!serverCompData || serverCompData.candidates.length === 0)
+      return { count: 0, avgDist: null, avgScore: null };
+    const selected = serverCompData.candidates.filter((c) => c.selected_yn);
+    const pool = selected.length > 0 ? selected : serverCompData.candidates;
+    const dists = pool.map((c) => c.distance_miles).filter((d): d is number => d != null);
+    const scores = pool.map((c) => c.raw_score).filter((s): s is number => s != null);
+    return {
+      count: pool.length,
+      avgDist: dists.length > 0 ? dists.reduce((a, b) => a + b, 0) / dists.length : null,
+      avgScore: scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null,
+    };
+  }, [serverCompData]);
 
   const fullAddress = [
     data.property.address,
@@ -189,9 +263,59 @@ export function PartnerAnalysisView({
 
       {/* ── Partner-visible cards (read-only) ── */}
       <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 320px" }}>
-        {/* Left: placeholder for Comp Workspace (ships in next 4D commit) */}
-        <div className="rounded border border-dashed border-slate-300 bg-slate-50 px-4 py-12 text-center text-xs text-slate-400">
-          Comp Workspace (map + table) coming in next commit
+        {/* Left: Comp Workspace (read-only for partner MVP).
+         *  CompWorkspace expects ScreeningCompData — we build a
+         *  compatible object from the server-loaded PartnerCompData. */}
+        <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <CompWorkspace
+            loading={false}
+            data={
+              serverCompData
+                ? ({
+                    ...serverCompData,
+                    closePrice: null,
+                    mlsStatus: null,
+                    mlsNumber: null,
+                    mlsChangeType: null,
+                    listDate: null,
+                    ucDate: null,
+                    closeDate: null,
+                    originalListPrice: null,
+                    propertyType: data.physical?.propertyType ?? null,
+                    postalCode: data.property.postalCode,
+                    county: data.property.county,
+                    ownershipRaw: null,
+                    occupantType: null,
+                    annualPropertyTax: null,
+                    annualHoaDues: null,
+                    arvAggregate: data.arv.effective,
+                    maxOffer: dealMath?.maxOffer ?? null,
+                    offerPct: dealMath?.offerPct ?? null,
+                    spread: dealMath?.spread ?? null,
+                    rehabTotal: data.rehab.effective,
+                    holdTotal: data.holding?.total ?? null,
+                    transactionTotal: data.transaction?.total ?? null,
+                    financingTotal: data.financing?.total ?? null,
+                    targetProfit: dealMath?.targetProfit ?? null,
+                    trendAnnualRate: data.trend?.blendedAnnualRate ?? null,
+                    trendConfidence: data.trend?.confidence ?? null,
+                    isPrimeCandidate: false,
+                    reviewAction: null,
+                    passReason: null,
+                    subjectCity: data.property.city,
+                  } as Parameters<typeof CompWorkspace>[0]["data"])
+                : null
+            }
+            mapPins={compMapPins}
+            liveDeal={{
+              arv: dealMath?.arv ?? null,
+              gapPerSqft: dealMath?.estGapPerSqft ?? null,
+            }}
+            compStats={compStats}
+            onToggleSelection={() => {}}
+            onMapPinToggle={() => {}}
+            onReloadData={() => {}}
+          />
         </div>
 
         {/* Right: partner-visible cards */}

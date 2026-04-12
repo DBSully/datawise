@@ -33,6 +33,7 @@ export default async function PartnerDealPage({
   return (
     <PartnerAnalysisView
       workstationData={data.workstationData!}
+      compData={data.compData}
       share={data.share}
       partnerVersion={data.partnerVersion}
     />
