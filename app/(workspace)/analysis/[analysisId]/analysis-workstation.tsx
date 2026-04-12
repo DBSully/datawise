@@ -26,10 +26,17 @@
 
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { markAnalysisCompleteAction } from "@/app/(workspace)/deals/actions";
 import { generateReportAction } from "@/app/(workspace)/reports/actions";
+import {
+  loadCompDataByRunAction,
+  toggleScreeningCompSelectionAction,
+  type ScreeningCompData,
+} from "@/app/(workspace)/screening/actions";
+import type { MapPin } from "@/components/properties/comp-map";
+import { CompWorkspace } from "@/components/workstation/comp-workspace";
 import { DealStatStrip } from "@/components/workstation/deal-stat-strip";
 import {
   QuickAnalysisTile,
@@ -171,6 +178,179 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
     data,
   ]);
 
+  // ── Comp data loading for the hero CompWorkspace ───────────────────
+  // The new Workstation reuses the screening modal's loadCompDataByRunAction
+  // which returns ScreeningCompData (the shape CompWorkspace consumes).
+  // Loaded client-side on mount because WorkstationData doesn't carry
+  // the full ScreeningCompData payload server-side. CompWorkspace handles
+  // the brief loading state internally.
+  const compSearchRunId = data.compModalData.latestRun?.id ?? null;
+  const realPropertyId = data.propertyId;
+  const [compData, setCompData] = useState<ScreeningCompData | null>(null);
+  const [compLoading, setCompLoading] = useState<boolean>(
+    compSearchRunId != null,
+  );
+
+  const reloadCompData = useCallback(() => {
+    if (!compSearchRunId) return;
+    setCompLoading(true);
+    loadCompDataByRunAction(compSearchRunId, realPropertyId).then((result) => {
+      setCompData(result);
+      setCompLoading(false);
+    });
+  }, [compSearchRunId, realPropertyId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!compSearchRunId) {
+      setCompData(null);
+      setCompLoading(false);
+      return;
+    }
+    setCompLoading(true);
+    loadCompDataByRunAction(compSearchRunId, realPropertyId).then((result) => {
+      if (!cancelled) {
+        setCompData(result);
+        setCompLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [compSearchRunId, realPropertyId]);
+
+  // Optimistic toggle: update local compData immediately for snappy UI,
+  // then fire the server action. Mirrors the screening modal's pattern.
+  const handleCompToggle = useCallback(
+    async (candidateId: string, currentType: "selected" | "candidate") => {
+      const fd = new FormData();
+      fd.set("candidate_id", candidateId);
+      fd.set("property_id", realPropertyId);
+      fd.set("analysis_id", data.analysisId);
+      fd.set("next_selected", currentType === "candidate" ? "true" : "false");
+      setCompData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          candidates: prev.candidates.map((c) =>
+            c.id === candidateId
+              ? { ...c, selected_yn: currentType === "candidate" }
+              : c,
+          ),
+        };
+      });
+      try {
+        await toggleScreeningCompSelectionAction(fd);
+      } catch (err) {
+        // On failure, reload to restore consistency.
+        // eslint-disable-next-line no-console
+        console.error("[handleCompToggle]", err);
+        reloadCompData();
+      }
+    },
+    [data.analysisId, realPropertyId, reloadCompData],
+  );
+
+  // Map pin click — same intent as a Pick button click. Mirrors modal.
+  const handleCompMapPinToggle = useCallback(
+    (pinId: string, currentType: "selected" | "candidate") => {
+      handleCompToggle(pinId, currentType);
+    },
+    [handleCompToggle],
+  );
+
+  // Map pins computed from compData. Mirrors the modal's mapPins useMemo.
+  const compMapPins = useMemo<MapPin[]>(() => {
+    if (!compData) return [];
+    const pins: MapPin[] = [];
+    const subjectSqft = compData.subjectBuildingSqft ?? 0;
+    const subjectListPrice = compData.subjectListPrice ?? 0;
+
+    if (compData.subjectLat && compData.subjectLng) {
+      pins.push({
+        id: "subject",
+        lat: compData.subjectLat,
+        lng: compData.subjectLng,
+        label: compData.subjectAddress,
+        tooltipData: {
+          listPrice: subjectListPrice || null,
+          sqft: subjectSqft || null,
+          gapPerSqft: compData.estGapPerSqft,
+        },
+        type: "subject",
+      });
+    }
+
+    for (const c of compData.candidates) {
+      const m = c.metrics_json;
+      const lat = Number(m.latitude);
+      const lng = Number(m.longitude);
+      if (!lat || !lng || !Number.isFinite(lat) || !Number.isFinite(lng))
+        continue;
+
+      const compSqft = Number(m.building_area_total_sqft) || null;
+      const sqftDelta =
+        compSqft && subjectSqft ? subjectSqft - compSqft : null;
+      const sqftDeltaPct =
+        compSqft && subjectSqft
+          ? (subjectSqft - compSqft) / subjectSqft
+          : null;
+      const compNetPrice = Number(m.net_price) || Number(m.close_price) || 0;
+      const perCompGapPerSqft =
+        subjectSqft > 0 && compNetPrice > 0 && subjectListPrice > 0
+          ? Math.round((compNetPrice - subjectListPrice) / subjectSqft)
+          : null;
+      const compArvDetail = c.comp_listing_row_id
+        ? compData.arvByCompListingId[c.comp_listing_row_id] ?? null
+        : null;
+
+      pins.push({
+        id: c.id,
+        lat,
+        lng,
+        label: String(m.address ?? "—"),
+        tooltipData: {
+          closePrice: compNetPrice || null,
+          impliedArv: compArvDetail?.arv ?? null,
+          closeDate: m.close_date ? String(m.close_date).slice(0, 10) : null,
+          sqft: compSqft,
+          sqftDelta,
+          sqftDeltaPct,
+          ppsf: (m.ppsf as number) ?? null,
+          distance: (c.distance_miles as number) ?? null,
+          gapPerSqft: perCompGapPerSqft,
+        },
+        type: c.selected_yn ? "selected" : "candidate",
+      });
+    }
+
+    return pins;
+  }, [compData]);
+
+  // Comp quality stats for the subject row's Score column. Mirrors the
+  // modal's compStats useMemo.
+  const compStats = useMemo(() => {
+    if (!compData || compData.candidates.length === 0)
+      return { count: 0, avgDist: null, avgScore: null };
+    const selected = compData.candidates.filter((c) => c.selected_yn);
+    const pool = selected.length > 0 ? selected : compData.candidates;
+    const dists = pool
+      .map((c) => c.distance_miles)
+      .filter((d): d is number => d != null);
+    const scores = pool
+      .map((c) => c.raw_score)
+      .filter((s): s is number => s != null);
+    return {
+      count: pool.length,
+      avgDist:
+        dists.length > 0 ? dists.reduce((a, b) => a + b, 0) / dists.length : null,
+      avgScore:
+        scores.length > 0
+          ? scores.reduce((a, b) => a + b, 0) / scores.length
+          : null,
+    };
+  }, [compData]);
+
   const p = data.physical;
 
   return (
@@ -287,10 +467,22 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
         }}
       />
 
-      {/* HERO + RIGHT COLUMN — 3E.5 + 3E.6 */}
+      {/* HERO + RIGHT COLUMN — 3E.5 (hero) + 3E.6 (right column) */}
       <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 320px" }}>
-        <div className="rounded border border-dashed border-slate-300 bg-slate-50 px-4 py-12 text-xs text-slate-500">
-          HERO COMP WORKSPACE (3E.5) — map + comp table + tab bar + controls
+        <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <CompWorkspace
+            loading={compLoading}
+            data={compData}
+            mapPins={compMapPins}
+            liveDeal={{
+              arv: liveDeal.arv,
+              gapPerSqft: liveDeal.gapPerSqft,
+            }}
+            compStats={compStats}
+            onToggleSelection={handleCompToggle}
+            onMapPinToggle={handleCompMapPinToggle}
+            onReloadData={reloadCompData}
+          />
         </div>
         <div className="rounded border border-dashed border-slate-300 bg-slate-50 px-4 py-12 text-xs text-slate-500">
           RIGHT TILE COLUMN (3E.6 + 3E.7) — 9 collapsible detail cards
