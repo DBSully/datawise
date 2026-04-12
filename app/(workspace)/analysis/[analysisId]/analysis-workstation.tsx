@@ -38,6 +38,8 @@ import {
 import type { MapPin } from "@/components/properties/comp-map";
 import { CompWorkspace } from "@/components/workstation/comp-workspace";
 import { DealStatStrip } from "@/components/workstation/deal-stat-strip";
+import { DetailCard } from "@/components/workstation/detail-card";
+import { DetailModal } from "@/components/workstation/detail-modal";
 import {
   QuickAnalysisTile,
   parseDollarInput,
@@ -351,6 +353,22 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
     };
   }, [compData]);
 
+  // ── Right column modal state ─────────────────────────────────────
+  // Which card's modal is currently open, or null if none. 3E.7 will
+  // replace the placeholder modals with real per-card modal components.
+  type CardModalId =
+    | "arv"
+    | "rehab"
+    | "holdTrans"
+    | "financing"
+    | "cashRequired"
+    | "priceTrend"
+    | "pipeline"
+    | "notes"
+    | "partnerSharing"
+    | null;
+  const [openModal, setOpenModal] = useState<CardModalId>(null);
+
   const p = data.physical;
 
   return (
@@ -484,10 +502,164 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
             onReloadData={reloadCompData}
           />
         </div>
-        <div className="rounded border border-dashed border-slate-300 bg-slate-50 px-4 py-12 text-xs text-slate-500">
-          RIGHT TILE COLUMN (3E.6 + 3E.7) — 9 collapsible detail cards
+        {/* RIGHT TILE COLUMN — 9 collapsible detail cards per spec §5 */}
+        <div className="flex flex-col gap-1.5">
+          {/* 1. ARV card — reads from liveDeal (cascade-affected) */}
+          <DetailCard
+            title="ARV"
+            headline={fmt(liveDeal.arv)}
+            context={`${data.compSummary.selectedCount} comps · $${fmtNum(data.physical?.buildingSqft ? Math.round(liveDeal.arv / data.physical.buildingSqft) : 0)}/sf`}
+            badge={
+              liveDeal.arvManual ? (
+                <span className="rounded bg-emerald-100 px-1 py-0.5 text-[8px] font-semibold text-emerald-700">
+                  Override
+                </span>
+              ) : undefined
+            }
+            onExpand={() => setOpenModal("arv")}
+          />
+
+          {/* 2. Rehab card — reads from liveDeal (cascade-affected) */}
+          <DetailCard
+            title="Rehab"
+            headline={fmt(liveDeal.rehabTotal)}
+            context={`$${fmtNum(data.physical?.buildingSqft ? Math.round(liveDeal.rehabTotal / data.physical.buildingSqft) : 0)}/sf bldg`}
+            badge={
+              liveDeal.rehabManual ? (
+                <span className="rounded bg-emerald-100 px-1 py-0.5 text-[8px] font-semibold text-emerald-700">
+                  Override
+                </span>
+              ) : undefined
+            }
+            onExpand={() => setOpenModal("rehab")}
+          />
+
+          {/* 3. Holding & Transaction card — reads from liveDeal (cascade-affected via daysHeld) */}
+          <DetailCard
+            title="Hold & Trans"
+            headline={`Hold ${fmt(liveDeal.holdTotal)} · Trans ${fmt(liveDeal.transactionTotal)}`}
+            context={`${liveDeal.daysHeld} days held`}
+            badge={
+              liveDeal.daysHeldManual ? (
+                <span className="rounded bg-emerald-100 px-1 py-0.5 text-[8px] font-semibold text-emerald-700">
+                  Override
+                </span>
+              ) : undefined
+            }
+            onExpand={() => setOpenModal("holdTrans")}
+          />
+
+          {/* 4. Financing card — reads from server data (not cascade-affected by Quick Analysis) */}
+          <DetailCard
+            title="Financing"
+            headline={fmt(data.financing?.total)}
+            context={
+              data.financing
+                ? `$${fmtNum(data.financing.loanAmount)} loan · ${fmtNum(data.financing.ltvPct * 100, 0)}% · ${fmtNum(data.financing.annualRate * 100, 1)}%`
+                : "No financing data"
+            }
+            onExpand={() => setOpenModal("financing")}
+          />
+
+          {/* 5. Cash Required card — server data for now; full cascade through
+           *  Quick Analysis → Cash Required is a 3E.8 polish item */}
+          <DetailCard
+            title="Cash Required"
+            headline={fmt(data.cashRequired?.totalCashRequired)}
+            context={`@ Max Offer ${fmt(liveDeal.maxOffer)}`}
+            onExpand={() => setOpenModal("cashRequired")}
+          />
+
+          {/* 6. Price Trend card — pure market data, no cascade */}
+          <DetailCard
+            title="Price Trend"
+            headline={
+              data.trend
+                ? `${data.trend.blendedAnnualRate >= 0 ? "+" : ""}${(data.trend.blendedAnnualRate * 100).toFixed(1)}%/yr`
+                : "No trend data"
+            }
+            context={
+              data.trend
+                ? `${data.trend.direction.replace(/_/g, " ")} · ${data.trend.confidence} confidence`
+                : "\u2014"
+            }
+            onExpand={() => setOpenModal("priceTrend")}
+          />
+
+          {/* 7. Pipeline Status card — pipeline state, no cascade */}
+          <DetailCard
+            title="Pipeline"
+            headline={
+              [
+                data.pipeline?.showing_status as string | null,
+                data.pipeline?.offer_status as string | null,
+              ]
+                .filter(Boolean)
+                .join(" · ") || "No pipeline data"
+            }
+            context={
+              data.pipeline?.offer_submitted_date
+                ? `Offer submitted ${String(data.pipeline.offer_submitted_date).slice(0, 10)}`
+                : "\u2014"
+            }
+            onExpand={() => setOpenModal("pipeline")}
+          />
+
+          {/* 8. Notes card — note count, no cascade */}
+          <DetailCard
+            title="Notes"
+            headline={`${data.notes.length} note${data.notes.length !== 1 ? "s" : ""}`}
+            context={
+              data.notes.length > 0
+                ? (() => {
+                    const counts: Record<string, number> = {};
+                    for (const n of data.notes) {
+                      counts[n.note_type] = (counts[n.note_type] ?? 0) + 1;
+                    }
+                    return Object.entries(counts)
+                      .slice(0, 3)
+                      .map(([type, count]) => `${count} ${type}`)
+                      .join(" · ");
+                  })()
+                : "\u2014"
+            }
+            onExpand={() => setOpenModal("notes")}
+          />
+
+          {/* 9. Partner Sharing card — STUB per Decision 5.4 */}
+          <DetailCard
+            title="Partner Sharing"
+            headline="Not yet implemented"
+            context="Arriving in Step 4"
+            onExpand={() => setOpenModal("partnerSharing")}
+          />
         </div>
       </div>
+
+      {/* ── Placeholder modals — each replaced by a real modal in 3E.7 ── */}
+      {openModal && (
+        <DetailModal
+          title={
+            openModal === "arv" ? "ARV" :
+            openModal === "rehab" ? "Rehab" :
+            openModal === "holdTrans" ? "Holding & Transaction" :
+            openModal === "financing" ? "Financing" :
+            openModal === "cashRequired" ? "Cash Required" :
+            openModal === "priceTrend" ? "Price Trend" :
+            openModal === "pipeline" ? "Pipeline Status" :
+            openModal === "notes" ? "Notes" :
+            openModal === "partnerSharing" ? "Partner Sharing" :
+            "Detail"
+          }
+          onClose={() => setOpenModal(null)}
+        >
+          <p className="py-8 text-center text-sm text-slate-400">
+            {openModal === "partnerSharing"
+              ? "Full Partner Sharing arrives in Step 4."
+              : `${openModal} card modal content ships in 3E.7.`}
+          </p>
+        </DetailModal>
+      )}
     </section>
   );
 }
