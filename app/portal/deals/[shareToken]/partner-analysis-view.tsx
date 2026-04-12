@@ -322,6 +322,9 @@ export function PartnerAnalysisView({
           manualTargetProfitInput: "",
           setManualTargetProfitInput: () => {},
           targetProfitPlaceholder: "",
+          manualDaysHeldInput: "",
+          setManualDaysHeldInput: () => {},
+          daysHeldPlaceholder: "",
         }}
       />
 

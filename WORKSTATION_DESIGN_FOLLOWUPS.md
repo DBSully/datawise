@@ -398,6 +398,28 @@ The headline tries to show both holding AND transaction totals in one line, maki
 
 ## 18. → MOVED to PRODUCT_VISION.md §4.4 — Deal urgency fuse + agent behavior
 
+## 19. Quick Status for un-promoted screening results
+
+**Surfaced:** 2026-04-12 during screening modal Quick Status addition
+**Status:** Open — discuss when reaching this area
+**Severity:** Feature gap — not a bug
+
+### The issue
+
+Quick Status (Interest, Condition, Location, Next Step) currently only appears in the screening modal when the property has been promoted to an analysis, because the dropdowns auto-persist to `manual_analysis` and `analysis_pipeline` — tables that require an `analysis_id`. For un-promoted screening results there's no analysis row to write to, so Quick Status is hidden.
+
+### The complication
+
+Adding Quick Status to un-promoted items would require either: (a) creating an analysis row at screening time just to hold status fields, which blurs the screening → analysis promotion boundary, or (b) adding status columns to `screening_results` itself, which duplicates the concept across two tables. There may also be a valid product reason to keep screening intentionally lightweight — the screening modal is a triage tool, and forcing status decisions before promotion could slow down the workflow.
+
+### Possible fixes
+- (a) Add `interest_level`, `condition_rating`, `location_rating`, `next_step` columns to `screening_results` — local to screening, no analysis needed
+- (b) Auto-create a lightweight analysis stub when the user first interacts with Quick Status, effectively a "soft promote"
+- (c) Leave as-is — Quick Status appears only after promotion, keeping screening fast and uncluttered
+
+### Recommended next step
+Discuss pros/cons when the screening workflow is next revisited. The current behavior (Quick Status after promotion only) may be the right design.
+
 ---
 
 ## How to add new entries

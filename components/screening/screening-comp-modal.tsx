@@ -9,12 +9,15 @@ import { SubjectTileRow } from "@/components/workstation/subject-tile-row";
 import {
   loadScreeningCompDataAction,
   loadCompDataByRunAction,
+  loadAnalysisStatusAction,
   toggleScreeningCompSelectionAction,
   promoteToAnalysisAction,
   passOnScreeningResultAction,
   reactivateScreeningResultAction,
   type ScreeningCompData,
+  type AnalysisQuickStatus,
 } from "@/app/(workspace)/screening/actions";
+import { QuickStatusTile } from "@/components/workstation/quick-status-tile";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -92,6 +95,10 @@ export function ScreeningCompModal({
   const [manualArvInput, setManualArvInput] = useState("");
   const [manualTargetProfitInput, setManualTargetProfitInput] = useState("");
   const [manualRehabInput, setManualRehabInput] = useState("");
+  const [manualDaysHeldInput, setManualDaysHeldInput] = useState("");
+
+  // Quick Status state (loaded from analysis when promoted)
+  const [quickStatus, setQuickStatus] = useState<AnalysisQuickStatus | null>(null);
 
   // Sort state for candidate table
   type SortCol = "gap" | "impArv" | "days" | "bldg";
@@ -110,19 +117,23 @@ export function ScreeningCompModal({
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    const promise = isWorkstationMode
+    const compPromise = isWorkstationMode
       ? loadCompDataByRunAction(compSearchRunIdProp!, realPropertyId!)
       : loadScreeningCompDataAction(resultId!);
-    promise.then((result) => {
+    const statusPromise = promotedAnalysisId
+      ? loadAnalysisStatusAction(promotedAnalysisId)
+      : Promise.resolve(null);
+    Promise.all([compPromise, statusPromise]).then(([compResult, statusResult]) => {
       if (!cancelled) {
-        setData(result);
+        setData(compResult);
+        if (statusResult) setQuickStatus(statusResult);
         setLoading(false);
       }
     });
     return () => {
       cancelled = true;
     };
-  }, [resultId, compSearchRunIdProp, realPropertyId, isWorkstationMode]);
+  }, [resultId, compSearchRunIdProp, realPropertyId, isWorkstationMode, promotedAnalysisId]);
 
   // Shared reload function
   const reloadData = useCallback(() => {
@@ -456,8 +467,22 @@ export function ScreeningCompModal({
                 manualTargetProfitInput,
                 setManualTargetProfitInput,
                 targetProfitPlaceholder: data.targetProfit != null ? `${data.targetProfit.toLocaleString()}` : "40,000",
+                manualDaysHeldInput,
+                setManualDaysHeldInput,
+                daysHeldPlaceholder: "—",
               }}
-            />
+            >
+              {/* Quick Status — auto-persists when analysis exists */}
+              {promotedAnalysisId && quickStatus && (
+                <QuickStatusTile
+                  analysisId={promotedAnalysisId}
+                  initialInterestLevel={quickStatus.interestLevel}
+                  initialCondition={quickStatus.condition}
+                  initialLocation={quickStatus.location}
+                  initialNextStep={quickStatus.nextStep}
+                />
+              )}
+            </SubjectTileRow>
           )}
         </div>
 

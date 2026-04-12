@@ -472,6 +472,9 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
             manualTargetProfitInput: "",
             setManualTargetProfitInput: () => {},
             targetProfitPlaceholder: "",
+            manualDaysHeldInput: "",
+            setManualDaysHeldInput: () => {},
+            daysHeldPlaceholder: "",
           }}
         />
 

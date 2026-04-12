@@ -96,6 +96,9 @@ export type SubjectTileRowQuickAnalysis = {
   manualTargetProfitInput: string;
   setManualTargetProfitInput: (v: string) => void;
   targetProfitPlaceholder: string;
+  manualDaysHeldInput: string;
+  setManualDaysHeldInput: (v: string) => void;
+  daysHeldPlaceholder: string;
   /** Optional Tab key handler for the Target Profit input — used by the
    *  Workstation to redirect Tab focus to a downstream button. The modal
    *  does not pass this. */
@@ -112,6 +115,9 @@ type SubjectTileRowProps = {
    *  modal omits this prop (defaulting to true) so its built-in
    *  local-only Quick Analysis tile keeps rendering unchanged. */
   showQuickAnalysis?: boolean;
+  /** Additional tiles rendered after Quick Analysis in the flex row.
+   *  Used by the screening modal to slot in Quick Status. */
+  children?: React.ReactNode;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -123,6 +129,7 @@ export function SubjectTileRow({
   physical,
   quickAnalysis,
   showQuickAnalysis = true,
+  children,
 }: SubjectTileRowProps) {
   const handleTargetProfitKeyDown = quickAnalysis.onTargetProfitTab
     ? (e: KeyboardEvent<HTMLInputElement>) => {
@@ -244,12 +251,12 @@ export function SubjectTileRow({
       {showQuickAnalysis && (
       <div
         className="shrink-0 rounded border border-blue-200 bg-blue-50/50 px-3 py-2"
-        style={{ maxWidth: 360 }}
+        style={{ maxWidth: 320 }}
       >
         <div className="mb-1.5 text-[9px] font-bold uppercase tracking-wider text-blue-600">
           Quick Analysis
         </div>
-        <div className="grid grid-cols-3 gap-x-2 gap-y-1">
+        <div className="grid grid-cols-2 gap-x-2 gap-y-2">
           <div>
             <label className="block text-[9px] font-semibold uppercase tracking-wider text-slate-500">
               Manual ARV
@@ -287,9 +294,22 @@ export function SubjectTileRow({
               className="mt-0.5 w-[100px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
             />
           </div>
+          <div>
+            <label className="block text-[9px] font-semibold uppercase tracking-wider text-slate-500">
+              Days Held
+            </label>
+            <input
+              type="text"
+              value={quickAnalysis.manualDaysHeldInput}
+              onChange={(e) => quickAnalysis.setManualDaysHeldInput(e.target.value)}
+              placeholder={quickAnalysis.daysHeldPlaceholder}
+              className="mt-0.5 w-[100px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
+            />
+          </div>
         </div>
       </div>
       )}
+      {children}
     </div>
   );
 }

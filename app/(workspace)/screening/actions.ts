@@ -288,6 +288,41 @@ export async function runImportScreeningAction(
 }
 
 // ---------------------------------------------------------------------------
+// Load analysis quick-status fields (used by Quick Status tile in modal)
+// ---------------------------------------------------------------------------
+
+export type AnalysisQuickStatus = {
+  interestLevel: string | null;
+  condition: string | null;
+  location: string | null;
+  nextStep: string | null;
+};
+
+export async function loadAnalysisStatusAction(
+  analysisId: string,
+): Promise<AnalysisQuickStatus> {
+  const supabase = await createClient();
+  const [{ data: ma }, { data: ap }] = await Promise.all([
+    supabase
+      .from("manual_analysis")
+      .select("analyst_condition, location_rating")
+      .eq("analysis_id", analysisId)
+      .maybeSingle(),
+    supabase
+      .from("analysis_pipeline")
+      .select("interest_level, next_step")
+      .eq("analysis_id", analysisId)
+      .maybeSingle(),
+  ]);
+  return {
+    interestLevel: ap?.interest_level ?? null,
+    condition: ma?.analyst_condition ?? null,
+    location: ma?.location_rating ?? null,
+    nextStep: ap?.next_step ?? null,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Load comp data for screening result (used by Quick Comps modal)
 // ---------------------------------------------------------------------------
 
