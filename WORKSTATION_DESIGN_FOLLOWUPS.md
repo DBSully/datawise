@@ -264,6 +264,59 @@ Add `text-right` to the value `<span>` elements for numeric fields in the Proper
 
 ---
 
+## 9. Screening modal needs a visible Deal Math waterfall card
+
+**Surfaced:** 2026-04-12
+**Status:** Open
+**Severity:** UX — affects the core screening workflow
+**Scope:** `components/screening/screening-comp-modal.tsx` + possibly a new shared component
+
+### The issue
+
+The screening modal shows the Deal Stat Strip (horizontal pills: ARV, Max Offer, Offer%, Gap/sqft, Rehab, Target Profit, Trend) but does NOT show the step-by-step waterfall that explains HOW the offer price is computed. The analyst sees the final numbers but can't see the math chain at a glance.
+
+Dan's view: "At all times, the user should see how the math works for the offer price."
+
+### What the analyst needs to see in the modal
+
+A visible Deal Math waterfall — the same concept as the Workstation's Deal Math section but rendered vertically alongside the comp workspace:
+
+```
+  Effective ARV        $1,125,000
+  − Rehab                 $71,400
+  − Holding               $12,800
+  − Transaction           $53,600
+  − Financing              $4,846
+  − Target Profit         $40,000
+  ─────────────────────────────────
+  = Max Offer            $942,354
+  
+  Offer %                  88.6%
+  Spread                $182,646
+  Gap/sqft                  $219
+```
+
+This should be visible WITHOUT clicking — either as a permanent sidebar panel next to the comp workspace, or as a collapsible section that defaults to expanded.
+
+### The complication
+
+The screening modal is already dense (map + table + subject tiles + deal strip + footer actions). Adding a permanent waterfall card means either:
+- Shrinking the comp table width to make room for a sidebar
+- Adding it below the deal strip (pushes the comp table down)
+- Making it a floating/sticky panel that overlays part of the workspace
+
+### Possible fixes
+
+- **(a) Vertical sidebar.** Add a ~200px column to the right of the comp table inside the modal. The waterfall renders as a compact vertical stack using `<CostLine>` from 3C. The comp table loses ~200px of width — still functional at ~560px on a 1440 viewport.
+- **(b) Collapsible section below the Deal Stat Strip.** A "Show Deal Math ▾" toggle that expands the waterfall between the strip and the comp workspace. Defaults to expanded. Collapses to save space when the analyst wants more room for comps.
+- **(c) Reuse the new Workstation's right-column card pattern.** Render a subset of the DetailCard stack (just Deal Math / ARV / Rehab) in a narrow column alongside the modal's comp workspace. Heavier but consistent with the Workstation design language.
+
+### Recommended next step
+
+(b) is the lowest-risk MVP — it doesn't change the modal's horizontal layout, just adds vertical content. The deal math waterfall is small (~10 lines of CostLine items) and the toggle lets the analyst reclaim space. Start with (b); if the analyst always leaves it expanded, consider promoting to (a) in a future iteration.
+
+---
+
 ## How to add new entries
 
 Append a new section below using the same template:
