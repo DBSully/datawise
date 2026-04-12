@@ -28,7 +28,7 @@
 
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import type { MapPin } from "@/components/properties/comp-map";
 import { CompWorkspace } from "@/components/workstation/comp-workspace";
 import { SubjectTileRow } from "@/components/workstation/subject-tile-row";
@@ -40,6 +40,7 @@ import { PriceTrendCardModal } from "@/app/(workspace)/analysis/[analysisId]/pri
 import { fmt, fmtNum } from "@/lib/reports/format";
 import type { WorkstationData } from "@/lib/reports/types";
 import type { PartnerCompData } from "@/lib/partner-portal/load-partner-view-data";
+import { createClient } from "@/lib/supabase/client";
 import { submitPartnerFeedbackAction } from "@/lib/partner-portal/feedback-actions";
 import { savePartnerOverrideAction } from "@/lib/partner-portal/save-partner-override-action";
 import { useDebouncedSave } from "@/lib/auto-persist/use-debounced-save";
@@ -56,7 +57,6 @@ function fmtIsoDate(v: string | null | undefined): string {
 type PartnerAnalysisViewProps = {
   workstationData: WorkstationData;
   compData: PartnerCompData | null;
-  isAuthenticated: boolean;
   share: {
     id: string;
     analysisId: string;
@@ -78,11 +78,20 @@ type PartnerAnalysisViewProps = {
 export function PartnerAnalysisView({
   workstationData: data,
   compData: serverCompData,
-  isAuthenticated,
   share,
   partnerVersion,
 }: PartnerAnalysisViewProps) {
   const [openModal, setOpenModal] = useState<string | null>(null);
+
+  // Client-side auth check — avoids hydration mismatch. Server always
+  // renders the "locked" overlay; client upgrades to interactive on mount.
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setIsAuthenticated(!!user);
+    });
+  }, []);
 
   const p = data.physical;
 
