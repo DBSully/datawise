@@ -3,9 +3,7 @@
 // Two actions for the analyst's Partner Sharing card:
 //
 // 1. createAnalysisShareAction — generates a UUID share_token, creates
-//    an analysis_shares row, and (eventually) sends an email via Resend.
-//    For now, email is a placeholder that logs the share link to the
-//    server console so the full flow can be tested without Resend setup.
+//    an analysis_shares row, and sends an email via Resend.
 //
 // 2. revokeAnalysisShareAction — sets is_active = false on an existing
 //    share, effectively removing the partner's access.
@@ -13,15 +11,12 @@
 // Both actions revalidate the canonical Workstation route so the Partner
 // Sharing card's collapsed headline and expanded modal refresh with the
 // latest share state.
-//
-// EMAIL PLACEHOLDER: when Resend is set up, replace the console.log
-// block in createAnalysisShareAction with the actual Resend API call.
-// Search for "RESEND_PLACEHOLDER" to find the exact location.
 
 "use server";
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { Resend } from "resend";
 import { createClient } from "@/lib/supabase/server";
 
 type CreateShareInput = {
@@ -116,37 +111,45 @@ export async function createAnalysisShareAction(
     });
   }
 
+  // Fetch the property address for the email subject line
+  const { data: property } = await supabase
+    .from("real_properties")
+    .select("unparsed_address, city")
+    .eq("id", analysis.real_property_id)
+    .single();
+  const subjectAddress = property
+    ? [property.unparsed_address, property.city].filter(Boolean).join(", ")
+    : "a property";
+
   // Build the share URL
   const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
   const shareUrl = `${baseUrl}/portal/deals/${shareToken}`;
 
-  // ── RESEND_PLACEHOLDER ──────────────────────────────────────────
-  // When Resend is set up, replace this block with the actual email
-  // send. For now, log the share link to the server console so the
-  // full flow can be tested manually.
-  //
-  // Future code shape:
-  //   import { Resend } from "resend";
-  //   const resend = new Resend(process.env.RESEND_API_KEY);
-  //   await resend.emails.send({
-  //     from: process.env.RESEND_FROM_EMAIL,
-  //     to: partnerEmail,
-  //     subject: `Analysis shared with you — ${address}`,
-  //     html: `<p>${message ?? "An analysis has been shared with you."}</p>
-  //            <a href="${shareUrl}">View Analysis</a>`,
-  //   });
-  //
-  // eslint-disable-next-line no-console
-  console.log(
-    `\n[SHARE] ── Email placeholder ──\n` +
-    `  To: ${partnerEmail}\n` +
-    `  Analysis: ${analysisId}\n` +
-    `  Token: ${shareToken}\n` +
-    `  URL: ${shareUrl}\n` +
-    `  Message: ${message ?? "(none)"}\n` +
-    `  ── Copy the URL above to test the partner portal ──\n`,
-  );
-  // ── END RESEND_PLACEHOLDER ──────────────────────────────────────
+  // Send the share notification email via Resend
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  const { error: emailError } = await resend.emails.send({
+    from: "DataWise <analysis@datawisere.com>",
+    to: partnerEmail,
+    subject: `Analysis shared with you — ${subjectAddress}`,
+    html: [
+      `<div style="font-family: sans-serif; max-width: 560px; margin: 0 auto;">`,
+      `<h2 style="color: #1e293b; margin-bottom: 4px;">A deal analysis has been shared with you</h2>`,
+      `<p style="color: #64748b; font-size: 14px; margin-top: 0;">${subjectAddress}</p>`,
+      message
+        ? `<p style="color: #334155; font-size: 14px; background: #f8fafc; padding: 12px; border-radius: 6px; border-left: 3px solid #3b82f6;">${message}</p>`
+        : "",
+      `<a href="${shareUrl}" style="display: inline-block; background: #2563eb; color: #fff; padding: 10px 24px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 14px; margin-top: 8px;">View Analysis</a>`,
+      `<p style="color: #94a3b8; font-size: 12px; margin-top: 24px;">You can view the numbers, adjust your own assumptions, and submit feedback — all from the link above.</p>`,
+      `</div>`,
+    ].join("\n"),
+  });
+
+  if (emailError) {
+    // eslint-disable-next-line no-console
+    console.error("[SHARE] Email send failed:", emailError);
+    // Don't fail the share — the DB row is created, the link works.
+    // The analyst can copy the link manually from the Partner Sharing modal.
+  }
 
   revalidatePath(`/analysis/${analysisId}`);
 
