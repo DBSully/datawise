@@ -473,6 +473,85 @@ This is a Phase 2+ layout evolution, not a Phase 1 task. The current flat stack 
 
 ---
 
+## 14. "Show Market Conditions" button — active/expired/withdrawn listings overlay
+
+**Surfaced:** 2026-04-12
+**Status:** Open — feature idea, not a fix
+**Severity:** Feature — new analytical capability
+**Scope:** The Workstation comp workspace (hero) + possibly the screening modal
+
+### Dan's insight
+
+The ARV comp workspace shows **closed sales** — historical transactions used to estimate After Repair Value. But it doesn't show **current market conditions**: what's currently listed (active competition), what expired (couldn't sell), what was withdrawn (pulled off market). A property with a strong ARV can still be a bad deal if 5 similar homes are actively listed and competing for the same buyers.
+
+Dan's view: "A good deal can turn bad if there is too much competition."
+
+### The feature
+
+A "Show Market Conditions" button in the comp workspace that, when clicked, overlays the comp map + table with current market data:
+
+- **Active listings** (green pins) — current competition. How many similar homes are listed right now? At what prices?
+- **Expired listings** (amber pins) — couldn't sell. Were they priced too high? How long were they on market?
+- **Withdrawn listings** (red pins) — pulled off market. Why? Price too high? Condition issues?
+
+This data is already in the `mls_listings` table (MLS status field distinguishes Active / Expired / Withdrawn / Closed / etc.) but the comp engine currently only queries closed sales. The market conditions overlay would query the SAME geographic area + property filters but for non-closed statuses.
+
+### Why on-demand (not automatic)
+
+The comp engine pre-loads closed sales into memory for the bulk screening runner. Adding active/expired/withdrawn to every screening run would:
+- Increase the data load significantly (active listings are numerous)
+- Slow down bulk screening without benefiting most properties
+- Add noise to the default comp display
+
+Instead, the analyst triggers the market conditions overlay **on demand** when they're evaluating a specific deal and want competitive context. One button press fetches the data for this property's area and renders it alongside the ARV comps.
+
+### Design sketch
+
+```
+┌──────────────��─────────────────────────────────────��─────────────┐
+│  Comp Workspace                                                  │
+│                                                                  │
+│  Tabs: [ ARV (12) ] [ As-Is (5) ] [ Scrape — ] [ Rental — ]    │
+│                                                                  │
+│  [ Show Market Conditions 🏘 ]     ← new button                  │
+│                                                                  │
+│  When clicked:                                                   │
+│  ┌─────────────┐  ┌──────────────────────────┐                  │
+│  │ MAP         │  │ Split or tabbed display:  │                  │
+│  │ • Closed    │  │ Active (7) | Expired (3)  │                  │
+│  │   (existing)│  │ | Withdrawn (1)           │                  │
+│  │ • Active 🟢│  │                            │                  │
+│  │ • Expired 🟡│  │ Address | Status | List $ │                  │
+│  │ • Withdrawn │  │ | DOM | Sqft | Bd/Ba      │                  │
+│  │   🔴       │  │                            │                  │
+│  └─────────────┘  └────────────────────────���─┘                  │
+│                                                                  │
+│  Market summary: 7 active · avg $685K · avg 42 DOM              │
+│  Competition index: MODERATE (7 active in 0.5mi, similar size)  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Implementation notes
+
+- **Data source:** `mls_listings` table, filtered by: same geographic radius as the comp search, similar property type/size, MLS status IN ('Active', 'Expired', 'Withdrawn', 'Coming Soon')
+- **Server action:** `loadMarketConditionsAction(propertyId, { radius, propertyType, sqftRange })` — fetches non-closed listings matching the comp search parameters
+- **Map integration:** reuse CompMap with additional pin types (active/expired/withdrawn get distinct colors/shapes from the existing closed-sale comp pins)
+- **Table:** new lightweight table (or a tab in the existing comp table) showing the non-closed listings with: address, status, list price, DOM, sqft, beds/baths
+- **Competition summary:** a small stat bar showing active count, avg list price, avg DOM, and possibly a qualitative "competition index" (low / moderate / high based on active listing density relative to the subject's price point)
+- **Processing:** on-demand only — NOT part of the bulk screening pipeline. No pre-loading. The button triggers a single query scoped to this property's comp area.
+
+### Recommended approach
+
+Scope this as a standalone feature task after Step 4. The data is already in the database; the comp search parameters are already defined per property. The main work is:
+1. A new server action to query non-closed listings
+2. Extending CompMap to render additional pin types
+3. A market conditions panel/tab in the comp workspace
+4. A competition summary stat bar
+
+Could be a ~1-2 day feature addition. High analytical value — gives the analyst competitive context that's currently invisible in the platform.
+
+---
+
 ## How to add new entries
 
 Append a new section below using the same template:
