@@ -233,7 +233,59 @@ The circle-closing + accuracy scorecard described in §1. The most transformativ
 
 ---
 
-## 6. Implementation Priority (Dan to refine)
+## 6. Partner Management Panel — cross-deal, cross-partner activity tracking
+
+**Surfaced:** 2026-04-12
+
+The Partner Sharing card in the Workstation is per-analysis: "who did I share THIS deal with, and what did they say?" The Partner Workspace dashboard at `/portal/` is per-partner: "what deals have been shared with ME?"
+
+Neither surface answers the analyst's cross-cutting questions:
+- **Which partners are most engaged?** Who responds quickly, who ghosts?
+- **Who hasn't responded in 2 weeks?** Follow-up reminders.
+- **Which partner always passes?** Maybe stop sharing certain deal types with them.
+- **Who's my most active partner?** Relationship health across all deals.
+- **What's the overall pipeline of shared deals?** How many are pending response vs. interested vs. passed?
+
+### The feature
+
+A **Partner Management Panel** — an analyst-side dashboard that aggregates partner activity across ALL analyses. Not tied to a single Workstation; lives as its own top-level section (maybe under `/admin/partners` or a new `/partners` route).
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ PARTNER MANAGEMENT                                       │
+│                                                          │
+│ ┌────────────────────────────────────────────────────┐   │
+│ │ Partner         Shared  Viewed  Interested  Passed │   │
+│ │ Mike Smith         12      10        4         6   │   │
+│ │ Jane Kim            8       5        3         1   │   │
+│ │ Tom Rodriguez       3       1        0         0   │   │
+│ │   └─ 2 pending response (shared 5d + 8d ago)      │   │
+│ └────────────────────────────────────────────────────┘   │
+│                                                          │
+│ Recent activity:                                         │
+│  Mike Smith marked Interested on 1005 Garfield · 2h ago  │
+│  Jane Kim passed on 742 Pearl St · "too much rehab" · 1d │
+│  Tom Rodriguez viewed 818 Grant St · 3d ago              │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Data
+
+All the data already exists in the Step 4 tables:
+- `analysis_shares` — every share, every partner, every analysis
+- `partner_feedback` — every response with timestamps
+- `partner_analysis_versions` — every adjustment the partner made
+- `profiles` — partner names and emails
+
+The panel is purely aggregation queries over existing data — no new schema needed.
+
+### Implementation estimate
+
+~2-3 days. A new route with a server component that aggregates partner activity + a client component with per-partner expandable rows showing their shared deals, response rates, and recent activity. Could integrate with Realtime for live updates (same pattern as the Partner Sharing card).
+
+---
+
+## 7. Implementation Priority (Dan to refine)
 
 | Priority | What | Estimated effort |
 |---|---|---|
