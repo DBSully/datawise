@@ -172,16 +172,6 @@ export type TransactionResult = {
   /** NEW (Decision 5): Sum of disposition-side line items. Deducted from sale proceeds. */
   dispositionSubtotal: number;
 
-  // ─── Backwards-compat (deprecated) ───
-
-  /**
-   * @deprecated Use dispositionCommissionBuyer + dispositionCommissionSeller.
-   * Kept as a backwards-compat shim for the existing Workstation and any
-   * other consumer that hasn't migrated yet. Computed automatically by
-   * the engine as buyer + seller. Will be removed in 3F.
-   */
-  dispositionCommissions: number;
-
   // ─── Total ───
 
   /** Sum of all 6 line items (acquisitionSubtotal + dispositionSubtotal). */

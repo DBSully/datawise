@@ -149,7 +149,7 @@ export async function loadWorkstationData(
       .maybeSingle(),
     supabase
       .from("analysis_notes")
-      .select("id, note_type, note_body, is_public, created_at, updated_at")
+      .select("id, note_type, note_body, visibility, created_at, updated_at")
       .eq("analysis_id", analysisId)
       .order("created_at", { ascending: true }),
   ]);
@@ -814,7 +814,7 @@ export async function loadWorkstationData(
       id: string;
       note_type: string;
       note_body: string;
-      is_public: boolean;
+      visibility: string;
       created_at: string;
     }>,
     compModalData: {

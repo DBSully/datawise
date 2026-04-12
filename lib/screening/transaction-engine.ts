@@ -22,10 +22,6 @@
 // output is unchanged. Existing screening_results.transaction_total
 // values remain valid — no recompute or backfill needed.
 //
-// The deprecated `dispositionCommissions` field is kept on the result
-// type as a backwards-compat shim (computed as buyer + seller) so any
-// existing consumer that hasn't migrated yet continues to work. The
-// shim is removed in 3F when the existing Workstation is fully retired.
 // ---------------------------------------------------------------------------
 
 import type { TransactionConfig } from "./strategy-profiles";
@@ -69,10 +65,6 @@ export function calculateTransaction(
   const dispositionSubtotal =
     dispositionTitle + dispositionCommissionBuyer + dispositionCommissionSeller;
 
-  // ─── Backwards-compat shim (deprecated) ───
-  const dispositionCommissions =
-    dispositionCommissionBuyer + dispositionCommissionSeller;
-
   return {
     acquisitionTitle,
     acquisitionCommission,
@@ -82,7 +74,6 @@ export function calculateTransaction(
     dispositionCommissionBuyer,
     dispositionCommissionSeller,
     dispositionSubtotal,
-    dispositionCommissions, // deprecated, kept for backwards compat
     total: acquisitionSubtotal + dispositionSubtotal,
   };
 }

@@ -229,10 +229,7 @@ export function NotesCardModal({ data, onClose }: NotesCardModalProps) {
             const catInfo = NOTE_CATEGORIES.find(
               (c) => c.value === note.note_type,
             );
-            // Derive visibility from is_public until the type exposes
-            // the visibility column directly (deferred to 3F when
-            // is_public is dropped).
-            const vis = note.is_public ? "all_partners" : "internal";
+            const vis = note.visibility ?? "internal";
             return (
               <div
                 key={note.id}

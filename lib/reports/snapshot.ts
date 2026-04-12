@@ -23,9 +23,9 @@ export function buildReportSnapshot(data: WorkstationData): ReportContentJson {
       };
     });
 
-  // Only include public notes
+  // Only include partner-visible notes (exclude internal-only)
   const publicNotes = data.notes
-    .filter((n) => n.is_public)
+    .filter((n) => n.visibility !== "internal")
     .map((n) => ({
       noteType: n.note_type,
       noteBody: n.note_body,

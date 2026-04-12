@@ -88,14 +88,6 @@ export type TransactionDetail = {
   /** NEW (Decision 5): sum of disposition-side line items. */
   dispositionSubtotal: number;
 
-  // ─── Backwards-compat (deprecated) ───
-  /**
-   * @deprecated Use dispositionCommissionBuyer + dispositionCommissionSeller.
-   * Kept so the existing Workstation continues to compile and render.
-   * Will be removed in 3F.
-   */
-  dispositionCommissions: number;
-
   // ─── Total ───
   /** Sum of all 6 line items. */
   total: number;
@@ -311,7 +303,7 @@ export type WorkstationData = {
     id: string;
     note_type: string;
     note_body: string;
-    is_public: boolean;
+    visibility: string;
     created_at: string;
   }>;
   compModalData: {

@@ -208,7 +208,8 @@ export function ReportDocument({ report, title, mapSlot }: Props) {
                 <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Transaction</div>
                 <Row label="Acquisition Title" value={fmt(r.transaction.acquisitionTitle)} />
                 <Row label="Disposition Title" value={fmt(r.transaction.dispositionTitle)} />
-                <Row label="Commissions" value={fmt(r.transaction.dispositionCommissions)} />
+                <Row label="Commission — Buyer" value={fmt(r.transaction.dispositionCommissionBuyer)} />
+                <Row label="Commission — Seller" value={fmt(r.transaction.dispositionCommissionSeller)} />
                 <div className="mt-1 border-t border-slate-200" />
                 <Row label="Total Transaction" value={fmt(r.transaction.total)} bold />
               </div>
