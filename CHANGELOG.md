@@ -1,3 +1,50 @@
+## 2026-04-11 — Phase 1 Step 3F — Cleanup (Step 3 Complete)
+
+Final sub-step of Step 3. Mechanical cleanup: convert legacy URL wrappers to hard redirects, drop the deprecated `analysis_notes.is_public` column, remove the `dispositionCommissions` backwards-compat shim, delete dead files, and retire the layout-level auth check.
+
+### What shipped
+
+- **Legacy `/deals/*` URLs now redirect permanently.** `/deals/watchlist` → `/analysis`, `/deals/watchlist/[id]` → `/analysis/[id]`, `/deals/pipeline` → `/action`, `/deals/closed` → `/action?status=closed`. Bookmarks still work; they just redirect now instead of serving content.
+
+- **`analysis_notes.is_public` column dropped.** Type, loader, and all consumers updated to use `visibility` (the enum column added in 3A) directly. Migration `20260411100100` drops the column.
+
+- **`dispositionCommissions` backwards-compat shim removed.** The deprecated field was removed from `TransactionResult`, `TransactionDetail`, and the transaction engine. The report document now renders buyer + seller commissions separately. 4 code files cleaned.
+
+- **Dead files deleted (780 lines removed).** The 3D auto-persist test harness (`dev/auto-persist-test/`), the dead `ManualAnalysisPanel` component (zero imports), and their directories.
+
+- **Layout-level auth check retired.** `app/(workspace)/layout.tsx` no longer calls `supabase.auth.getUser()`. Proxy.ts middleware remains the primary auth enforcer. Saves one getUser() round-trip per workspace page load. Confirmed by Dan.
+
+### What stays (deferred)
+
+- `saveManualAnalysisAction` bulk form action — RehabCard still uses it for the Save Rehab button. Deferred until RehabCard is migrated to per-payload auto-persist.
+- The `deals/` directory itself — still has load-bearing actions and table components used by the Watch List and Action pages.
+
+### Step 3 Summary
+
+Step 3 of Phase 1 is **complete** across 6 sub-steps (3A through 3F):
+
+| Sub-step | What it did |
+|---|---|
+| **3A** | Schema preparation — notes visibility, next_step column, transaction 6-line restructure, cash required extension, bed/bath level fields, SECURITY DEFINER audit |
+| **3B** | Route restructure — canonical `/analysis` + `/analysis/[id]` + `/action` routes, nav update, internal link sweep, sign-out button |
+| **3C** | Component extraction — 11 shared components in `components/workstation/`, 905 lines of inline JSX deduplicated |
+| **3D** | Auto-persist infrastructure — discriminated-union server action, race-safe useDebouncedSave hook, SaveStatusDot indicator |
+| **3E** | New Workstation card layout — header, 4-tile row with auto-persist, deal stat strip with override indicators, hero comp workspace, 9 collapsible detail cards with per-card modals |
+| **3F** | Cleanup — legacy redirects, drop is_public, remove deprecated shim, delete dead files, retire layout auth |
+
+**By the numbers:**
+- ~60+ commits across 3A-3F
+- ~5,000+ lines of new code in the new Workstation + shared components
+- ~3,800+ lines of dead/deprecated code removed
+- 2 SQL migrations (notes visibility DEFAULT + is_public drop)
+- 7 design followups queued for the polish pass
+- The `components/workstation/` directory contains 13 shared components
+- The new Workstation orchestrator + 8 modal files replace the monolithic legacy client
+
+**Next:** Step 4 (Partner Portal MVP) builds the partner-facing experience on top of the Workstation infrastructure. The Partner Sharing card stub is ready to be filled in. The design followups (WORKSTATION_DESIGN_FOLLOWUPS.md) can be addressed in a focused polish pass before or alongside Step 4.
+
+---
+
 ## 2026-04-11 — Phase 1 Step 3E — New Workstation Card Layout
 
 Fifth and largest sub-step of the Step 3 milestone. Build the new Analysis Workstation per `WORKSTATION_CARD_SPEC.md`. The new Workstation replaces the legacy 2046-line monolithic `analysis-workstation.tsx` with a modular orchestrator (~720 lines) + 8 per-card modal files + shared components from 3C + auto-persist infrastructure from 3D.
