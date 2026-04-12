@@ -317,6 +317,31 @@ The screening modal is already dense (map + table + subject tiles + deal strip +
 
 ---
 
+## 10. Workstation Deal Stat Strip missing Copy MLS Selected / Copy All buttons
+
+**Surfaced:** 2026-04-12
+**Status:** Open
+**Severity:** Functional gap — spec §3.3 explicitly calls for these; the modal has them but the Workstation doesn't
+**Scope:** `app/(workspace)/analysis/[analysisId]/analysis-workstation.tsx` (DealStatStrip `rightSlot` prop)
+
+### The issue
+
+The screening modal's Deal Stat Strip has a right-aligned section with comp count text + "Copy Selected" + "Copy All" MLS# buttons (wired via the `rightSlot` prop on `<DealStatStrip>` in 3C Task 10). The new Workstation's Deal Stat Strip was wired in 3E.4 WITHOUT a `rightSlot`, so the Copy MLS buttons are missing.
+
+The spec §3.3 says: "On the right side of the strip: small comp count + Copy Selected MLS# / Copy All MLS# buttons (matches modal). The Copy Selected button should still be the Tab target from Quick Analysis (existing keyboard flow preserved)."
+
+### The fix
+
+The Workstation parent already has `compData` (ScreeningCompData) in state from the hero CompWorkspace loading. The fix is:
+
+1. Extract `CopyMlsButton` from the screening modal (currently a private component at ~20 lines) into `components/workstation/copy-mls-button.tsx`
+2. Pass a `rightSlot` to the Workstation's `<DealStatStrip>` with the comp count text + two CopyMlsButton instances (same pattern as the modal)
+3. Wire the Copy Selected button ref for the Tab-from-Quick-Analysis keyboard flow (the `onTargetProfitTab` callback on QuickAnalysisTile)
+
+~15 min fix. Requires compData to be loaded (which it is after the hero mounts).
+
+---
+
 ## How to add new entries
 
 Append a new section below using the same template:
