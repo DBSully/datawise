@@ -121,46 +121,129 @@ This scorecard turns DataWise from a deal calculator into a **learning system** 
 
 ---
 
-## 2. The Feature Stack That Builds Toward This Vision
+## 2. The Feature Stack
 
-The design followups from `WORKSTATION_DESIGN_FOLLOWUPS.md` aren't isolated ideas — they're layers of a coherent analytical intelligence stack:
+Four layers of analytical intelligence, each building on the one below:
 
 ```
-LAYER 4 — LEARNING (this document)
+LAYER 4 — LEARNING
   Dashboard circles + accuracy scorecard
   "Was I right? What can I learn?"
-    ↑ feeds from
-LAYER 3 — PRIORITY + CONTEXT (followups #14, #17, #18)
+
+LAYER 3 — PRIORITY + CONTEXT
   Urgency fuse + agent behavior + market conditions
   "What should I do next and why?"
-    ↑ feeds from
-LAYER 2 — SPATIAL AWARENESS (followups #11, #15, #16)
+
+LAYER 2 — SPATIAL AWARENESS
   Map views + close/list ratio + nearby analyses
   "Where are the opportunities?"
-    ↑ feeds from
-LAYER 1 — DEAL MATH (followups #9, #10, #12, #13)
-  Waterfall cards + copy MLS + layout architecture
+
+LAYER 1 — DEAL MATH (design polish in WORKSTATION_DESIGN_FOLLOWUPS.md)
+  Waterfall cards + layout architecture + strip polish
   "What does the math say?"
-    ↑ feeds from
-FOUNDATION — the Workstation + Screening + Auto-persist (Steps 1-4)
-  The infrastructure that captures every analysis decision
+
+FOUNDATION — Steps 1-4
+  Workstation + Screening + Auto-persist + Partner Portal
 ```
 
-Each layer builds on the one below. The foundation (Steps 1-4) captures the data. Layer 1 computes the math. Layer 2 adds spatial context. Layer 3 adds urgency and relationship intelligence. Layer 4 closes the feedback loop and makes the analyst better over time.
+Layer 1 items stay in `WORKSTATION_DESIGN_FOLLOWUPS.md` as design polish (entries #1-10, #12). Layers 2-4 are product features described below.
 
 ---
 
-## 3. Implementation Priority (Dan to refine)
+## 3. Layer 2 — Spatial Awareness
 
-| Priority | What | Why | Estimated effort |
-|---|---|---|---|
-| **Now** | Step 4 Partner Portal | Phase 1 #1 deliverable | In progress |
-| **Next** | Design polish pass (followups #1-12) | Analyst UX quality | 2-3 days |
-| **Then** | Layer 2 features (#11 map, #15 C/L ratio, #16 nearby) | Quick wins, existing data | 3-5 days |
-| **Then** | Layer 3 features (#14 market conditions, #17 agents, #18 urgency) | High analytical value | 2-3 weeks |
-| **Future** | Layer 4 (circle closing, accuracy scorecard) | Transformative — makes DataWise a learning system | 2-4 weeks |
+### 3.1 Map view for screening queue + Watch List
 
-The exact ordering is Dan's call. The stack is designed so each layer adds value independently — you don't need Layer 4 to benefit from Layer 2. But the full stack is where the product vision lives.
+*(Moved from design followup #11)*
+
+A map view toggle that plots deals geographically. Pins color-coded by a selectable metric (Gap/sqft or Offer%). Click a pin → opens the screening modal or navigates to the Workstation. Reuses the existing `<CompMap>` component.
+
+- **Data:** `analysis_queue_v` and `watch_list_v` already have lat/lng, gap, offer%
+- **Effort:** ~1-2 days (new shared `<DealMapView>` component + toggle state per page)
+
+### 3.2 Close/list price ratio + DOM per comp — market health signal
+
+*(Moved from design followup #15)*
+
+The comp table shows what sold but not HOW it sold. Two comps at the same price tell different stories — one sold over ask on day 3 (hot), another closed after 2 price cuts on day 45 (soft). Add C/L% and DOM columns to the comp table. Aggregate into the Price Trend card as a market health indicator.
+
+- **Data:** `mls_listings.list_price`, `close_price`, `listing_contract_date`, `purchase_contract_date` — likely already available
+- **Effort:** ~1-2 days (check if list_price is in comp metrics_json; add table columns; aggregate for trend card)
+
+### 3.3 Nearby Analyses — showing efficiency + cross-deal awareness
+
+*(Moved from design followup #16)*
+
+When viewing a property, surface other active analyses within 0.5mi. Groups showings into efficient routes. The `haversine()` function already exists in the codebase.
+
+- **Data:** `real_properties` has lat/lng for all properties; `analyses` links to them
+- **Effort:** ~half-day (proximity query + compact display in Workstation header or a mini-card)
+
+---
+
+## 4. Layer 3 — Priority + Context
+
+### 4.1 Show Market Conditions — active/expired/withdrawn listing overlay
+
+*(Moved from design followup #14)*
+
+On-demand button in the comp workspace that overlays current market data: active listings (competition), expired (couldn't sell), withdrawn (pulled off market). Helps the analyst gauge whether a strong ARV gap is real or threatened by competition.
+
+- **Data:** `mls_listings` filtered by non-closed statuses in the same geographic area as the comp search
+- **Effort:** ~1-2 days (server action + CompMap extension + market conditions panel/tab)
+- **Key insight from Dan:** "A good deal can turn bad if there is too much competition"
+
+### 4.2 Layout evolution — separate deal-math cards from non-math cards
+
+*(Moved from design followup #13)*
+
+The 9 right-column cards mix four concerns: deal math (ARV/Rehab/Hold/Trans/Financing/Cash), market data (Price Trend), action/status (Pipeline), communication (Notes/Partner Sharing). The deal-math cards should visually mirror the offer price waterfall. Non-math cards belong in a separate region.
+
+Future direction: the deal-math cards could become a single interactive waterfall where each line item is expandable in-place — the layout IS the math. Combined with design followup #4 (cards move to the left), the analyst's primary interaction surface becomes a vertical deal-math cascade on the left with the comp workspace on the right.
+
+- **Effort:** Phase A (two card groups with divider) ~1 day; Phase B (interactive waterfall) ~3-5 days
+
+### 4.3 Listing agent relationship tracking
+
+*(Moved from design followup #17)*
+
+Track agent interactions across deals: showings, offers, calls, responsiveness. Dan tracked this in detail in the legacy MS Access system — it's a known high-value workflow.
+
+- **Schema:** new `agents` + `agent_interactions` tables
+- **Features:** agent deduplication from MLS data, interaction logging UI, cross-deal relationship summary in the Workstation
+- **Effort:** ~5-7 days as a dedicated feature branch
+
+### 4.4 Deal urgency "fuse" — time-and-offer-sensitive priority management
+
+*(Moved from design followup #18)*
+
+A per-analysis urgency indicator combining time pressure (DOM + price reductions), offer positioning (how close the analyst's offer is to list), and agent behavior (does this agent sell fast at full price or routinely accept discounts?).
+
+- **Urgency burns faster when:** DOM high + price reduced + offer% close to list + agent's listings sit
+- **Urgency burns slower when:** just listed + offer far below + agent sells fast at full price
+- **Display:** color-coded urgency column in Watch List (sortable); badge in Workstation header
+- **Effort:** Phase A (simple DOM/price/offer score) ~1 day; Phase B (agent behavior query) ~2 days; Phase C (integrated formula) ~1-2 days
+- **Key insight from Dan:** "My urgency is low if I can offer 82% on a house listed yesterday. But that fuse is burning."
+
+---
+
+## 5. Layer 4 — Learning (§1 above)
+
+The circle-closing + accuracy scorecard described in §1. The most transformative layer — turns DataWise from a deal calculator into a system that makes the analyst better over time.
+
+---
+
+## 6. Implementation Priority (Dan to refine)
+
+| Priority | What | Estimated effort |
+|---|---|---|
+| **Now** | Step 4 Partner Portal | In progress |
+| **Next** | Design polish pass (WORKSTATION_DESIGN_FOLLOWUPS.md #1-10, #12) | 2-3 days |
+| **Then** | Layer 2 (map views, C/L ratio, nearby analyses) | 3-5 days |
+| **Then** | Layer 3 (market conditions, layout evolution, agents, urgency) | 2-4 weeks |
+| **Future** | Layer 4 (circle closing, accuracy scorecard) | 2-4 weeks |
+
+Each layer adds value independently. The full stack is where the product vision lives.
 
 ---
 
