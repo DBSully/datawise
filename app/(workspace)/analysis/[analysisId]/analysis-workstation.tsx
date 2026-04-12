@@ -42,6 +42,7 @@ import { DetailCard } from "@/components/workstation/detail-card";
 import { DetailModal } from "@/components/workstation/detail-modal";
 import { ArvCardModal } from "./arv-card-modal";
 import { CashRequiredCardModal } from "./cash-required-card-modal";
+import { PriceTrendCardModal } from "./price-trend-card-modal";
 import {
   QuickAnalysisTile,
   parseDollarInput,
@@ -654,13 +655,18 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
           onClose={() => setOpenModal(null)}
         />
       )}
-      {openModal != null && openModal !== "arv" && openModal !== "cashRequired" && (
+      {openModal === "priceTrend" && (
+        <PriceTrendCardModal
+          trend={data.trend}
+          onClose={() => setOpenModal(null)}
+        />
+      )}
+      {openModal != null && openModal !== "arv" && openModal !== "cashRequired" && openModal !== "priceTrend" && (
         <DetailModal
           title={
             openModal === "rehab" ? "Rehab" :
             openModal === "holdTrans" ? "Holding & Transaction" :
             openModal === "financing" ? "Financing" :
-            openModal === "priceTrend" ? "Price Trend" :
             openModal === "pipeline" ? "Pipeline Status" :
             openModal === "notes" ? "Notes" :
             openModal === "partnerSharing" ? "Partner Sharing" :
