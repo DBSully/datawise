@@ -607,6 +607,62 @@ Check whether `list_price` is available in the comp candidate's `metrics_json`. 
 
 ---
 
+## 16. "Nearby Analyses" — show other properties we've analyzed in the area
+
+**Surfaced:** 2026-04-12
+**Status:** Open — feature idea, workflow efficiency
+**Severity:** Feature — operational efficiency for showings and route planning
+**Scope:** Workstation (possibly the header or a new card) + Watch List / Pipeline views
+
+### Dan's insight
+
+When the analyst is scheduling showings for a property, they should know if there are other properties of interest nearby. If two Watch List properties are 3 blocks apart, the analyst should see them both on the same trip. Today there's no way to discover this proximity — each analysis is isolated.
+
+Dan's view: "Let's create efficiency."
+
+### The feature
+
+A "Nearby Analyses" indicator that surfaces other properties the analyst has analyzed (or is watching) that are geographically close to the current property. This creates showing-route efficiency and cross-deal awareness.
+
+### Where it could appear
+
+- **Workstation header or a small card:** "2 other analyses within 0.5 mi" with a mini-map or link list. Click to open the other Workstation.
+- **Watch List / Pipeline table:** a "cluster" indicator on rows that have nearby siblings. "3 properties in Capitol Hill" grouped visually.
+- **Map view (#11):** if the map view is built, nearby analyses are automatically visible as pins. This feature becomes implicit in the map — no separate UI needed.
+
+### Implementation notes
+
+- **Data:** `real_properties` has `latitude` + `longitude` for every property. `analyses` links to `real_properties`. A simple proximity query: `SELECT * FROM analyses JOIN real_properties ON ... WHERE ST_DDistance(lat/lng, subject_lat/lng) < threshold AND analyses.id != current_analysis_id AND analyses.is_archived = false`.
+- **Or simpler without PostGIS:** Haversine distance calculation in a server action, filtering analyses within 0.5mi (or configurable radius). We already have the `haversine()` function in `deals/actions.ts` from the manual comp addition feature.
+- **Performance:** the analysis count is small (dozens to hundreds, not thousands). A simple distance filter over all active analyses is fast.
+- **Display:** a compact list: address + distance + lifecycle stage (screening / analysis / showing / offer) + interest level. Click → navigate to that Workstation.
+
+### Design sketch
+
+```
+┌──────────────────────────────────────────────┐
+│ 📍 Nearby Analyses (2 within 0.5 mi)         │
+│                                              │
+│  742 Pearl St (0.2 mi) · Watch List · Hot    │
+│  818 Grant St (0.4 mi) · Showing · Warm      │
+│                                              │
+│  → Great for a combined showing trip          │
+└──────────────────────────────────────────────┘
+```
+
+### Relationship to other followups
+
+- **#11 (Map view for screening/Watch List):** if the map view is built, nearby analyses are visible automatically as pins on the map. The "Nearby Analyses" card becomes a quick reference for the non-map view.
+- **#14 (Market Conditions):** nearby analyses + active market conditions together give the analyst full spatial awareness — "what am I analyzing here, what's competing, and what else do I have going on in this neighborhood?"
+
+### Recommended approach
+
+Start simple: a small "Nearby" section in the Workstation (below the header or as a mini-card) that queries active analyses within 0.5mi and lists them. The haversine function already exists. The query is cheap. If the map view (#11) ships, this becomes redundant for map users but still useful as a text summary.
+
+Could be a ~half-day feature addition. High operational value for analysts managing multiple deals in the same neighborhood.
+
+---
+
 ## How to add new entries
 
 Append a new section below using the same template:
