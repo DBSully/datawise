@@ -44,6 +44,7 @@ import { ArvCardModal } from "./arv-card-modal";
 import { CashRequiredCardModal } from "./cash-required-card-modal";
 import { FinancingCardModal } from "./financing-card-modal";
 import { HoldTransCardModal } from "./hold-trans-card-modal";
+import { PipelineCardModal } from "./pipeline-card-modal";
 import { PriceTrendCardModal } from "./price-trend-card-modal";
 import { RehabCardModal } from "./rehab-card-modal";
 import {
@@ -691,10 +692,15 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
           onClose={() => setOpenModal(null)}
         />
       )}
-      {openModal != null && openModal !== "arv" && openModal !== "cashRequired" && openModal !== "priceTrend" && openModal !== "rehab" && openModal !== "holdTrans" && openModal !== "financing" && (
+      {openModal === "pipeline" && (
+        <PipelineCardModal
+          data={data}
+          onClose={() => setOpenModal(null)}
+        />
+      )}
+      {openModal != null && openModal !== "arv" && openModal !== "cashRequired" && openModal !== "priceTrend" && openModal !== "rehab" && openModal !== "holdTrans" && openModal !== "financing" && openModal !== "pipeline" && (
         <DetailModal
           title={
-            openModal === "pipeline" ? "Pipeline Status" :
             openModal === "notes" ? "Notes" :
             openModal === "partnerSharing" ? "Partner Sharing" :
             "Detail"
