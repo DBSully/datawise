@@ -46,6 +46,7 @@ import {
   type AnalysisShareRow,
   type PartnerFeedbackRow,
 } from "@/lib/partner-portal/share-actions";
+import { useShareRealtime } from "@/lib/partner-portal/use-share-realtime";
 import {
   QuickAnalysisTile,
   parseDollarInput,
@@ -366,9 +367,21 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
     feedback: PartnerFeedbackRow[];
   } | null>(null);
 
-  useEffect(() => {
+  const refreshShareData = useCallback(() => {
     loadAnalysisSharesAction(data.analysisId).then(setShareData);
   }, [data.analysisId]);
+
+  useEffect(() => {
+    refreshShareData();
+  }, [refreshShareData]);
+
+  // ── Realtime subscription (Decision 9) ─────────────────────────────
+  // Live-updates the Partner Sharing card when partners view or submit
+  // feedback. Falls back to manual refresh if Realtime is unavailable.
+  useShareRealtime({
+    analysisId: data.analysisId,
+    onUpdate: refreshShareData,
+  });
 
   const activeShareCount = shareData?.shares.filter((s) => s.is_active).length ?? 0;
   const viewedCount = shareData?.shares.filter((s) => s.is_active && s.first_viewed_at).length ?? 0;
@@ -732,8 +745,7 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
           analysisId={data.analysisId}
           onClose={() => {
             setOpenModal(null);
-            // Reload share data so the collapsed card headline refreshes
-            loadAnalysisSharesAction(data.analysisId).then(setShareData);
+            refreshShareData();
           }}
         />
       )}
