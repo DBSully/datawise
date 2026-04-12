@@ -431,6 +431,48 @@ The headline tries to show both holding AND transaction totals in one line, maki
 
 ---
 
+## 13. Future layout direction: separate deal-math cards from non-math cards
+
+**Surfaced:** 2026-04-12
+**Status:** Open — directional vision, not an immediate fix
+**Severity:** Architecture / UX direction — informs future layout decisions
+**Scope:** The overall Workstation right-column card organization
+
+### Dan's vision
+
+The 9 right-column cards currently mix four fundamentally different concerns into one vertical stack:
+
+| Concern | Cards | Role |
+|---|---|---|
+| **Deal Math** | ARV, Rehab, Holding & Trans, Financing, Cash Required | Numbers that feed the offer price waterfall. Each cascades into the next. |
+| **Market Data** | Price Trend | External context — informs the analyst's judgment but doesn't directly compute the offer price |
+| **Action / Status** | Pipeline Status | Deal mechanics — showings, offers, contracts. Operational state, not math. |
+| **Communication** | Notes, Partner Sharing | Collaboration and record-keeping. No math influence. |
+
+Dan's insight: the deal-math cards should be **visually organized to mirror the deal math waterfall itself** — the analyst should see the cascade (ARV → minus Rehab → minus Hold → minus Trans → minus Financing → minus Profit = Max Offer) reflected in the card layout. The non-math cards (Price Trend, Pipeline, Notes, Partner Sharing) belong in a separate visual region since they serve a different purpose.
+
+### Why this matters
+
+Today all 9 cards are in one flat stack. The analyst has to mentally separate "which of these affect my offer price?" from "which of these are context / communication?" When the deal-math cards are intermixed with the non-math cards, the waterfall relationship between them is invisible — you can't see that ARV feeds into Cash Required, or that changing Days Held cascades through Holding into the offer price.
+
+### Possible future layouts
+
+- **(a) Two card groups.** "Deal Math" group (5 cards, ordered to match the waterfall: ARV → Rehab → Hold/Trans → Financing → Cash Required) + "Context & Action" group (4 cards: Price Trend, Pipeline, Notes, Partner Sharing). Two visually distinct sections in the column, with a subtle divider or different background.
+
+- **(b) Deal Math cards laid out AS the waterfall.** Instead of 5 separate collapsed cards, render the deal math as a single interactive waterfall card where each line item is expandable in-place. Click "Rehab $71,400" in the waterfall → it expands to show the category breakdown without opening a separate modal. The non-math cards stay as a separate card stack. This would be the most natural representation — the layout IS the math.
+
+- **(c) Two columns.** Deal math on the left, context/action on the right. The comp workspace occupies the center. Three-column layout on wide viewports.
+
+### Recommended approach
+
+This is a Phase 2+ layout evolution, not a Phase 1 task. The current flat stack works — it just doesn't communicate the relationships between cards. When the time comes:
+
+1. Start with **(a)** — two card groups with a divider. Lowest-risk layout change that immediately communicates the separation.
+2. If (a) feels right, explore **(b)** — the interactive waterfall card. This is the more ambitious but more elegant solution. It would replace 5 separate DetailCards with one unified waterfall component where each line item is its own expand-in-place section.
+3. Consider **(b)** alongside design followup #4 (moving the card column to the left) — if the cards move left AND become a waterfall, the analyst's primary interaction surface becomes a vertical deal-math cascade on the left with the comp workspace on the right. That's a strong layout.
+
+---
+
 ## How to add new entries
 
 Append a new section below using the same template:
