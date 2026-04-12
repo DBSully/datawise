@@ -342,6 +342,64 @@ The Workstation parent already has `compData` (ScreeningCompData) in state from 
 
 ---
 
+## 11. Screening queue + Watch List need a map view for geographic deal selection
+
+**Surfaced:** 2026-04-12
+**Status:** Open
+**Severity:** Feature — new capability, not a fix to existing UI
+**Scope:** `app/(workspace)/screening/page.tsx`, `app/(workspace)/analysis/page.tsx` (Watch List), possibly a new shared `<DealMapView>` component
+
+### The issue
+
+The screening queue and Watch List are currently table-only views. The analyst has no way to see deals spatially — where they are relative to each other, which neighborhoods have clusters of opportunity, or which deals are near a property they're already evaluating.
+
+### Dan's vision
+
+A map view toggle on the screening queue and Watch List that plots deals geographically. Pins are color-coded by a selectable metric (Gap/sqft or Offer%) so the analyst can visually scan for opportunity clusters and choose which properties to evaluate based on location + deal quality together.
+
+### Design sketch
+
+```
+┌────────────────────────────────────────────────────────┐
+│  Screening Queue          [ Table View | Map View 🗺 ] │
+│                                                        │
+│  Color by: [ Gap/sqft ▾ ]   Filter: [ Prime Only ☐ ]  │
+│                                                        │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │                                                  │  │
+│  │     🟢         🟢                                │  │
+│  │          🟡                                      │  │
+│  │                    🟢    🔴                       │  │
+│  │     🟡                                           │  │
+│  │              🔴          🟢                       │  │
+│  │                                                  │  │
+│  │  Click pin → opens screening modal for that      │  │
+│  │  property (same as clicking a table row today)   │  │
+│  └──────────────────────────────────────────────────┘  │
+│                                                        │
+│  Pin colors (Gap/sqft):                                │
+│  🟢 ≥$60  🟡 $30–$59  🔴 <$30                         │
+│                                                        │
+└────────────────────────────────────────────────────────┘
+```
+
+### Implementation notes
+
+- Reuses the existing `<CompMap>` component from `components/properties/comp-map.tsx` (already battle-tested in the screening modal and Workstation hero)
+- Data: `analysis_queue_v` already has `subject_address`, latitude/longitude (via the mls_listings join), `est_gap_per_sqft`, `offer_pct`, `is_prime_candidate`
+- Watch List: `watch_list_v` has the same fields via the property/listing joins
+- Pin click handler: opens the screening modal (queue) or navigates to `/analysis/[id]` (Watch List)
+- Toggle between Table View and Map View (or render both side-by-side on wide viewports)
+- Color metric selector: Gap/sqft (default) or Offer% — drives the pin color thresholds
+
+### Recommended approach
+
+Build a shared `<DealMapView>` component that takes an array of `{ id, lat, lng, label, metric, metricValue }` pins and renders them on a CompMap with color coding. Both the screening queue page and the Watch List page can use it by mapping their respective view data into the pin format. The toggle between table and map view is a per-page state (`useState<"table" | "map">("table")`).
+
+This is a feature addition, not a design fix. Scope it as a standalone task outside the design polish pass — possibly after Step 4 or as a parallel track.
+
+---
+
 ## How to add new entries
 
 Append a new section below using the same template:
