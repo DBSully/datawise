@@ -64,14 +64,20 @@ export function useShareRealtime({
           schema: "public",
           table: "partner_feedback",
         },
-        (payload) => {
-          // partner_feedback doesn't have analysis_id directly —
-          // it's linked via analysis_shares. For MVP, we trigger on
-          // ALL partner_feedback inserts and let the data reload
-          // filter to the current analysis. This is acceptable at
-          // MVP scale (few feedback events total). A more targeted
-          // approach would join through analysis_shares in a DB
-          // function, but that's over-engineering for now.
+        () => {
+          onUpdateRef.current();
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "partner_analysis_versions",
+        },
+        () => {
+          // Partner saved an override (ARV, rehab, etc.) — refresh
+          // so the analyst can see the partner's adjustments.
           onUpdateRef.current();
         },
       )

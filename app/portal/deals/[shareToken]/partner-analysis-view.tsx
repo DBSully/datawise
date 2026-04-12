@@ -41,6 +41,9 @@ import { fmt, fmtNum } from "@/lib/reports/format";
 import type { WorkstationData } from "@/lib/reports/types";
 import type { PartnerCompData } from "@/lib/partner-portal/load-partner-view-data";
 import { submitPartnerFeedbackAction } from "@/lib/partner-portal/feedback-actions";
+import { savePartnerOverrideAction } from "@/lib/partner-portal/save-partner-override-action";
+import { useDebouncedSave } from "@/lib/auto-persist/use-debounced-save";
+import { SaveStatusDot } from "@/components/workstation/save-status-dot";
 
 /** Format an ISO date string as mm/dd/yy without TZ shifts. */
 function fmtIsoDate(v: string | null | undefined): string {
@@ -81,9 +84,71 @@ export function PartnerAnalysisView({
 
   const p = data.physical;
 
-  // For MVP, use the analyst's deal math values. Partner overrides
-  // (Quick Analysis sandbox) ship in a subsequent 4D commit.
   const dealMath = data.dealMath;
+
+  // ── Partner Quick Analysis sandbox ─────────────────────────────
+  // Private overrides that persist to partner_analysis_versions.
+  // The Deal Stat Strip recalculates from these when set.
+  const [partnerArvInput, setPartnerArvInput] = useState<string>(
+    partnerVersion?.arvOverride != null ? String(partnerVersion.arvOverride) : "",
+  );
+  const [partnerRehabInput, setPartnerRehabInput] = useState<string>(
+    partnerVersion?.rehabOverride != null ? String(partnerVersion.rehabOverride) : "",
+  );
+  const [partnerProfitInput, setPartnerProfitInput] = useState<string>(
+    partnerVersion?.targetProfitOverride != null ? String(partnerVersion.targetProfitOverride) : "",
+  );
+  const [partnerDaysInput, setPartnerDaysInput] = useState<string>(
+    partnerVersion?.daysHeldOverride != null ? String(partnerVersion.daysHeldOverride) : "",
+  );
+
+  // Parse helpers
+  const parseDollar = (s: string): number | null => {
+    const c = s.replace(/[,$\s]/g, "");
+    if (c === "") return null;
+    const n = Number(c);
+    return Number.isFinite(n) ? n : null;
+  };
+  const parseInt_ = (s: string): number | null => {
+    const c = s.replace(/[,\s]/g, "");
+    if (c === "") return null;
+    const n = Number.parseInt(c, 10);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  // Auto-persist hooks
+  const arvSave = useDebouncedSave(parseDollar(partnerArvInput), async (value) => {
+    await savePartnerOverrideAction({ shareId: share.id, field: "arv_override", value });
+  });
+  const rehabSave = useDebouncedSave(parseDollar(partnerRehabInput), async (value) => {
+    await savePartnerOverrideAction({ shareId: share.id, field: "rehab_override", value });
+  });
+  const profitSave = useDebouncedSave(parseDollar(partnerProfitInput), async (value) => {
+    await savePartnerOverrideAction({ shareId: share.id, field: "target_profit_override", value });
+  });
+  const daysSave = useDebouncedSave(parseInt_(partnerDaysInput), async (value) => {
+    await savePartnerOverrideAction({ shareId: share.id, field: "days_held_override", value });
+  });
+
+  // ── Partner liveDeal — recalculates from partner overrides ─────
+  const partnerLiveDeal = useMemo(() => {
+    if (!dealMath) return null;
+    const arv = parseDollar(partnerArvInput) ?? dealMath.arv;
+    const rehabTotal = parseDollar(partnerRehabInput) ?? dealMath.rehabTotal;
+    const targetProfit = parseDollar(partnerProfitInput) ?? dealMath.targetProfit;
+    const holdTotal = dealMath.holdTotal ?? 0;
+    const transactionTotal = dealMath.transactionTotal ?? 0;
+    const financingTotal = dealMath.financingTotal ?? 0;
+
+    const costs = rehabTotal + holdTotal + transactionTotal + financingTotal + targetProfit;
+    const maxOffer = Math.round(arv - costs);
+    const listPrice = data.listing?.listPrice ?? 0;
+    const offerPct = listPrice > 0 ? Math.round((maxOffer / listPrice) * 10000) / 10000 : null;
+    const sqft = data.physical?.buildingSqft ?? 0;
+    const gapPerSqft = listPrice > 0 && sqft > 0 ? Math.round((arv - listPrice) / sqft) : null;
+
+    return { arv, maxOffer, offerPct, gapPerSqft, rehabTotal, targetProfit };
+  }, [partnerArvInput, partnerRehabInput, partnerProfitInput, dealMath, data]);
 
   // ── Comp data from server (loaded via service-role client, no
   //    client-side fetch needed — avoids RLS issues for unauthenticated
@@ -249,8 +314,66 @@ export function PartnerAnalysisView({
         }}
       />
 
-      {/* ── Deal Stat Strip (analyst's values for MVP) ── */}
-      {dealMath && (
+      {/* ── Partner Quick Analysis (private sandbox) ── */}
+      <div className="shrink-0 rounded border border-indigo-200 bg-indigo-50/50 px-3 py-2" style={{ maxWidth: 320 }}>
+        <div className="mb-1.5 text-[9px] font-bold uppercase tracking-wider text-indigo-600">
+          Your Analysis (private)
+        </div>
+        <div className="grid grid-cols-2 gap-x-2 gap-y-2">
+          <div>
+            <label className="block text-[9px] font-semibold uppercase tracking-wider text-slate-500">Your ARV</label>
+            <div className="mt-0.5 flex items-center gap-1">
+              <input type="text" value={partnerArvInput} onChange={(e) => setPartnerArvInput(e.target.value)}
+                placeholder={dealMath?.arv != null ? String(Math.round(dealMath.arv)) : "—"}
+                className="w-[100px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-200" />
+              <SaveStatusDot status={arvSave.status} errorMessage={arvSave.errorMessage} />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[9px] font-semibold uppercase tracking-wider text-slate-500">Your Rehab</label>
+            <div className="mt-0.5 flex items-center gap-1">
+              <input type="text" value={partnerRehabInput} onChange={(e) => setPartnerRehabInput(e.target.value)}
+                placeholder={dealMath?.rehabTotal != null ? String(Math.round(dealMath.rehabTotal)) : "—"}
+                className="w-[100px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-200" />
+              <SaveStatusDot status={rehabSave.status} errorMessage={rehabSave.errorMessage} />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[9px] font-semibold uppercase tracking-wider text-slate-500">Target Profit</label>
+            <div className="mt-0.5 flex items-center gap-1">
+              <input type="text" value={partnerProfitInput} onChange={(e) => setPartnerProfitInput(e.target.value)}
+                placeholder={dealMath?.targetProfit != null ? String(dealMath.targetProfit) : "40,000"}
+                className="w-[100px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-200" />
+              <SaveStatusDot status={profitSave.status} errorMessage={profitSave.errorMessage} />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[9px] font-semibold uppercase tracking-wider text-slate-500">Days Held</label>
+            <div className="mt-0.5 flex items-center gap-1">
+              <input type="text" value={partnerDaysInput} onChange={(e) => setPartnerDaysInput(e.target.value)}
+                placeholder={data.holding?.daysHeld != null ? String(data.holding.daysHeld) : "—"}
+                className="w-[100px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-200" />
+              <SaveStatusDot status={daysSave.status} errorMessage={daysSave.errorMessage} />
+            </div>
+          </div>
+        </div>
+        <p className="mt-1.5 text-[9px] text-indigo-500">
+          Your adjustments are private and saved automatically. The strip below recalculates from your values.
+        </p>
+      </div>
+
+      {/* ── Deal Stat Strip (recalculates from partner overrides) ── */}
+      {partnerLiveDeal ? (
+        <DealStatStrip
+          arv={partnerLiveDeal.arv}
+          maxOffer={partnerLiveDeal.maxOffer}
+          offerPct={partnerLiveDeal.offerPct}
+          gapPerSqft={partnerLiveDeal.gapPerSqft}
+          rehabTotal={partnerLiveDeal.rehabTotal}
+          targetProfit={partnerLiveDeal.targetProfit}
+          trendAnnualRate={data.trend?.blendedAnnualRate ?? null}
+        />
+      ) : dealMath ? (
         <DealStatStrip
           arv={dealMath.arv}
           maxOffer={dealMath.maxOffer}
@@ -260,7 +383,7 @@ export function PartnerAnalysisView({
           targetProfit={dealMath.targetProfit}
           trendAnnualRate={data.trend?.blendedAnnualRate ?? null}
         />
-      )}
+      ) : null}
 
       {/* ── Partner-visible cards (read-only) ── */}
       <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 320px" }}>

@@ -229,9 +229,18 @@ export type PartnerFeedbackRow = {
   submitted_at: string;
 };
 
+export type PartnerVersionRow = {
+  analysis_share_id: string;
+  arv_override: number | null;
+  rehab_override: number | null;
+  target_profit_override: number | null;
+  days_held_override: number | null;
+};
+
 export type AnalysisSharesData = {
   shares: AnalysisShareRow[];
   feedback: PartnerFeedbackRow[];
+  partnerVersions: PartnerVersionRow[];
 };
 
 export async function loadAnalysisSharesAction(
@@ -275,8 +284,19 @@ export async function loadAnalysisSharesAction(
     feedbackRows = (fb ?? []) as PartnerFeedbackRow[];
   }
 
+  // Load partner versions for each share
+  let partnerVersionRows: PartnerVersionRow[] = [];
+  if (shareIds.length > 0) {
+    const { data: pv } = await supabase
+      .from("partner_analysis_versions")
+      .select("analysis_share_id, arv_override, rehab_override, target_profit_override, days_held_override")
+      .in("analysis_share_id", shareIds);
+    partnerVersionRows = (pv ?? []) as PartnerVersionRow[];
+  }
+
   return {
     shares: (shares ?? []) as AnalysisShareRow[],
     feedback: feedbackRows,
+    partnerVersions: partnerVersionRows,
   };
 }

@@ -22,6 +22,7 @@ import {
   loadAnalysisSharesAction,
   type AnalysisShareRow,
   type PartnerFeedbackRow,
+  type PartnerVersionRow,
 } from "@/lib/partner-portal/share-actions";
 
 type PartnerSharingCardModalProps = {
@@ -38,6 +39,7 @@ export function PartnerSharingCardModal({
   // ── Share data state ─────────────────────────────────────────────
   const [shares, setShares] = useState<AnalysisShareRow[]>([]);
   const [feedback, setFeedback] = useState<PartnerFeedbackRow[]>([]);
+  const [partnerVersions, setPartnerVersions] = useState<PartnerVersionRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
@@ -45,6 +47,7 @@ export function PartnerSharingCardModal({
     const data = await loadAnalysisSharesAction(analysisId);
     setShares(data.shares);
     setFeedback(data.feedback);
+    setPartnerVersions(data.partnerVersions);
     setLoading(false);
   }, [analysisId]);
 
@@ -103,6 +106,8 @@ export function PartnerSharingCardModal({
   const activeShares = shares.filter((s) => s.is_active);
   const getFeedbackForShare = (shareId: string) =>
     feedback.filter((f) => f.analysis_share_id === shareId);
+  const getVersionForShare = (shareId: string) =>
+    partnerVersions.find((v) => v.analysis_share_id === shareId) ?? null;
 
   return (
     <DetailModal title="Partner Sharing" onClose={onClose}>
@@ -176,6 +181,7 @@ export function PartnerSharingCardModal({
               <div className="space-y-1.5">
                 {activeShares.map((share) => {
                   const fb = getFeedbackForShare(share.id);
+                  const pv = getVersionForShare(share.id);
                   const latestFb = fb[0] ?? null;
                   const hasUnread =
                     latestFb &&
@@ -232,6 +238,7 @@ export function PartnerSharingCardModal({
                       </div>
 
                       {/* Feedback */}
+                      {/* Feedback */}
                       {fb.length > 0 && (
                         <div className="mt-1.5 border-t border-slate-100 pt-1.5">
                           {fb.map((f) => (
@@ -269,6 +276,41 @@ export function PartnerSharingCardModal({
                               </span>
                             </div>
                           ))}
+                        </div>
+                      )}
+
+                      {/* Partner's adjustments */}
+                      {pv && (pv.arv_override != null || pv.rehab_override != null || pv.target_profit_override != null || pv.days_held_override != null) && (
+                        <div className="mt-1.5 border-t border-slate-100 pt-1.5">
+                          <div className="text-[9px] font-semibold uppercase tracking-wider text-indigo-500 mb-0.5">
+                            Partner&apos;s adjustments
+                          </div>
+                          <div className="flex gap-3 text-[10px]">
+                            {pv.arv_override != null && (
+                              <span>
+                                <span className="text-slate-400">ARV: </span>
+                                <span className="font-mono text-indigo-700">${Math.round(pv.arv_override).toLocaleString()}</span>
+                              </span>
+                            )}
+                            {pv.rehab_override != null && (
+                              <span>
+                                <span className="text-slate-400">Rehab: </span>
+                                <span className="font-mono text-indigo-700">${Math.round(pv.rehab_override).toLocaleString()}</span>
+                              </span>
+                            )}
+                            {pv.target_profit_override != null && (
+                              <span>
+                                <span className="text-slate-400">Profit: </span>
+                                <span className="font-mono text-indigo-700">${Math.round(pv.target_profit_override).toLocaleString()}</span>
+                              </span>
+                            )}
+                            {pv.days_held_override != null && (
+                              <span>
+                                <span className="text-slate-400">Days: </span>
+                                <span className="font-mono text-indigo-700">{pv.days_held_override}</span>
+                              </span>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
