@@ -247,6 +247,23 @@ Dan's observation: "I like knowing that the edit is happening in real time, but 
 
 ---
 
+## 8. Property Physical tile — square footage values should be right-aligned
+
+**Surfaced:** 2026-04-11 after 3F completion
+**Status:** Open
+**Severity:** Cosmetic — minor alignment inconsistency
+**Scope:** `components/workstation/subject-tile-row.tsx` Property Physical tile
+
+### The issue
+
+Square footage values in the Property Physical tile (Total SF, Above SF, Below SF, Bsmt Fin, Lot SF) are left-aligned within their grid cells. When a value is short (e.g. "900" for a small basement), it sits at the left edge of its column while longer values in the same column are naturally wider. Numbers in an accounting-style layout should right-align so the digits line up consistently.
+
+### Recommended fix
+
+Add `text-right` to the value `<span>` elements for numeric fields in the Property Physical grid. Single class addition per cell. Same principle as the CostLine number-column alignment in entry 5.
+
+---
+
 ## How to add new entries
 
 Append a new section below using the same template:
