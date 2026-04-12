@@ -159,6 +159,34 @@ This is a single `gridTemplateColumns` change in the Workstation's JSX + swappin
 
 ---
 
+## 5. CostLine subscript notes displace numbers from the value column
+
+**Surfaced:** 2026-04-11 during 3E.7.f (FinancingCardModal)
+**Status:** Open
+**Severity:** Layout — affects readability and trust in every waterfall card
+**Scope:** `components/workstation/cost-line.tsx` (the shared cost-line primitive used by Holding/Trans, Financing, Cash Required)
+
+### The issue
+
+The `CostLine` component renders a small subscript note (`sub` prop) to the RIGHT of the dollar value. Example: `$4,846 67d` or `$2,200 informational`. The subscript displaces the dollar value leftward out of the natural "number column" alignment. When scanning a waterfall of cost lines, the eye expects all numbers to right-align consistently — but the subscript pushes some numbers further left than others depending on the subscript's length.
+
+Dan's view: "This is intended to be a reliable accounting model. Notes do not belong in the number column."
+
+### Dan's preference
+
+The subscript note should render to the LEFT of the number, not to the right. The number stays in its rightmost position, consistently aligned with every other value in the waterfall. The subscript sits between the label and the number, serving as context without disrupting the alignment.
+
+### Possible fixes
+
+- **(a) Move the sub to the left of the value in CostLine.** Change the `<div className="text-right shrink-0">` container so the sub comes first (left) and the value comes second (right). The value stays anchored at the right edge. Small change in cost-line.tsx, affects all waterfalls uniformly.
+- **(b) Render the sub as a separate column.** Convert CostLine from a 2-column layout (label | value+sub) to a 3-column layout (label | sub | value). More structured but requires changing the grid/flex in every CostLine consumer.
+
+### Recommended next step
+
+(a) — move the sub to the left of the value within CostLine's existing flex layout. Single file change, uniform effect across all waterfall cards.
+
+---
+
 ## How to add new entries
 
 Append a new section below using the same template:
