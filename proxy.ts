@@ -45,9 +45,29 @@ const PUBLIC_PREFIXES: readonly string[] = [
   "/portal/",    // partner portal — view without login (Decision 4.3)
 ] as const;
 
+/**
+ * Workspace route prefixes — analyst-only areas ("the kitchen").
+ * Partners are redirected to /portal if they try to access these.
+ */
+const ANALYST_PREFIXES: readonly string[] = [
+  "/dashboard",
+  "/intake",
+  "/screening",
+  "/analysis",
+  "/action",
+  "/reports",
+  "/admin",
+] as const;
+
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_PATHS.has(pathname)) return true;
   return PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
+function isAnalystRoute(pathname: string): boolean {
+  return ANALYST_PREFIXES.some((prefix) =>
+    pathname === prefix || pathname.startsWith(prefix + "/"),
+  );
 }
 
 export async function proxy(request: NextRequest) {
@@ -56,7 +76,7 @@ export async function proxy(request: NextRequest) {
   // Always refresh the session first — even on public paths — so a
   // signed-in user reading marketing content doesn't have their session
   // expire while they browse.
-  const { response, user } = await updateSession(request);
+  const { response, user, role } = await updateSession(request);
 
   // Public paths bypass the auth gate but still benefit from the
   // session refresh above.
@@ -69,6 +89,12 @@ export async function proxy(request: NextRequest) {
     const signInUrl = new URL("/auth/sign-in", request.url);
     signInUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(signInUrl);
+  }
+
+  // Role-based access: partners cannot access analyst workspace routes.
+  // Redirect them to the partner portal instead.
+  if (role === "partner" && isAnalystRoute(pathname)) {
+    return NextResponse.redirect(new URL("/portal", request.url));
   }
 
   return response;

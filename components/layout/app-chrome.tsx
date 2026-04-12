@@ -27,7 +27,7 @@ type SectionConfig = {
 };
 
 const primaryNav = [
-  { href: "/home", label: "Home" },
+  { href: "/dashboard", label: "Dashboard" },
   { href: "/intake", label: "Intake" },
   { href: "/screening", label: "Screening" },
   { href: "/analysis", label: "Analysis" },
@@ -37,11 +37,11 @@ const primaryNav = [
 ];
 
 function getSectionConfig(pathname: string): SectionConfig {
-  if (pathname === "/home") {
+  if (pathname === "/dashboard") {
     return {
-      title: "Home",
+      title: "Dashboard",
       subtitle: "Daily overview of pipeline, screening, and imports.",
-      tabs: [{ href: "/home", label: "Dashboard", exact: true }],
+      tabs: [{ href: "/dashboard", label: "Dashboard", exact: true }],
     };
   }
 
@@ -127,7 +127,7 @@ function getPageLabel(
   pathname: string,
   searchParams: URLSearchParams,
 ): string {
-  if (pathname === "/home") return "Dashboard";
+  if (pathname === "/dashboard") return "Dashboard";
 
   if (pathname === "/intake/imports") return "Imports";
   if (pathname === "/intake/manual") return "Manual Entry";
@@ -153,7 +153,7 @@ function getPageLabel(
 }
 
 function isPrimaryActive(pathname: string, href: string) {
-  if (href === "/home") return pathname === "/home";
+  if (href === "/dashboard") return pathname === "/dashboard";
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -198,7 +198,7 @@ export function AppChrome({ children }: AppChromeProps) {
         <div className="flex h-[var(--dw-header-height)] items-center justify-between gap-4 px-[var(--dw-page-pad-x)]">
           <div className="flex min-w-0 items-center gap-6">
             <Link
-              href="/home"
+              href="/dashboard"
               className="shrink-0 text-sm font-semibold uppercase tracking-[0.22em] text-white"
             >
               DataWise

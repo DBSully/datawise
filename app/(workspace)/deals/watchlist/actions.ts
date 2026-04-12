@@ -134,7 +134,7 @@ export async function passFromWatchListAction(
   revalidatePath("/analysis");
   revalidatePath("/deals/pipeline");
   revalidatePath("/action");
-  revalidatePath("/home");
+  revalidatePath("/dashboard");
 }
 
 // ---------------------------------------------------------------------------
@@ -162,5 +162,5 @@ export async function moveToPipelineAction(
   revalidatePath("/analysis");
   revalidatePath("/deals/pipeline");
   revalidatePath("/action");
-  revalidatePath("/home");
+  revalidatePath("/dashboard");
 }

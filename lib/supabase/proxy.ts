@@ -21,6 +21,7 @@ import type { User } from "@supabase/supabase-js";
 export type UpdateSessionResult = {
   response: NextResponse;
   user: User | null;
+  role: string | null;
 };
 
 export async function updateSession(
@@ -63,5 +64,17 @@ export async function updateSession(
     data: { user },
   } = await supabase.auth.getUser();
 
-  return { response, user };
+  // Look up role from profiles for route-level access control.
+  // Only runs when we have an authenticated user.
+  let role: string | null = null;
+  if (user) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+    role = profile?.role ?? null;
+  }
+
+  return { response, user, role };
 }

@@ -856,7 +856,7 @@ export async function markAnalysisCompleteAction(formData: FormData) {
   if (error) return { error: error.message };
 
   revalidatePath(`/analysis/${analysisId}`);
-  revalidatePath("/home");
+  revalidatePath("/dashboard");
 
   return { error: null, completedAt: new Date().toISOString() };
 }

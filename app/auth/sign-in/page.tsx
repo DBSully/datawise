@@ -8,26 +8,43 @@ import { createClient } from "@/lib/supabase/client";
 
 /**
  * Validates a `?next=` query param value to prevent open-redirect attacks.
- *
- * Open redirects let attackers craft links like
- *   https://datawisere.com/auth/sign-in?next=https://evil.com/fake-login
- * The victim signs in, gets bounced to the attacker's site, and may not
- * notice the domain change. The validator below only accepts internal
- * paths starting with exactly one forward slash.
- *
- * Rejected:
- *   - null / empty                  (no param)
- *   - https://evil.com              (doesn't start with /)
- *   - //evil.com                    (protocol-relative URL)
- *   - /\evil                        (backslash injection)
- *
- * Falls back to /home in any rejected case.
+ * Falls back to the provided default path in any rejected case.
  */
-function safeNextPath(raw: string | null): string {
-  if (!raw) return "/home";
-  if (!raw.startsWith("/") || raw.startsWith("//")) return "/home";
-  if (raw.includes("\\")) return "/home";
+function safeNextPath(raw: string | null, fallback: string): string {
+  if (!raw) return fallback;
+  if (!raw.startsWith("/") || raw.startsWith("//")) return fallback;
+  if (raw.includes("\\")) return fallback;
   return raw;
+}
+
+/**
+ * Determine post-login destination by user role.
+ * Partners always go to /portal (even if ?next= points to a workspace route).
+ * Analysts honor ?next= and fall back to /dashboard.
+ */
+async function getPostLoginPath(
+  supabase: ReturnType<typeof createClient>,
+  nextParam: string | null,
+): Promise<string> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return "/auth/sign-in";
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  const role = profile?.role ?? "partner";
+
+  if (role === "partner") {
+    // Partners can go to /portal/* paths via ?next=, but never workspace routes
+    const next = safeNextPath(nextParam, "/portal");
+    return next.startsWith("/portal") ? next : "/portal";
+  }
+
+  // Analysts honor ?next= fully, fall back to /dashboard
+  return safeNextPath(nextParam, "/dashboard");
 }
 
 /**
@@ -85,10 +102,10 @@ function SignInPageInner() {
       return;
     }
 
-    // Honor the ?next= query param the proxy sets when redirecting
-    // unauthenticated users. Falls back to /home if not provided
-    // or if the param fails open-redirect validation.
-    router.push(safeNextPath(searchParams.get("next")));
+    // Determine post-login destination by role.
+    // Partners → /portal, analysts → /dashboard (or ?next= target).
+    const destination = await getPostLoginPath(supabase, searchParams.get("next"));
+    router.push(destination);
     router.refresh();
   }
 
@@ -109,12 +126,9 @@ function SignInPageInner() {
       return;
     }
 
-    // If Confirm Email is OFF, Supabase usually gives you a session immediately.
-    // If Confirm Email is ON, you may get a user but no active session yet.
     if (data.session) {
-      // Same ?next= handling as sign-in: a partner who signs up after
-      // following a share link should land on the shared deal, not /home.
-      router.push(safeNextPath(searchParams.get("next")));
+      const destination = await getPostLoginPath(supabase, searchParams.get("next"));
+      router.push(destination);
       router.refresh();
       return;
     }

@@ -720,7 +720,7 @@ export async function promoteToAnalysisAction(
   });
 
   revalidatePath("/screening");
-  revalidatePath("/home");
+  revalidatePath("/dashboard");
   revalidatePath("/deals/watchlist");
   revalidatePath("/analysis");
 
@@ -787,7 +787,7 @@ export async function passOnScreeningResultAction(
   }
 
   revalidatePath("/screening");
-  revalidatePath("/home");
+  revalidatePath("/dashboard");
 }
 
 // ---------------------------------------------------------------------------
@@ -822,7 +822,7 @@ export async function reactivateScreeningResultAction(
   }
 
   revalidatePath("/screening");
-  revalidatePath("/home");
+  revalidatePath("/dashboard");
 }
 
 // ---------------------------------------------------------------------------

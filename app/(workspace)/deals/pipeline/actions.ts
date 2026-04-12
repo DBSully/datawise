@@ -48,7 +48,7 @@ export async function advancePipelineStageAction(
   revalidatePath("/action");
   revalidatePath("/deals/watchlist");
   revalidatePath("/analysis");
-  revalidatePath("/home");
+  revalidatePath("/dashboard");
 }
 
 // ---------------------------------------------------------------------------
@@ -83,7 +83,7 @@ export async function updateOfferStatusAction(
   if (error) throw new Error(error.message);
   revalidatePath("/deals/pipeline");
   revalidatePath("/action");
-  revalidatePath("/home");
+  revalidatePath("/dashboard");
 }
 
 // ---------------------------------------------------------------------------
@@ -121,7 +121,7 @@ export async function closeDealAction(
   revalidatePath("/deals/closed");
   revalidatePath("/deals/watchlist");
   revalidatePath("/analysis");
-  revalidatePath("/home");
+  revalidatePath("/dashboard");
 }
 
 // ---------------------------------------------------------------------------
@@ -149,5 +149,5 @@ export async function moveToWatchListAction(
   revalidatePath("/action");
   revalidatePath("/deals/watchlist");
   revalidatePath("/analysis");
-  revalidatePath("/home");
+  revalidatePath("/dashboard");
 }

@@ -393,7 +393,7 @@ export async function previewImportAction(
   revalidatePath("/intake/imports");
   revalidatePath("/screening");
   revalidatePath("/admin/properties");
-  revalidatePath("/home");
+  revalidatePath("/dashboard");
 
   return {
     status: "ready",
@@ -480,7 +480,7 @@ export async function processImportBatchAction(formData: FormData) {
     }
 
     revalidatePath("/screening");
-    revalidatePath("/home");
+    revalidatePath("/dashboard");
   } catch (error) {
     const message =
       error instanceof Error

@@ -669,7 +669,7 @@ export async function markAnalysisCompleteAction(formData: FormData) {
   }
   revalidatePath("/deals/watchlist");
   revalidatePath("/analysis");
-  revalidatePath("/home");
+  revalidatePath("/dashboard");
 
   return { error: null, completedAt: new Date().toISOString() };
 }
