@@ -43,6 +43,7 @@ import { DetailModal } from "@/components/workstation/detail-modal";
 import { ArvCardModal } from "./arv-card-modal";
 import { CashRequiredCardModal } from "./cash-required-card-modal";
 import { PriceTrendCardModal } from "./price-trend-card-modal";
+import { RehabCardModal } from "./rehab-card-modal";
 import {
   QuickAnalysisTile,
   parseDollarInput,
@@ -661,10 +662,17 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
           onClose={() => setOpenModal(null)}
         />
       )}
-      {openModal != null && openModal !== "arv" && openModal !== "cashRequired" && openModal !== "priceTrend" && (
+      {openModal === "rehab" && (
+        <RehabCardModal
+          data={data}
+          rehabManual={liveDeal.rehabManual}
+          rehabManualValue={parseDollarInput(rehabInput)}
+          onClose={() => setOpenModal(null)}
+        />
+      )}
+      {openModal != null && openModal !== "arv" && openModal !== "cashRequired" && openModal !== "priceTrend" && openModal !== "rehab" && (
         <DetailModal
           title={
-            openModal === "rehab" ? "Rehab" :
             openModal === "holdTrans" ? "Holding & Transaction" :
             openModal === "financing" ? "Financing" :
             openModal === "pipeline" ? "Pipeline Status" :
