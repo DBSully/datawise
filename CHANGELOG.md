@@ -1,3 +1,34 @@
+## 2026-04-12 — MILESTONE: Production Launch at www.DataWiseRE.com
+
+**DataWiseRE is live on a real domain.** The platform moved from a Vercel preview URL to production at `www.datawisere.com` with full SSL, custom domain routing, authenticated email delivery, and a polished screening workflow.
+
+This marks the transition from development prototype to live production application.
+
+### What shipped
+
+- **Custom domain deployment.** `www.datawisere.com` is the primary production URL. Root domain `datawisere.com` redirects to `www`. Vercel handles SSL certificates automatically. DNS configured at GoDaddy with Vercel CNAME/A records alongside existing Resend SPF/DKIM records.
+
+- **Resend email integration.** Partner share notifications now send real emails via Resend from `DataWise <analysis@datawisere.com>`. Clean HTML email template with property address in the subject line, optional analyst message, and a "View Analysis" CTA button. Email failures are non-blocking — the share link still works via manual copy from the Partner Sharing modal. Domain verified: `datawisere.com`.
+
+- **Screening modal: Quick Analysis 2x2 + Quick Status.** The screening modal's Quick Analysis pane now matches the Workstation layout — 4 inputs (Manual ARV, Rehab Override, Target Profit, Days Held) in a 2x2 grid. Quick Status tile (Interest, Condition, Location, Next Step) renders alongside Quick Analysis for promoted items and auto-persists to the analysis. SubjectTileRow gained a `children` slot for composable tile additions.
+
+- **Screening page performance: 12.6s → 3.7s (70% faster).** Parallelized all 4 Supabase queries (3 filter options + 1 main queue) into a single `Promise.all`. Removed `count: "exact"` which forced Postgres to scan the entire `analysis_queue_v` view.
+
+- **Supabase auth configured for production.** Site URL and redirect URLs updated to `https://www.datawisere.com/**` with localhost retained for local dev.
+
+### Infrastructure established
+
+| Layer | Detail |
+|---|---|
+| **Domain** | `www.datawisere.com` (primary) + `datawisere.com` (redirect) |
+| **Hosting** | Vercel with auto-deploy from GitHub `main` branch |
+| **Email** | Resend with verified `datawisere.com` domain, SPF/DKIM via GoDaddy |
+| **Auth** | Supabase Auth with production redirect URLs configured |
+| **SSL** | Auto-provisioned by Vercel |
+| **Fallback** | `datawise-brown.vercel.app` remains as backup domain |
+
+---
+
 ## 2026-04-12 — Phase 1 Step 4 — Partner Portal MVP
 
 Phase 1's #1 priority feature. The complete analyst-shares-with-partner → partner-views-and-adjusts → analyst-sees-feedback-in-real-time loop.
@@ -34,7 +65,7 @@ Phase 1's #1 priority feature. The complete analyst-shares-with-partner → part
 
 ### Deferred items
 
-- Email delivery via Resend (`RESEND_PLACEHOLDER` in `lib/partner-portal/share-actions.ts`)
+- ~~Email delivery via Resend~~ — **Shipped 2026-04-12** (see Production Launch milestone above)
 - Partner Quick Analysis sandbox (private overrides → `partner_analysis_versions`)
 - Partner comp picking (private selection set → `partner_analysis_versions.selected_comp_ids`)
 - Visibility-filtered notes in the partner view
