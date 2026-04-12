@@ -187,6 +187,36 @@ The subscript note should render to the LEFT of the number, not to the right. Th
 
 ---
 
+## 6. Notes modal UX refinements — delete confirmation, inline editing, note list visibility
+
+**Surfaced:** 2026-04-11 during 3E.7.h (NotesCardModal)
+**Status:** Open
+**Severity:** UX — affects daily note-taking workflow
+**Scope:** `app/(workspace)/analysis/[analysisId]/notes-card-modal.tsx`
+
+### The issues (3 related)
+
+**6a. Delete note needs "are you sure" confirmation.**
+Currently clicking × on a note deletes it immediately with no confirmation. Accidental deletion of an important note is unrecoverable. Dan wants an "Are you sure?" alert or inline confirmation before the delete fires.
+
+**6b. Existing notes should always be visible in the modal.**
+The analyst needs to see all existing notes while composing a new one — otherwise they may repeat something already noted. The current layout shows the Add Note form at the top and the note list below, which works spatially, but if the list is long and the form is expanded, the notes may scroll out of view. Dan wants zero friction: the note list should always be visible alongside the form.
+
+**6c. Clicking an existing note should open inline editing.**
+Currently notes are read-only display with a delete button. Dan wants: click on an existing note → it becomes editable in-place (body text, category, visibility all editable). Save on blur or via a small save affordance. Zero friction for updates and new information. This turns every note row into a potential edit surface.
+
+### Possible fixes
+
+- **(a) Delete confirmation:** wrap the × click in a `window.confirm("Delete this note?")` call. Simplest. Or render a small inline "Delete? Yes / No" confirmation that replaces the × button for 3 seconds.
+- **(b) Note list always visible:** ensure the note list scrolls independently from the form. Or keep the form compact (collapsed by default, expands on click). Or render the form in a sticky header/footer within the modal body.
+- **(c) Inline editing:** on note row click, swap the read-only text with an editable textarea + category/visibility controls. Auto-persist on blur (same useDebouncedSave pattern). Requires a new server action `updateAnalysisNoteAction` for editing existing notes (currently only add + delete exist).
+
+### Recommended next step
+
+Implement all three in the design polish pass. (a) is the quickest win. (c) requires a new server action but the pattern is established. (b) may require rethinking the modal's scroll layout.
+
+---
+
 ## How to add new entries
 
 Append a new section below using the same template:

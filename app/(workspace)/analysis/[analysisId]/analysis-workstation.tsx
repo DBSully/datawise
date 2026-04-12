@@ -44,6 +44,7 @@ import { ArvCardModal } from "./arv-card-modal";
 import { CashRequiredCardModal } from "./cash-required-card-modal";
 import { FinancingCardModal } from "./financing-card-modal";
 import { HoldTransCardModal } from "./hold-trans-card-modal";
+import { NotesCardModal } from "./notes-card-modal";
 import { PipelineCardModal } from "./pipeline-card-modal";
 import { PriceTrendCardModal } from "./price-trend-card-modal";
 import { RehabCardModal } from "./rehab-card-modal";
@@ -698,19 +699,16 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
           onClose={() => setOpenModal(null)}
         />
       )}
-      {openModal != null && openModal !== "arv" && openModal !== "cashRequired" && openModal !== "priceTrend" && openModal !== "rehab" && openModal !== "holdTrans" && openModal !== "financing" && openModal !== "pipeline" && (
-        <DetailModal
-          title={
-            openModal === "notes" ? "Notes" :
-            openModal === "partnerSharing" ? "Partner Sharing" :
-            "Detail"
-          }
+      {openModal === "notes" && (
+        <NotesCardModal
+          data={data}
           onClose={() => setOpenModal(null)}
-        >
+        />
+      )}
+      {openModal === "partnerSharing" && (
+        <DetailModal title="Partner Sharing" onClose={() => setOpenModal(null)}>
           <p className="py-8 text-center text-sm text-slate-400">
-            {openModal === "partnerSharing"
-              ? "Full Partner Sharing arrives in Step 4."
-              : `${openModal} card modal content ships in 3E.7.`}
+            Full Partner Sharing arrives in Step 4.
           </p>
         </DetailModal>
       )}
