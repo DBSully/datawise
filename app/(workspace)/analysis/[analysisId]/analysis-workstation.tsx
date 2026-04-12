@@ -1,27 +1,19 @@
-// Phase 1 Step 3E — new Workstation client.
+// Phase 1 Step 3E — new Workstation client (COMPLETE as of 3E.8).
 //
-// The canonical Analysis Workstation client component, built up
-// incrementally per WORKSTATION_CARD_SPEC.md. As of 3E.2 the header
-// bar is functional. Subsequent sub-tasks fill in the remaining
-// regions: top tile row (3E.3), deal stat strip (3E.4), hero comp
-// workspace (3E.5), right column collapsed cards (3E.6), per-card
-// detail modals (3E.7), cross-card cascades + polish (3E.8).
-//
-// Layout overview (per spec §2):
+// The canonical Analysis Workstation client component per
+// WORKSTATION_CARD_SPEC.md. All layout regions are functional:
 //
 //   ┌─────────────────────────────────────────────────────────────┐
-//   │  HEADER BAR                                       (3E.2 ✓)  │
+//   │  HEADER BAR — address, badges, Mark Complete / Generate     │
 //   ├─────────────────────────────────────────────────────────────┤
-//   │  TOP TILE ROW — MLS / Physical / QuickAnalysis / QuickStat │
-//   │                                                   (3E.3)    │
+//   │  MLS Info │ Prop Physical │ Quick Analysis │ Quick Status   │
 //   ├─────────────────────────────────────────────────────────────┤
-//   │  DEAL STAT STRIP                                  (3E.4)    │
+//   │  DEAL STAT STRIP — live recompute + override indicators     │
 //   ├─────────────────────────────────────────────┬───────────────┤
-//   │                                             │               │
-//   │  HERO COMP WORKSPACE                        │  RIGHT COLUMN │
-//   │  Map + comp table + tab bar + controls      │  9 cards stacked │
-//   │                                             │               │
-//   │                                  (3E.5)     │  (3E.6 + 3E.7)│
+//   │  HERO COMP WORKSPACE                        │  9 DETAIL     │
+//   │  Map + comp table + sort + filter           │  CARDS        │
+//   │  AddCompByMls + ExpandSearchPanel           │  (click →     │
+//   │                                             │   modal)      │
 //   └─────────────────────────────────────────────┴───────────────┘
 
 "use client";
@@ -362,8 +354,7 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
   }, [compData]);
 
   // ── Right column modal state ─────────────────────────────────────
-  // Which card's modal is currently open, or null if none. 3E.7 will
-  // replace the placeholder modals with real per-card modal components.
+  // Which card's modal is currently open, or null if none.
   type CardModalId =
     | "arv"
     | "rehab"
@@ -383,12 +374,10 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
     <section className="dw-section-stack-compact">
       <WorkstationHeader data={data} />
 
-      {/* TOP TILE ROW — 4 tiles total. SubjectTileRow handles the first
-       *  two (MLS Info + Property Physical with bed/bath grid). The
-       *  Quick Analysis tile is hidden via showQuickAnalysis={false}
-       *  because the new Workstation uses the auto-persisting
-       *  <QuickAnalysisTile> built on top of 3D's primitives.
-       *  Tile 4 (Quick Status) is still a stub — added in 3E.3.c. */}
+      {/* TOP TILE ROW — 4 tiles. SubjectTileRow handles MLS Info +
+       *  Property Physical (with bed/bath grid). QuickAnalysisTile
+       *  handles the 4 auto-persisting numeric inputs. QuickStatusTile
+       *  handles the 4 auto-persisting dropdowns. */}
       <div className="flex flex-wrap gap-3">
         <SubjectTileRow
           showQuickAnalysis={false}
@@ -644,8 +633,7 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
         </div>
       </div>
 
-      {/* ── Per-card modals (3E.7 — one at a time). Each card's modal is
-       *  its own commit. Cards not yet built still get the placeholder. ── */}
+      {/* ── Per-card modals (3E.7 complete — all 9 cards have real modals) ── */}
       {openModal === "arv" && (
         <ArvCardModal
           data={data}

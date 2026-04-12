@@ -217,6 +217,36 @@ Implement all three in the design polish pass. (a) is the quickest win. (c) requ
 
 ---
 
+## 7. Deal Stat Strip pills shift horizontally as digits change during Quick Analysis typing
+
+**Surfaced:** 2026-04-11 during 3E.8 (cross-card cascades + polish)
+**Status:** Open
+**Severity:** UX — distracting motion during the core editing workflow
+**Scope:** `components/workstation/deal-stat-strip.tsx` + `components/workstation/deal-stat.tsx`
+
+### The issue
+
+When the analyst types into a Quick Analysis input (e.g. Manual ARV), the Deal Stat Strip recomputes every value synchronously on every keystroke. Because the dollar amounts have variable digit counts (e.g. "$1,125,000" → "$112,500" → "$11,250" as the user deletes digits), every pill in the strip resizes horizontally, causing all pills to the right to shift left/right chaotically. The visual effect is a "jittering" strip where all 7 stat columns wobble back and forth with each keystroke.
+
+Dan's observation: "I like knowing that the edit is happening in real time, but I don't like the numbers moving back and forth."
+
+### Dan's preference
+
+1. **Fix the pills in place** — each pill should occupy a stable column width that doesn't change as the value changes. The strip should feel like a fixed-width table, not a flex container that reflows.
+2. **Visually highlight the pill(s) that are changing** — when a Quick Analysis override affects a strip value, the affected pills should flash or glow briefly to draw the eye to the change without the distracting horizontal motion.
+
+### Possible fixes
+
+- **(a) Fixed-width pills via `min-width` per column.** Set a `min-w-[X]` on each DealStat that's wide enough for the longest expected value in that column (e.g. "$1,999,999" for ARV, "99.9%" for Offer%). Pills stay put; values right-align within their fixed column. Simple CSS.
+- **(b) CSS Grid layout for the strip instead of flex.** Replace the `flex gap-4` container with `grid grid-cols-7` (or similar). Each column gets a fixed fraction of the strip width. More structured but may need per-column width tuning.
+- **(c) Transition animation on value change.** When a pill's value changes, briefly flash the value text (e.g. scale up to 105% and back, or a subtle background pulse) before settling. Draws the eye to the change. Implemented via a `useEffect` that watches the value and triggers a CSS transition class.
+
+### Recommended next step
+
+(a) + (c) combined. Fixed-width columns stop the jittering; the pulse animation tells the analyst which values just changed. Both are small CSS changes. Start with (a) alone to see if the fixed layout is sufficient — the motion problem is the primary complaint; the highlight is a nice-to-have.
+
+---
+
 ## How to add new entries
 
 Append a new section below using the same template:

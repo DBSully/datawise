@@ -1,3 +1,91 @@
+## 2026-04-11 — Phase 1 Step 3E — New Workstation Card Layout
+
+Fifth and largest sub-step of the Step 3 milestone. Build the new Analysis Workstation per `WORKSTATION_CARD_SPEC.md`. The new Workstation replaces the legacy 2046-line monolithic `analysis-workstation.tsx` with a modular orchestrator (~720 lines) + 8 per-card modal files + shared components from 3C + auto-persist infrastructure from 3D.
+
+Per Decision 5.1 (3E plan), the side-by-side rollout from master plan Decision 6.6 was dropped. The legacy Workstation file was deleted in 3E.1 and only the new Workstation exists from that point onward. The screening modal at `/screening` served as the daily-work fallback for property review during the build.
+
+### What shipped
+
+**3E.1 — Skeleton + delete legacy.** Created the new client skeleton at `app/(workspace)/analysis/[analysisId]/analysis-workstation.tsx` with dashed-box placeholders for each layout region. Deleted the 1,526-line legacy Workstation file. Updated the canonical `page.tsx` to import from the relative path. The 3B re-export wrapper at `/deals/watchlist/[analysisId]/page.tsx` was preserved — both URLs serve the new client.
+
+**3E.2 — Header bar.** Address + city/state/zip (truncated), status badges (MLS#, MLS status, strategy type, completed timestamp), action buttons (Mark Complete with optimistic local state, Share placeholder for Step 4, Generate Report with inline title dialog).
+
+**3E.3 — Four-tile top row.** MLS Info + Property Physical (with new bed/bath level mini-grid using 3A's per-level fields) via `<SubjectTileRow>`. New `<QuickAnalysisTile>` with auto-persist on 4 numeric overrides (Manual ARV, Rehab Override, Target Profit, Days Held) — controlled component pattern so the parent can compute `liveDeal` from the live inputs. New `<QuickStatusTile>` with auto-persist on 4 dropdowns (Interest, Condition, Location, Next Step) — instant persist via `delayMs=0`.
+
+**3E.4 — Deal Stat Strip with override indicators.** `<DealStatStrip>` wired with `manualOverrides` prop + `liveDeal` memo for live recompute. Extended `<DealStat>` with `override?: "none" | "manual" | "cascading"` prop per Decision 6.1 (indigo-700 + ᴹ superscript for direct overrides; indigo-500 for cascading). Cascade rules: ARV override → ARV manual + Max Offer/Offer%/Gap cascading; Rehab override → Rehab manual + Max Offer/Offer% cascading; Target Profit override → same cascade. `liveDeal` useMemo hoisted to parent level — the proactive fix for the legacy "Deal Math card doesn't reflect Quick Analysis" bug Dan surfaced during 3D testing.
+
+**3E.5 — Hero comp workspace.** Extracted `<CompWorkspace>` from the screening modal into `components/workstation/comp-workspace.tsx` (~626 lines, the deferred extraction from 3C). Wired into the new Workstation with client-side data loading via `loadCompDataByRunAction`, optimistic selection toggle, map pins, comp stats. Map + 19-column table + sort + filter + AddCompByMls + ExpandSearchPanel all functional.
+
+**3E.6 — Right column collapsed cards.** 9 `<DetailCard>` instances stacked vertically. Cascade-affected cards (ARV, Rehab, Hold & Trans, Cash Required) read headlines from the parent's `liveDeal` memo; non-cascade cards (Price Trend, Pipeline, Notes, Partner Sharing) read from server data. Override badges appear when manual values are set.
+
+**3E.7 — Per-card detail modals (9 total, one per commit).**
+- **ARV** (read-only) — 3-tier display, per-comp ARV table, PSF comparisons with red ⚠ warnings, comp summary stats.
+- **Cash Required** (read-only) — acquisition section with Decision 5 6-line transaction breakdown, project carry section, total. Uses `<CostLine>`.
+- **Price Trend** (read-only) — confidence/direction badges, local/metro tier columns using `<TrendTierColumn>`, summary text.
+- **Rehab** (editing) — wraps 3C's `<RehabCard>` inside `<DetailModal>`. Adds "Rehab Override active" banner when Quick Analysis has a manual rehab value.
+- **Holding & Transaction** (read-only display) — holding daily-rate waterfall + 6-line transaction breakdown per Decision 5.
+- **Financing** (editing with auto-persist) — 3 percentage inputs (Rate%/LTV%/Points%) wired to 3D's infrastructure. Each has SaveStatusDot + × clear affordance.
+- **Pipeline Status** (editing with auto-persist) — Showing/Offer status dropdowns + Watch List Note textarea. Footer: "Open in Action →" per Decision 7.
+- **Notes** (editing with 3-tier visibility) — Add Note form with category + visibility selector (Internal/All Partners; Specific Partners deferred to Step 4), existing note rows with visibility badges, category filter chips, delete button.
+- **Partner Sharing** (stub) — "Full Partner Sharing arrives in Step 4" placeholder per Decision 5.4.
+
+**3E.7.h also shipped migration** `20260411100000_notes_visibility_default_internal.sql` per Decision 5.5 — changes `analysis_notes.visibility` DEFAULT from `'all_partners'` to `'internal'`.
+
+**3E.8 — Cross-card cascades + polish.** Comment cleanup, stale reference removal. Cascade verification confirmed: client-side cascades (ARV/Rehab/TargetProfit/DaysHeld → Strip + card headlines) work synchronously; server-only cascades (Condition → Rehab, Financing overrides → Financing headline, Cash Required total) update after revalidatePath round-trip (~1-2s).
+
+### Design followups logged (7 entries in WORKSTATION_DESIGN_FOLLOWUPS.md)
+
+1. Property Physical tile — bed/bath mini-grid duplicates inline Beds/Baths rows
+2. Missing tile titles on MLS Info and Property Physical tiles (MLS DATA / PROPERTY DATA)
+3. DetailModal card width too wide — label-to-value gap hard to scan
+4. Right tile column should move to the LEFT side of the layout
+5. CostLine subscript notes displace numbers from the value column
+6. Notes modal UX — delete confirmation, inline editing, always-visible note list
+7. Deal Stat Strip pills shift horizontally as digits change during typing
+
+### Files touched in 3E
+
+**New (9 modal files + 3 tile/workspace components):**
+- `app/(workspace)/analysis/[analysisId]/analysis-workstation.tsx` — the new Workstation orchestrator (~720 lines)
+- `app/(workspace)/analysis/[analysisId]/arv-card-modal.tsx`
+- `app/(workspace)/analysis/[analysisId]/cash-required-card-modal.tsx`
+- `app/(workspace)/analysis/[analysisId]/price-trend-card-modal.tsx`
+- `app/(workspace)/analysis/[analysisId]/rehab-card-modal.tsx`
+- `app/(workspace)/analysis/[analysisId]/hold-trans-card-modal.tsx`
+- `app/(workspace)/analysis/[analysisId]/financing-card-modal.tsx`
+- `app/(workspace)/analysis/[analysisId]/pipeline-card-modal.tsx`
+- `app/(workspace)/analysis/[analysisId]/notes-card-modal.tsx`
+- `components/workstation/quick-analysis-tile.tsx`
+- `components/workstation/quick-status-tile.tsx`
+- `components/workstation/comp-workspace.tsx`
+
+**Modified:**
+- `app/(workspace)/analysis/[analysisId]/page.tsx` — import path update
+- `components/workstation/deal-stat.tsx` — added `override` prop
+- `components/workstation/deal-stat-strip.tsx` — added `manualOverrides` prop
+- `components/workstation/subject-tile-row.tsx` — added `bedBathLevels` + `showQuickAnalysis` props
+- `components/screening/screening-comp-modal.tsx` — CompWorkspace extraction
+- `app/(workspace)/deals/actions.ts` — addAnalysisNoteAction extended with visibility
+- `CHANGELOG.md`, `WORKSTATION_DESIGN_FOLLOWUPS.md`, `PERFORMANCE_FOLLOWUPS.md`
+
+**Deleted:**
+- `app/(workspace)/deals/watchlist/[analysisId]/analysis-workstation.tsx` — the 1,526-line legacy Workstation
+
+**Migration (1):**
+- `supabase/migrations/20260411100000_notes_visibility_default_internal.sql`
+
+### What 3F builds on top
+
+3F's job is now smaller since the legacy Workstation file was already deleted in 3E.1:
+- Convert `/deals/watchlist/[analysisId]/page.tsx` wrapper → hard `redirect()`
+- Delete the legacy `saveManualAnalysisAction` bulk form action
+- Drop `analysis_notes.is_public` deprecated column
+- Delete the 3D dev test harness at `/dev/auto-persist-test`
+- Remove the layout-level auth check
+- Final Step 3 CHANGELOG + tag `phase1-step3-complete`
+
+---
+
 ## 2026-04-11 — Phase 1 Step 3D — Auto-Persist Infrastructure
 
 Fourth sub-step of the Step 3 milestone. Build the "no Save buttons, every edit persists immediately" pattern that the new Workstation in 3E depends on (Decision 2 in `WORKSTATION_CARD_SPEC.md`). Three deliverables: a TypeScript discriminated-union server action, a custom React hook with a race-safe state machine, and a small visual indicator.
