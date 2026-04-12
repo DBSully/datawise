@@ -37,9 +37,15 @@ import { CashRequiredCardModal } from "./cash-required-card-modal";
 import { FinancingCardModal } from "./financing-card-modal";
 import { HoldTransCardModal } from "./hold-trans-card-modal";
 import { NotesCardModal } from "./notes-card-modal";
+import { PartnerSharingCardModal } from "./partner-sharing-card-modal";
 import { PipelineCardModal } from "./pipeline-card-modal";
 import { PriceTrendCardModal } from "./price-trend-card-modal";
 import { RehabCardModal } from "./rehab-card-modal";
+import {
+  loadAnalysisSharesAction,
+  type AnalysisShareRow,
+  type PartnerFeedbackRow,
+} from "@/lib/partner-portal/share-actions";
 import {
   QuickAnalysisTile,
   parseDollarInput,
@@ -353,6 +359,21 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
     };
   }, [compData]);
 
+  // ── Partner share data (for the collapsed card headline) ────────
+  // Loaded client-side on mount, same pattern as compData.
+  const [shareData, setShareData] = useState<{
+    shares: AnalysisShareRow[];
+    feedback: PartnerFeedbackRow[];
+  } | null>(null);
+
+  useEffect(() => {
+    loadAnalysisSharesAction(data.analysisId).then(setShareData);
+  }, [data.analysisId]);
+
+  const activeShareCount = shareData?.shares.filter((s) => s.is_active).length ?? 0;
+  const viewedCount = shareData?.shares.filter((s) => s.is_active && s.first_viewed_at).length ?? 0;
+  const interestedCount = shareData?.feedback.filter((f) => f.action === "interested").length ?? 0;
+
   // ── Right column modal state ─────────────────────────────────────
   // Which card's modal is currently open, or null if none.
   type CardModalId =
@@ -372,7 +393,10 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
 
   return (
     <section className="dw-section-stack-compact">
-      <WorkstationHeader data={data} />
+      <WorkstationHeader
+        data={data}
+        onShare={() => setOpenModal("partnerSharing")}
+      />
 
       {/* TOP TILE ROW — 4 tiles. SubjectTileRow handles MLS Info +
        *  Property Physical (with bed/bath grid). QuickAnalysisTile
@@ -623,11 +647,21 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
             onExpand={() => setOpenModal("notes")}
           />
 
-          {/* 9. Partner Sharing card — STUB per Decision 5.4 */}
+          {/* 9. Partner Sharing card */}
           <DetailCard
             title="Partner Sharing"
-            headline="Not yet implemented"
-            context="Arriving in Step 4"
+            headline={
+              activeShareCount === 0
+                ? "Not shared"
+                : interestedCount > 0
+                  ? `${activeShareCount} shared · ${viewedCount} viewed · ${interestedCount} interested`
+                  : `Shared with ${activeShareCount} partner${activeShareCount !== 1 ? "s" : ""}`
+            }
+            context={
+              activeShareCount === 0
+                ? "Click to share this analysis"
+                : "Click to manage shares"
+            }
             onExpand={() => setOpenModal("partnerSharing")}
           />
         </div>
@@ -694,11 +728,14 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
         />
       )}
       {openModal === "partnerSharing" && (
-        <DetailModal title="Partner Sharing" onClose={() => setOpenModal(null)}>
-          <p className="py-8 text-center text-sm text-slate-400">
-            Full Partner Sharing arrives in Step 4.
-          </p>
-        </DetailModal>
+        <PartnerSharingCardModal
+          analysisId={data.analysisId}
+          onClose={() => {
+            setOpenModal(null);
+            // Reload share data so the collapsed card headline refreshes
+            loadAnalysisSharesAction(data.analysisId).then(setShareData);
+          }}
+        />
       )}
     </section>
   );
@@ -721,7 +758,13 @@ function formatCompletedTimestamp(iso: string | null): string | null {
   return `${month}/${day} ${hours}:${minutes}`;
 }
 
-function WorkstationHeader({ data }: { data: WorkstationData }) {
+function WorkstationHeader({
+  data,
+  onShare,
+}: {
+  data: WorkstationData;
+  onShare?: () => void;
+}) {
   // Local state for Mark Complete — server returns the new completedAt
   // and we mirror it locally so the button label flips immediately
   // without waiting for a page revalidation round-trip.
@@ -855,13 +898,11 @@ function WorkstationHeader({ data }: { data: WorkstationData }) {
                 : "Mark Complete"}
           </button>
 
-          {/* Share button — placeholder per Decision 5.4. The full
-           *  Partner Sharing flow ships in Step 4. */}
+          {/* Share button — opens the Partner Sharing card modal */}
           <button
             type="button"
-            disabled
-            title="Partner sharing arrives in Step 4"
-            className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-400 cursor-not-allowed"
+            onClick={onShare}
+            className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
           >
             Share
           </button>

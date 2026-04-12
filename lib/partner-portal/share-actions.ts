@@ -1,4 +1,4 @@
-// Phase 1 Step 4B — Partner share server actions.
+// Phase 1 Step 4B + 4C — Partner share server actions.
 //
 // Two actions for the analyst's Partner Sharing card:
 //
@@ -200,4 +200,83 @@ export async function markFeedbackReadAction(
 
   revalidatePath(`/analysis/${input.analysisId}`);
   return { ok: true };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Data loading for the Partner Sharing card
+// ─────────────────────────────────────────────────────────────────────
+
+export type AnalysisShareRow = {
+  id: string;
+  shared_with_email: string;
+  shared_with_user_id: string | null;
+  share_token: string;
+  message: string | null;
+  is_active: boolean;
+  sent_at: string;
+  first_viewed_at: string | null;
+  last_viewed_at: string | null;
+  view_count: number;
+  last_viewed_by_analyst_at: string | null;
+};
+
+export type PartnerFeedbackRow = {
+  id: string;
+  analysis_share_id: string;
+  action: string;
+  pass_reason: string | null;
+  notes: string | null;
+  submitted_at: string;
+};
+
+export type AnalysisSharesData = {
+  shares: AnalysisShareRow[];
+  feedback: PartnerFeedbackRow[];
+};
+
+export async function loadAnalysisSharesAction(
+  analysisId: string,
+): Promise<AnalysisSharesData> {
+  const supabase = await createClient();
+
+  const [{ data: shares }, { data: feedback }] = await Promise.all([
+    supabase
+      .from("analysis_shares")
+      .select(
+        "id, shared_with_email, shared_with_user_id, share_token, message, is_active, sent_at, first_viewed_at, last_viewed_at, view_count, last_viewed_by_analyst_at",
+      )
+      .eq("analysis_id", analysisId)
+      .order("sent_at", { ascending: false }),
+    supabase
+      .from("partner_feedback")
+      .select("id, analysis_share_id, action, pass_reason, notes, submitted_at")
+      .in(
+        "analysis_share_id",
+        // Subquery: get all share IDs for this analysis
+        // PostgREST doesn't support subqueries directly, so we'll
+        // fetch all feedback and filter client-side for now.
+        // This is fine for the MVP scale (few shares per analysis).
+        [],
+      ),
+  ]);
+
+  // Fetch feedback separately since PostgREST doesn't support
+  // subquery-based IN filters. For MVP scale this is fine.
+  const shareIds = (shares ?? []).map((s) => s.id);
+  let feedbackRows: PartnerFeedbackRow[] = [];
+  if (shareIds.length > 0) {
+    const { data: fb } = await supabase
+      .from("partner_feedback")
+      .select(
+        "id, analysis_share_id, action, pass_reason, notes, submitted_at",
+      )
+      .in("analysis_share_id", shareIds)
+      .order("submitted_at", { ascending: false });
+    feedbackRows = (fb ?? []) as PartnerFeedbackRow[];
+  }
+
+  return {
+    shares: (shares ?? []) as AnalysisShareRow[],
+    feedback: feedbackRows,
+  };
 }
