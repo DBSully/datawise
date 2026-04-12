@@ -40,6 +40,7 @@ import { CompWorkspace } from "@/components/workstation/comp-workspace";
 import { DealStatStrip } from "@/components/workstation/deal-stat-strip";
 import { DetailCard } from "@/components/workstation/detail-card";
 import { DetailModal } from "@/components/workstation/detail-modal";
+import { ArvCardModal } from "./arv-card-modal";
 import {
   QuickAnalysisTile,
   parseDollarInput,
@@ -636,11 +637,18 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
         </div>
       </div>
 
-      {/* ── Placeholder modals — each replaced by a real modal in 3E.7 ── */}
-      {openModal && (
+      {/* ── Per-card modals (3E.7 — one at a time). Each card's modal is
+       *  its own commit. Cards not yet built still get the placeholder. ── */}
+      {openModal === "arv" && (
+        <ArvCardModal
+          data={data}
+          liveDeal={{ arv: liveDeal.arv, arvManual: liveDeal.arvManual }}
+          onClose={() => setOpenModal(null)}
+        />
+      )}
+      {openModal != null && openModal !== "arv" && (
         <DetailModal
           title={
-            openModal === "arv" ? "ARV" :
             openModal === "rehab" ? "Rehab" :
             openModal === "holdTrans" ? "Holding & Transaction" :
             openModal === "financing" ? "Financing" :
