@@ -56,6 +56,7 @@ function fmtIsoDate(v: string | null | undefined): string {
 type PartnerAnalysisViewProps = {
   workstationData: WorkstationData;
   compData: PartnerCompData | null;
+  isAuthenticated: boolean;
   share: {
     id: string;
     analysisId: string;
@@ -77,6 +78,7 @@ type PartnerAnalysisViewProps = {
 export function PartnerAnalysisView({
   workstationData: data,
   compData: serverCompData,
+  isAuthenticated,
   share,
   partnerVersion,
 }: PartnerAnalysisViewProps) {
@@ -264,14 +266,14 @@ export function PartnerAnalysisView({
       <SubjectTileRow
         showQuickAnalysis={false}
         mlsInfo={{
-          mlsStatus: "\u2014",
-          mlsNumber: "\u2014",
-          mlsChangeType: "\u2014",
-          listDate: "\u2014",
-          origListPrice: "\u2014",
-          ucDate: "\u2014",
+          mlsStatus: data.listing?.mlsStatus ?? "\u2014",
+          mlsNumber: data.listing?.listingId ?? "\u2014",
+          mlsChangeType: data.listing?.mlsMajorChangeType ?? "\u2014",
+          listDate: fmtIsoDate(data.listing?.listingContractDate),
+          origListPrice: fmt(data.listing?.originalListPrice),
+          ucDate: fmtIsoDate(data.listing?.purchaseContractDate),
           listPrice: fmt(data.listing?.listPrice),
-          closeDate: "\u2014",
+          closeDate: fmtIsoDate(data.listing?.closeDate),
         }}
         physical={{
           totalSf: fmtNum(p?.buildingSqft),
@@ -314,8 +316,8 @@ export function PartnerAnalysisView({
         }}
       />
 
-      {/* ── Partner Quick Analysis (private sandbox) ── */}
-      <div className="shrink-0 rounded border border-indigo-200 bg-indigo-50/50 px-3 py-2" style={{ maxWidth: 320 }}>
+      {/* ── Partner Quick Analysis (private sandbox — visible always, interactive when auth'd) ── */}
+      <div className="relative shrink-0 rounded border border-indigo-200 bg-indigo-50/50 px-3 py-2" style={{ maxWidth: 320 }}>
         <div className="mb-1.5 text-[9px] font-bold uppercase tracking-wider text-indigo-600">
           Your Analysis (private)
         </div>
@@ -357,9 +359,17 @@ export function PartnerAnalysisView({
             </div>
           </div>
         </div>
-        <p className="mt-1.5 text-[9px] text-indigo-500">
-          Your adjustments are private and saved automatically. The strip below recalculates from your values.
-        </p>
+        {isAuthenticated ? (
+          <p className="mt-1.5 text-[9px] text-indigo-500">
+            Your adjustments are private and saved automatically. The strip below recalculates from your values.
+          </p>
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center rounded bg-white/80 backdrop-blur-[1px]">
+            <a href="/auth/sign-in?next=/portal" className="rounded-md border border-indigo-200 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50">
+              Sign in to adjust values
+            </a>
+          </div>
+        )}
       </div>
 
       {/* ── Deal Stat Strip (recalculates from partner overrides) ── */}
@@ -471,8 +481,8 @@ export function PartnerAnalysisView({
             onExpand={() => setOpenModal("priceTrend")}
           />
 
-          {/* ── Action Buttons (partner feedback) ── */}
-          <div className="mt-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+          {/* ── Action Buttons (visible always, interactive when auth'd) ── */}
+          <div className="relative mt-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
             <h3 className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
               Your Response
             </h3>
@@ -502,9 +512,17 @@ export function PartnerAnalysisView({
                 action="pass"
               />
             </div>
-            <p className="mt-2 text-center text-[10px] text-slate-400">
-              Your response is shared with the analyst
-            </p>
+            {isAuthenticated ? (
+              <p className="mt-2 text-center text-[10px] text-slate-400">
+                Your response is shared with the analyst
+              </p>
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-white/80 backdrop-blur-[1px]">
+                <a href="/auth/sign-in?next=/portal" className="rounded-md border border-indigo-200 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50">
+                  Sign in to respond
+                </a>
+              </div>
+            )}
           </div>
         </div>
       </div>

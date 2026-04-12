@@ -12,6 +12,7 @@
 
 import { notFound } from "next/navigation";
 import { unstable_noStore as noStore } from "next/cache";
+import { createClient } from "@/lib/supabase/server";
 import { loadPartnerViewData } from "@/lib/partner-portal/load-partner-view-data";
 import { PartnerAnalysisView } from "./partner-analysis-view";
 
@@ -30,12 +31,25 @@ export default async function PartnerDealPage({
   const data = await loadPartnerViewData(shareToken);
   if (!data) notFound();
 
+  // Check if the partner is authenticated — gates interactive features
+  // (Quick Analysis sandbox, action buttons) per Decision 4.3:
+  // view without login, act with login.
+  let isAuthenticated = false;
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    isAuthenticated = !!user;
+  } catch {
+    // Not authenticated — that's fine for viewing
+  }
+
   return (
     <PartnerAnalysisView
       workstationData={data.workstationData!}
       compData={data.compData}
       share={data.share}
       partnerVersion={data.partnerVersion}
+      isAuthenticated={isAuthenticated}
     />
   );
 }
