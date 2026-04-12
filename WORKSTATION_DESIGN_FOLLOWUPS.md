@@ -552,6 +552,61 @@ Could be a ~1-2 day feature addition. High analytical value — gives the analys
 
 ---
 
+## 15. Comp sales need close/list price ratio + DOM context for market health signal
+
+**Surfaced:** 2026-04-12
+**Status:** Open — analytical enhancement, related to Price Trend card
+**Severity:** Feature — new analytical signal from existing data
+**Scope:** Comp table columns + possibly the Price Trend card or a new Market Health summary
+
+### Dan's insight
+
+The comp table shows each comparable sale's net price, implied ARV, gap, and days since close — but it doesn't tell the analyst HOW that sale happened. Two comps with the same close price tell very different stories:
+
+- **Comp A:** Listed at $680K, closed at $710K on day 3. ← Hot market. Bidding war. Buyers paying over ask.
+- **Comp B:** Listed at $750K, two price reductions, closed at $680K on day 45. ← Soft market. Sellers capitulating.
+
+Both appear similar in the current comp table but represent opposite market conditions. The analyst needs to see the close/list price ratio and DOM per comp to judge market health.
+
+### What's needed
+
+**Per-comp data points (already in the database):**
+- `list_price` (original list price of the comp sale)
+- `close_price` (what it actually sold for)
+- **Close/List ratio** = `close_price / list_price` (derived). >1.0 = sold over ask. <1.0 = sold under ask.
+- `DOM` (days on market) — already partially exposed as `days_since_close` in the comp table, but DOM (listing date to contract date) is a different and more useful metric than days since close
+
+**Display options:**
+- **(a) Add columns to the comp table.** Two new columns: `C/L%` (close/list ratio as percentage, e.g. "104%" or "91%") and `DOM` (days on market). Color code: C/L ≥100% green, <95% red. DOM <14 green, >45 red.
+- **(b) Market Health summary in the Price Trend card.** Aggregate the per-comp close/list ratios and DOM into a market health indicator: "Avg C/L: 98.2% · Avg DOM: 34 days · 3 of 12 comps sold over ask". This tells the macro story alongside the trend rate.
+- **(c) Both.** Per-comp columns in the table AND an aggregate summary in the Price Trend card.
+
+### Data availability
+
+- `mls_listings.list_price` — the original (or current) list price. Available for most listings.
+- `mls_listings.close_price` — the sale price. Available for closed sales.
+- `mls_listings.listing_contract_date` — the date the listing went active.
+- `mls_listings.purchase_contract_date` — the date the property went under contract (if available).
+- DOM can be computed as `purchase_contract_date - listing_contract_date` (for pending/closed) or `current_date - listing_contract_date` (for active).
+
+The comp engine already loads comp listing data including `close_price` via `metrics_json`. The `list_price` may need to be added to the comp candidate's `metrics_json` if it's not already there — depends on what `loadScreeningCompDataAction` populates.
+
+### Relationship to Price Trend
+
+The Price Trend card currently shows the annual appreciation/depreciation rate based on a time-decay regression. The close/list ratio and DOM data is complementary — the trend rate says "prices are rising/falling" while the close/list + DOM says "sellers are getting their price quickly" or "sellers are struggling." Together they paint the full market health picture.
+
+Dan's note: "This is related to market trend, and may need to be incorporated." Two paths:
+1. **Keep separate.** Comp table gets per-comp C/L% and DOM columns. Price Trend card gets an aggregate market health summary. Both are visible independently.
+2. **Integrate.** The Price Trend card evolves into a broader "Market Health" card that combines the trend rate + close/list aggregate + DOM aggregate + competition data (from followup #14). A single card that answers "what is this market doing?"
+
+### Recommended approach
+
+Start with **(a)** — add C/L% and DOM columns to the comp table. The data is per-comp and belongs next to the other per-comp metrics. Then evaluate whether the aggregate belongs in the Price Trend card (option b) or warrants a new Market Health card. The per-comp columns are the foundation; the aggregate is the synthesis.
+
+Check whether `list_price` is available in the comp candidate's `metrics_json`. If yes, the C/L% column is a pure UI addition. If no, the comp engine needs to include it in the metrics — a small loader change.
+
+---
+
 ## How to add new entries
 
 Append a new section below using the same template:
