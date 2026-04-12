@@ -400,6 +400,37 @@ This is a feature addition, not a design fix. Scope it as a standalone task outs
 
 ---
 
+## 12. Hold & Trans collapsed card headline is messy
+
+**Surfaced:** 2026-04-12
+**Status:** Open
+**Severity:** Cosmetic — affects readability of the right column at a glance
+**Scope:** `app/(workspace)/analysis/[analysisId]/analysis-workstation.tsx` (Hold & Trans DetailCard instance)
+
+### The issue
+
+The Hold & Transaction collapsed card currently renders:
+
+```
+Hold & Trans     Hold $12,800 · Trans $53,600   ▾
+                 120 days held
+```
+
+The headline tries to show both holding AND transaction totals in one line, making it long and cluttered compared to the other cards which have a single clean number. "Hold $12,800 · Trans $53,600" is a lot of visual noise for a collapsed card that's meant to be scannable.
+
+### Possible fixes
+
+- **(a) Single combined total.** Headline: `$66,400` (holding + transaction combined). Context: `Hold $12.8K · Trans $53.6K · 120 days`. Cleaner headline, detail in context line.
+- **(b) Two-line headline.** Line 1: `Hold $12,800`. Line 2: `Trans $53,600`. But DetailCard's headline prop is a single string.
+- **(c) Shorter format.** Headline: `H $12.8K · T $53.6K`. Abbreviated labels + compact numbers. Still noisy.
+- **(d) Show only the dominant number.** Headline: `$53,600` (transaction, the larger component). Context: `+ $12,800 holding · 120 days`. Highlights the bigger cost.
+
+### Recommended next step
+
+(a) — single combined total as the headline, breakdown in the context line. Matches the pattern of other cards (one prominent number + supporting context). Easy change in the DetailCard props.
+
+---
+
 ## How to add new entries
 
 Append a new section below using the same template:
