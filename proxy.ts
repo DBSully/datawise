@@ -41,8 +41,8 @@ const PUBLIC_PATHS = new Set<string>([
  */
 const PUBLIC_PREFIXES: readonly string[] = [
   "/_next",      // Next.js internals (chunks, hot reload)
-  "/api/public", // future: public API endpoints (Phase 1 Step 4)
-  "/share/",     // future: tokenized share links (Phase 1 Step 4)
+  "/api/public", // future: public API endpoints
+  "/portal/",    // partner portal — view without login (Decision 4.3)
 ] as const;
 
 function isPublicPath(pathname: string): boolean {
