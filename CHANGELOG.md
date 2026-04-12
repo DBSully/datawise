@@ -1,3 +1,25 @@
+## 2026-04-12 — Role-Based Access Control + Partner Portal Chrome
+
+Partners and analysts now have separate experiences. The kitchen is locked.
+
+### What shipped
+
+- **Default role changed to `partner`.** New signups get `role = 'partner'` by default. Analysts are promoted manually. Migration updates both the `profiles` table default and the `handle_new_auth_user` trigger.
+
+- **Role-based route protection in `proxy.ts`.** Partners are blocked from all workspace routes (`/dashboard`, `/intake`, `/screening`, `/analysis`, `/action`, `/reports`, `/admin`) and redirected to `/portal`. Analysts pass through as before. The proxy looks up the user's role from `profiles` on each request.
+
+- **Analyst dashboard moved from `/home` to `/dashboard`.** `/home` now redirects to `/dashboard`. AppChrome nav updated: "Home" → "Dashboard". All `revalidatePath("/home")` calls updated across 7 action files.
+
+- **Role-aware post-login redirect.** Sign-in page looks up the user's role after authentication. Partners → `/portal`, analysts → `/dashboard`. Partners following a `?next=` link to `/portal/*` are honored; workspace `?next=` targets are overridden to `/portal`.
+
+- **Partner portal header.** Portal layout now has a proper header with DataWise branding, "My Deals" and "Profile" nav links, public page links (Offerings, Methodology, Contact), and a Sign Out button.
+
+- **Profile page at `/portal/profile`.** Shows email, role, member-since date (read-only) and an editable full name field with save button. Accessible to both partners and analysts.
+
+- **Public page links in both layouts.** Offerings, Methodology, and Contact are now navigable from the analyst workspace header and the partner portal header.
+
+---
+
 ## 2026-04-12 — MILESTONE: Production Launch at www.DataWiseRE.com
 
 **DataWiseRE is live on a real domain.** The platform moved from a Vercel preview URL to production at `www.datawisere.com` with full SSL, custom domain routing, authenticated email delivery, and a polished screening workflow.

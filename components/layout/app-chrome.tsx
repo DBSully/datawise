@@ -220,6 +220,16 @@ export function AppChrome({ children }: AppChromeProps) {
           </div>
 
           <div className="hidden shrink-0 items-center gap-2 md:flex">
+            <Link href="/offerings" className="text-[11px] text-slate-400 hover:text-white">
+              Offerings
+            </Link>
+            <Link href="/methodology" className="text-[11px] text-slate-400 hover:text-white">
+              Methodology
+            </Link>
+            <Link href="/contact" className="text-[11px] text-slate-400 hover:text-white">
+              Contact
+            </Link>
+            <span className="mx-1 text-slate-700">|</span>
             <span className="rounded-md border border-slate-700 px-2 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-300">
               Denver MVP
             </span>

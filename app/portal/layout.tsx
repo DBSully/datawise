@@ -32,6 +32,16 @@ export default function PortalLayout({
               <Link href="/portal/profile" className="hover:text-slate-900">
                 Profile
               </Link>
+              <span className="mx-1 text-slate-300">|</span>
+              <Link href="/offerings" className="hover:text-slate-900">
+                Offerings
+              </Link>
+              <Link href="/methodology" className="hover:text-slate-900">
+                Methodology
+              </Link>
+              <Link href="/contact" className="hover:text-slate-900">
+                Contact
+              </Link>
             </nav>
           </div>
           <PortalSignOutButton />
