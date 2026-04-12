@@ -739,6 +739,98 @@ Total: ~5-7 days as a dedicated feature. Could be Phase 2 or a parallel track al
 
 ---
 
+## 18. Deal urgency "fuse" — time-and-offer-sensitive priority management + agent behavior analytics
+
+**Surfaced:** 2026-04-12
+**Status:** Open — feature concept, connects to #17 (agent tracking)
+**Severity:** Feature — new analytical + operational capability
+**Scope:** New urgency scoring system + agent behavior analytics derived from historical MLS data
+
+### Dan's insight
+
+Not every deal on the Watch List has the same urgency. A house listed yesterday at $700K where the analyst can offer 82% is low urgency — there's time to evaluate. But that same house on day 45 after two price reductions is HIGH urgency — the seller is motivated and someone else will act soon. The "fuse" is burning, and the analyst needs to see it.
+
+Furthermore, the listing agent's historical behavior should inform urgency. An agent who routinely sells at full price in 5 days signals "act now or lose it." An agent who routinely accepts offers 10% below list with large concessions signals "take your time, there's room to negotiate."
+
+### The feature: Deal Urgency Fuse
+
+A per-analysis urgency indicator that combines **time pressure** (how long the property has been listed, price reduction history) with **offer positioning** (how far below list the analyst's max offer is) and optionally **agent behavior** (how this agent typically handles their listings).
+
+```
+┌──────────────────────────────────────────────────────┐
+│ 🔥 URGENCY: HIGH                                     │
+│                                                      │
+│ ● Listed 47 days ago (avg for this area: 28 days)    │
+│ ● 2 price reductions ($750K → $725K → $700K)         │
+│ ● Your offer at 88% of current list                  │
+│ ● Agent history: avg 34 DOM, 96% close/list ratio    │
+│   → This agent typically holds firm on price          │
+│                                                      │
+│ Recommendation: Contact agent soon — motivated        │
+│ seller but agent resists deep discounts               │
+└──────────────────────────────────────────────────────┘
+```
+
+### Urgency scoring factors
+
+| Factor | Low urgency | Medium | High urgency |
+|---|---|---|---|
+| **DOM** | <7 days (just listed) | 7-30 days | >30 days (stale, seller getting anxious) |
+| **Price reductions** | 0 (holding firm) | 1 reduction | 2+ reductions (seller capitulating) |
+| **Offer positioning** | Offer% ≤80% (far below, unlikely accepted) | 80-90% | ≥90% (close to list, high probability) |
+| **MLS status changes** | New listing / Coming Soon | Active (stable) | Back on Market / Price Change |
+| **Agent DOM history** | Agent's listings avg <10 DOM (hot agent, moves fast) | 10-30 | >30 (agent's listings sit) |
+| **Agent close/list ratio** | Agent avg >100% (gets over ask) | 95-100% | <95% (accepts discounts) |
+
+The fuse BURNS FASTER when:
+- DOM is high AND price has been reduced (seller is motivated)
+- Offer% is high (the analyst's offer is close to what the seller might accept)
+- The agent's history suggests they accept below-list offers
+
+The fuse BURNS SLOWER when:
+- The property just listed (time to evaluate)
+- Offer% is very low (unlikely the seller accepts anyway)
+- The agent typically sells quickly at full price (hard to negotiate, may need to wait for a price drop)
+
+### Where it appears
+
+- **Watch List table:** a new "Urgency" column with a color-coded indicator (🟢 Low / 🟡 Medium / 🔴 High / 🔥 Critical). Sortable — the analyst can sort by urgency to see what needs attention TODAY.
+- **Workstation header or Quick Status tile:** urgency badge next to the property address. Visible at all times while working the analysis.
+- **Home dashboard "Needs Attention" section:** already shows Watch List items that need attention. The urgency fuse adds a quantitative signal to the existing qualitative flags (hot interest, showing scheduled, no activity in 3+ days).
+- **Pipeline / Action:** urgent deals in the pipeline (offer deadline approaching, counter-offer pending) get the same fuse treatment.
+
+### Relationship to other followups
+
+- **#15 (Close/list ratio + DOM per comp):** the per-comp C/L% and DOM data is the SAME data that feeds the agent behavior analytics. Building #15 first gives us the raw data; #18 synthesizes it into an urgency signal.
+- **#17 (Agent relationship tracking):** the agent behavior analytics here (avg DOM, avg C/L%) are a subset of the broader agent tracking feature. #17 builds the interaction history; #18 derives predictive signals from the agent's MLS track record.
+- **#14 (Market conditions):** active listing competition is another urgency factor — if 5 similar homes are active, the seller has less leverage and urgency shifts.
+
+### Implementation notes
+
+**Agent behavior analytics (derived from existing MLS data):**
+- `mls_listings` already has `listing_agent_name` / `listing_agent_id` + `close_price` + `list_price` + `listing_contract_date` + `close_date` + `dom` for every listing in the database.
+- For any listing agent, we can compute: total listings, avg DOM, avg close/list ratio, % that sold over ask, % with price reductions, avg time to first price reduction.
+- This is a READ-ONLY analytics query against existing data — no new tables needed for the agent behavior stats. The `agents` table from #17 would help with deduplication but isn't strictly required for a first pass (can query by `listing_agent_name` directly).
+
+**Urgency score computation:**
+- Could be a server-side computed column on the watch_list_v or analysis_queue_v views
+- Or a client-side computation from existing WorkstationData fields (DOM, price history from MLS, offer%)
+- The agent behavior component requires a separate query per agent (or a pre-computed materialized view of agent stats)
+
+### Recommended approach
+
+This is a **feature branch** that builds on #15 and #17. Phased:
+
+1. **Phase A (quick win, ~1 day):** simple urgency score based on DOM + price reductions + offer%. No agent behavior yet. Add a color-coded urgency column to the Watch List table. The score is a formula applied to existing data.
+
+2. **Phase B (~2 days):** agent behavior analytics. Query the listing agent's track record from `mls_listings`. Show avg DOM, avg C/L%, typical negotiation pattern. Display alongside the urgency score.
+
+3. **Phase C (~1-2 days):** integrate agent behavior into the urgency formula. Agent who sells fast at full price → urgency increases (act before someone else does). Agent who routinely discounts → urgency decreases (there's room to wait).
+
+Total: ~4-5 days across phases. High operational value — turns the Watch List from a flat list into a prioritized action queue.
+
+---
+
 ## How to add new entries
 
 Append a new section below using the same template:
