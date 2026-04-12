@@ -42,6 +42,7 @@ import { DetailCard } from "@/components/workstation/detail-card";
 import { DetailModal } from "@/components/workstation/detail-modal";
 import { ArvCardModal } from "./arv-card-modal";
 import { CashRequiredCardModal } from "./cash-required-card-modal";
+import { HoldTransCardModal } from "./hold-trans-card-modal";
 import { PriceTrendCardModal } from "./price-trend-card-modal";
 import { RehabCardModal } from "./rehab-card-modal";
 import {
@@ -670,10 +671,21 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
           onClose={() => setOpenModal(null)}
         />
       )}
-      {openModal != null && openModal !== "arv" && openModal !== "cashRequired" && openModal !== "priceTrend" && openModal !== "rehab" && (
+      {openModal === "holdTrans" && (
+        <HoldTransCardModal
+          data={data}
+          liveDeal={{
+            holdTotal: liveDeal.holdTotal,
+            transactionTotal: liveDeal.transactionTotal,
+            daysHeld: liveDeal.daysHeld,
+            daysHeldManual: liveDeal.daysHeldManual,
+          }}
+          onClose={() => setOpenModal(null)}
+        />
+      )}
+      {openModal != null && openModal !== "arv" && openModal !== "cashRequired" && openModal !== "priceTrend" && openModal !== "rehab" && openModal !== "holdTrans" && (
         <DetailModal
           title={
-            openModal === "holdTrans" ? "Holding & Transaction" :
             openModal === "financing" ? "Financing" :
             openModal === "pipeline" ? "Pipeline Status" :
             openModal === "notes" ? "Notes" :

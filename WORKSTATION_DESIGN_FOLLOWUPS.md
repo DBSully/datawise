@@ -82,6 +82,83 @@ The MLS Info and Property Physical tiles live in `<SubjectTileRow>`, which is al
 
 ---
 
+## 3. DetailModal card width too wide — left/right column gap is hard to scan
+
+**Surfaced:** 2026-04-11 during 3E.7.e (HoldTransCardModal)
+**Status:** Open
+**Severity:** Readability — affects every card modal
+**Scope:** `components/workstation/detail-modal.tsx` (the shared modal wrapper)
+
+### The issue
+
+The DetailModal renders at `max-w-[720px]`. Inside each card modal, the CostLine rows (label on the left, value on the right) have a wide horizontal gap between the label and the value. When the analyst's eyes scan from the label to the corresponding number, the distance is large enough to require conscious eye movement, making it easy to land on the wrong row.
+
+### Dan's preference
+
+Narrower modal cards. Reducing max-width would bring the label and value columns closer together, making the label-to-value scan tighter and faster. Alternatively, larger text/numbers could anchor the eye better, but Dan leans toward narrower.
+
+### Possible fixes
+
+- **(a) Reduce max-w from 720px to ~520-560px.** Single CSS change in detail-modal.tsx. Affects all modals equally.
+- **(b) Add a max-width to the CostLine container inside each modal.** Only affects waterfall-style modals (Holding/Trans, Cash Required, Financing). More targeted but more per-file changes.
+- **(c) Increase font size of CostLine values.** Makes the numbers more prominent and easier to track horizontally, but doesn't reduce the gap.
+
+### Recommended next step
+
+(a) — reduce the DetailModal max-width. Single change, uniform effect. Test at ~540px to see if the content still fits comfortably.
+
+---
+
+## 4. Right tile column should move to the LEFT side of the layout
+
+**Surfaced:** 2026-04-11 during 3E.7.e (HoldTransCardModal)
+**Status:** Open
+**Severity:** Layout — major UX improvement, affects the core Workstation structure
+**Scope:** `app/(workspace)/analysis/[analysisId]/analysis-workstation.tsx` (grid layout)
+
+### The issue
+
+The 9 collapsible detail cards currently live in a **right-side column** (~320px) next to the hero comp workspace, per the original spec §2 layout diagram. Dan's observation after using the real cards: "These cards are an amazing add and are working out perfectly. They should not be on the right side. The user wants to interact with them. They will eventually be on the left."
+
+The analyst's primary workflow involves opening these cards, reviewing numbers, and occasionally editing values. Having the cards on the right means the analyst's attention bounces between the right column (cards) and the center/left (comp workspace) — the cards feel like secondary context rather than the primary interaction surface they've become.
+
+### Dan's preference
+
+Move the detail cards to the **left side** of the layout. The comp workspace shifts to the right. This puts the cards — the analyst's primary interaction targets — closer to where the eye naturally starts (left edge of the viewport).
+
+### The complication
+
+This is a layout flip of the main Workstation grid. The current structure is:
+
+```
+┌────────────────────────────────────┬──────────────┐
+│ HERO COMP WORKSPACE (1fr)          │ RIGHT COLUMN │
+│                                    │ (320px)      │
+└────────────────────────────────────┴──────────────┘
+```
+
+The change flips it to:
+
+```
+┌──────────────┬────────────────────────────────────┐
+│ LEFT COLUMN  │ HERO COMP WORKSPACE (1fr)          │
+│ (320px)      │                                    │
+└──────────────┴────────────────────────────────────┘
+```
+
+This is a single `gridTemplateColumns` change in the Workstation's JSX + swapping the order of the two grid children. Small code change, but it affects the visual hierarchy of the entire Workstation and may interact with the top tile row alignment, the Deal Stat Strip width, and the header layout.
+
+### Possible fixes
+
+- **(a) Swap columns in the grid.** Change `gridTemplateColumns: "1fr 320px"` to `gridTemplateColumns: "320px 1fr"` and swap the JSX order of the two children. Single commit.
+- **(b) Full layout redesign.** Rethink the header/tiles/strip width budget with the card column on the left. May want the tiles and strip to span full width ABOVE both columns, or just above the hero. More work.
+
+### Recommended next step
+
+(a) is the quick-swap MVP. Try it and see if the visual hierarchy feels better. If the tiles/strip need width adjustments, handle those as a follow-on within the same polish pass.
+
+---
+
 ## How to add new entries
 
 Append a new section below using the same template:
