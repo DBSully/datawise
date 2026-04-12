@@ -201,13 +201,16 @@ export function PartnerSharingCardModal({
                             <span className="inline-block h-2 w-2 rounded-full bg-red-500" title="New feedback" />
                           )}
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleRevoke(share.id)}
-                          className="text-[10px] text-slate-400 hover:text-red-600"
-                        >
-                          Revoke
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <CopyLinkButton shareToken={share.share_token} />
+                          <button
+                            type="button"
+                            onClick={() => handleRevoke(share.id)}
+                            className="text-[10px] text-slate-400 hover:text-red-600"
+                          >
+                            Revoke
+                          </button>
+                        </div>
                       </div>
 
                       <div className="mt-1 flex gap-3 text-[10px] text-slate-500">
@@ -285,5 +288,32 @@ export function PartnerSharingCardModal({
         </div>
       )}
     </DetailModal>
+  );
+}
+
+// ── Copy Link button for each active share row ──────────────────────
+
+function CopyLinkButton({ shareToken }: { shareToken: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    const baseUrl =
+      typeof window !== "undefined"
+        ? window.location.origin
+        : "http://localhost:3000";
+    const url = `${baseUrl}/portal/deals/${shareToken}`;
+    navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }, [shareToken]);
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="text-[10px] text-blue-600 hover:text-blue-800"
+    >
+      {copied ? "Copied!" : "Copy Link"}
+    </button>
   );
 }

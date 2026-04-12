@@ -40,6 +40,7 @@ import { PriceTrendCardModal } from "@/app/(workspace)/analysis/[analysisId]/pri
 import { fmt, fmtNum } from "@/lib/reports/format";
 import type { WorkstationData } from "@/lib/reports/types";
 import type { PartnerCompData } from "@/lib/partner-portal/load-partner-view-data";
+import { submitPartnerFeedbackAction } from "@/lib/partner-portal/feedback-actions";
 
 /** Format an ISO date string as mm/dd/yy without TZ shifts. */
 function fmtIsoDate(v: string | null | undefined): string {
@@ -357,33 +358,29 @@ export function PartnerAnalysisView({
                 label="I'm Interested"
                 color="emerald"
                 shareId={share.id}
-                analysisId={share.analysisId}
                 action="interested"
               />
               <ActionButton
                 label="Schedule Showing"
                 color="blue"
                 shareId={share.id}
-                analysisId={share.analysisId}
                 action="showing_request"
               />
               <ActionButton
                 label="Request Discussion"
                 color="amber"
                 shareId={share.id}
-                analysisId={share.analysisId}
                 action="discussion_request"
               />
               <ActionButton
                 label="Pass"
                 color="red"
                 shareId={share.id}
-                analysisId={share.analysisId}
                 action="pass"
               />
             </div>
             <p className="mt-2 text-center text-[10px] text-slate-400">
-              Sign in to submit your response and save your analysis adjustments
+              Your response is shared with the analyst
             </p>
           </div>
         </div>
@@ -443,16 +440,17 @@ function ActionButton({
   label,
   color,
   shareId,
-  analysisId,
   action,
 }: {
   label: string;
   color: "emerald" | "blue" | "amber" | "red";
   shareId: string;
-  analysisId: string;
-  action: string;
+  action: "interested" | "pass" | "showing_request" | "discussion_request";
 }) {
-  const [submitted, setSubmitted] = useState(false);
+  const [status, setStatus] = useState<
+    "idle" | "submitting" | "submitted" | "auth_required" | "error"
+  >("idle");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const colorClasses = {
     emerald:
@@ -463,24 +461,55 @@ function ActionButton({
   };
 
   const handleClick = useCallback(async () => {
-    // For MVP: mark as submitted locally. Full persistence (writing to
-    // partner_feedback table) requires the partner to be signed in.
-    // The sign-in flow + feedback persistence ships in 4F.
-    setSubmitted(true);
-  }, []);
+    setStatus("submitting");
+    setErrorMsg(null);
+    const result = await submitPartnerFeedbackAction({
+      shareId,
+      action,
+    });
+    if (result.ok) {
+      setStatus("submitted");
+    } else if (result.requiresAuth) {
+      setStatus("auth_required");
+      setErrorMsg(result.error ?? "Sign in required.");
+    } else {
+      setStatus("error");
+      setErrorMsg(result.error ?? "Something went wrong.");
+    }
+  }, [shareId, action]);
+
+  if (status === "auth_required") {
+    return (
+      <a
+        href="/auth/sign-in?next=/portal"
+        className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-center text-[10px] font-semibold text-slate-500 hover:bg-slate-100"
+      >
+        Sign in to {label.toLowerCase()}
+      </a>
+    );
+  }
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={submitted}
-      className={`rounded-md border px-2 py-1.5 text-[11px] font-semibold transition-colors ${
-        submitted
-          ? "border-slate-200 bg-slate-50 text-slate-400 cursor-default"
-          : colorClasses[color]
-      }`}
-    >
-      {submitted ? `✓ ${label}` : label}
-    </button>
+    <div>
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={status === "submitting" || status === "submitted"}
+        className={`w-full rounded-md border px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+          status === "submitted"
+            ? "border-slate-200 bg-slate-50 text-slate-400 cursor-default"
+            : colorClasses[color]
+        }`}
+      >
+        {status === "submitting"
+          ? "Submitting..."
+          : status === "submitted"
+            ? `✓ ${label}`
+            : label}
+      </button>
+      {status === "error" && errorMsg && (
+        <div className="mt-0.5 text-[9px] text-red-500">{errorMsg}</div>
+      )}
+    </div>
   );
 }
