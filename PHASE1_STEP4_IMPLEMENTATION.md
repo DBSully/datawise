@@ -165,12 +165,78 @@ const channel = supabase
 
 **Requires Supabase Realtime to be enabled** for the relevant tables. This is a Supabase dashboard configuration step.
 
-### 4F — Partner auth flow + dashboard
+### 4F — Partner auth flow + Partner Workspace
 
-- Partner registration: email + password (or magic link) via Supabase Auth
-- Auto-link: when a partner registers with an email that matches a `shared_with_email` in `analysis_shares`, the `shared_with_user_id` is automatically set to their new profile ID
-- Partner dashboard at `/portal`: list of shared analyses, view counts, feedback status
-- Partner profile at `/portal/profile`: name, email, preferences
+The partner experience should feel like a **workspace they return to daily**, not a notification inbox of one-off email links. When a partner logs in, they see their deal flow — organized, actionable, and live-updating. The database foundation from 4A already supports this with zero additional schema work.
+
+**Partner registration + auto-link:**
+- Registration: email + password (or magic link) via Supabase Auth
+- Auto-link: when a partner registers with an email that matches a `shared_with_email` in `analysis_shares`, the `shared_with_user_id` is automatically set to their new profile ID. All previously-shared analyses instantly appear in their dashboard.
+- Role: `profiles.role = 'partner'` (the role column was added in Step 2; becomes operational here)
+
+**Partner Workspace at `/portal/` — the partner's home:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  PARTNER WORKSPACE                              Dan's Deals     │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  Tabs: [ New (3) ] [ Watching (5) ] [ Interested (2) ]  │   │
+│  │        [ Passed (8) ] [ All (18) ]                       │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ 🔴 NEW  1005 Garfield St, Denver CO 80206               │    │
+│  │ ARV $1,125,000 · Max Offer $620,000 · 88.6%             │    │
+│  │ "Take a look at this one — strong ARV gap"               │    │
+│  │ Shared 2h ago · Not yet viewed                           │    │
+│  │                    [ I'm Interested ] [ Pass ] [ Open → ]│    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ 📋 WATCHING  742 Pearl St, Denver CO 80203              │    │
+│  │ ARV $890,000 · Max Offer $510,000 · 91.2%               │    │
+│  │ Your ARV: $920,000 · Your Rehab: $65,000                │    │
+│  │ Shared 3 days ago · Viewed 2x · Last viewed yesterday   │    │
+│  │                                              [ Open → ]  │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Status lanes (tabs):**
+
+| Lane | Filter logic | Purpose |
+|---|---|---|
+| **New** | `analysis_shares.is_active = true` AND no `partner_feedback` row AND `partner_analysis_versions.last_viewed_at IS NULL` | Deals the partner hasn't opened yet. The "inbox" — new opportunities from analysts. Badge count in the tab. |
+| **Watching** | `is_active = true` AND partner has viewed (`last_viewed_at IS NOT NULL`) but has NOT submitted final feedback (interested/pass) | Deals the partner is actively evaluating — they've looked, maybe adjusted numbers, but haven't committed. |
+| **Interested** | `partner_feedback.action = 'interested'` (or `showing_request` or `discussion_request`) | Deals the partner wants to pursue. Their "active pipeline." |
+| **Passed** | `partner_feedback.action = 'pass'` | Deals the partner declined. Historical reference. Can be re-opened if the analyst re-shares or the partner changes their mind. |
+| **All** | Everything shared with this partner (active or revoked) | Full history. |
+
+**Per-deal summary card on the dashboard:**
+- Property address + city/state
+- Key deal stats: ARV, Max Offer, Offer% (from the analyst's analysis)
+- Partner's own adjustments if any (their ARV override, rehab override)
+- Analyst's message (from the share)
+- Timing: when shared, view count, last viewed
+- **"New" badge** on unviewed deals (pulsing dot, same as the analyst's unread indicator)
+- **Quick actions** directly from the dashboard card:
+  - "I'm Interested" / "Pass" buttons (submit feedback without opening the full analysis)
+  - "Open →" link to `/portal/deals/[shareToken]` for the full view
+- Deals with new analyst activity (re-shared, updated analysis) get a subtle highlight
+
+**Live updates via Realtime (from 4E):**
+- When the analyst shares a new deal, it appears in the partner's "New" tab immediately (Realtime pushes the new `analysis_shares` row)
+- When the analyst updates an analysis the partner is watching, the card refreshes with new numbers
+- When the partner submits feedback, the card moves to the appropriate lane
+
+**Partner profile at `/portal/profile`:**
+- Name, email, phone (optional)
+- Notification preferences (email frequency: immediate / daily digest / none)
+- Connected analysts (list of analysts who have shared deals with this partner)
+- Account settings (password change, etc.)
+
+**Why this matters (Dan's insight):** the partner should feel that they have a place to go where they watch deals and find new ones, rather than just a one-off email interaction. The workspace model turns partners into **repeat users with their own workflow** — they check their dashboard, review new deals, track the ones they're interested in, and build a relationship with the analyst through the platform. This is the foundation for long-term partner engagement and the future "partner self-reconciliation" feature from Decision 11.
 
 ---
 
@@ -251,8 +317,8 @@ ALTER PUBLICATION supabase_realtime ADD TABLE partner_analysis_versions;
 | 4C | 3-4 | Partner Sharing card modal + header pill + Share button wiring |
 | 4D | 5-8 | Partner-facing route + layout + component gating + action buttons + partner Quick Analysis |
 | 4E | 2-3 | Realtime subscriptions + live card updates + unread indicators |
-| 4F | 2-3 | Partner registration + auto-link + dashboard + profile |
-| **Total** | **~16-23** | |
+| 4F | 4-6 | Partner registration + auto-link + Partner Workspace dashboard (status lanes, deal cards, quick actions) + profile |
+| **Total** | **~18-26** | |
 
 ---
 
