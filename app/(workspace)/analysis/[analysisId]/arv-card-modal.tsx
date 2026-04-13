@@ -14,6 +14,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { DetailModal } from "@/components/workstation/detail-modal";
 import { fmt, fmtNum } from "@/lib/reports/format";
 import type { WorkstationData, ArvPerCompDetail } from "@/lib/reports/types";
@@ -68,6 +69,7 @@ export function ArvCardModal({
   onClose,
   onEditManualArv,
 }: ArvCardModalProps) {
+  const router = useRouter();
   const arv = data.arv;
   const detail = arv.selectedDetail;
   const perComp = detail?.perCompDetails ?? [];
@@ -193,6 +195,7 @@ export function ArvCardModal({
                       isExpanded={isExpanded}
                       hasAdj={hasAdj}
                       onToggle={() => setExpandedIdx(isExpanded ? null : i)}
+                      onSaved={() => router.refresh()}
                     />
                   );
                 })}
@@ -257,12 +260,14 @@ function CompRow({
   isExpanded,
   hasAdj,
   onToggle,
+  onSaved,
 }: {
   comp: ArvPerCompDetail;
   sizeAdj: number;
   isExpanded: boolean;
   hasAdj: boolean;
   onToggle: () => void;
+  onSaved: () => void;
 }) {
   return (
     <>
@@ -311,7 +316,7 @@ function CompRow({
       {isExpanded && (
         <tr>
           <td colSpan={9} className="bg-slate-50 px-2 py-2">
-            <CompAdjustmentPanel comp={comp} />
+            <CompAdjustmentPanel comp={comp} onSaved={onSaved} />
           </td>
         </tr>
       )}
@@ -338,7 +343,7 @@ function parseAdjInput(s: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function CompAdjustmentPanel({ comp }: { comp: ArvPerCompDetail }) {
+function CompAdjustmentPanel({ comp, onSaved }: { comp: ArvPerCompDetail; onSaved: () => void }) {
   const initial = comp.analystAdjustments ?? emptyAdjustments();
   const [inputs, setInputs] = useState<Record<AnalystAdjCategoryKey, string>>(
     () => initInputs(initial),
@@ -378,6 +383,8 @@ function CompAdjustmentPanel({ comp }: { comp: ArvPerCompDetail }) {
       if (result.error) {
         // eslint-disable-next-line no-console
         console.error("[comp-adj] save failed:", result.error);
+      } else {
+        onSaved();
       }
     } catch (err) {
       // eslint-disable-next-line no-console
