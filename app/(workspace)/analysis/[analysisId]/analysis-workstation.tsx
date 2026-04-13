@@ -117,18 +117,49 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
     initialDaysHeldManual != null ? String(initialDaysHeldManual) : "",
   );
 
+  // ── Comp data state (declared early so liveDeal can read it) ────────
+  const compSearchRunId = data.compModalData.latestRun?.id ?? null;
+  const realPropertyId = data.propertyId;
+  const [compData, setCompData] = useState<ScreeningCompData | null>(null);
+  const [compLoading, setCompLoading] = useState<boolean>(
+    compSearchRunId != null,
+  );
+
   // ── liveDeal memo ──────────────────────────────────────────────────
-  // Recomputes synchronously on every keystroke in Quick Analysis.
-  // Mirrors the screening modal's liveDeal pattern but reads from
-  // WorkstationData fields instead of ScreeningCompData. The right-
-  // column cards in 3E.6 will read from this memo too (via props).
+  // Recomputes synchronously on every keystroke in Quick Analysis
+  // AND when comp selection changes (via compData dependency).
+  // Mirrors the screening modal's liveDeal pattern. The right-
+  // column cards in 3E.6 read from this memo too (via props).
   const liveDeal = useMemo(() => {
     const parsedArv = parseDollarInput(arvInput);
     const parsedRehab = parseDollarInput(rehabInput);
     const parsedTargetProfit = parseDollarInput(targetProfitInput);
     const parsedDaysHeld = parseIntInput(daysHeldInput);
 
-    const arv = parsedArv ?? data.arv.effective ?? 0;
+    // ARV priority: manual override → live comp selection → server-computed
+    let arv: number;
+    if (parsedArv != null) {
+      arv = parsedArv;
+    } else if (compData) {
+      // Recalculate from live comp selection (mirrors screening modal)
+      const selected = compData.candidates.filter((c) => c.selected_yn);
+      let weightedSum = 0;
+      let weightTotal = 0;
+      for (const c of selected) {
+        const detail = c.comp_listing_row_id
+          ? compData.arvByCompListingId[c.comp_listing_row_id]
+          : null;
+        if (detail) {
+          weightedSum += detail.arv * detail.weight;
+          weightTotal += detail.weight;
+        }
+      }
+      arv = weightTotal > 0
+        ? Math.round(weightedSum / weightTotal)
+        : (data.arv.effective ?? 0);
+    } else {
+      arv = data.arv.effective ?? 0;
+    }
     const rehabTotal = parsedRehab ?? data.rehab.effective ?? 0;
     const targetProfit =
       parsedTargetProfit ?? data.dealMath?.targetProfit ?? 40_000;
@@ -185,21 +216,10 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
     targetProfitInput,
     daysHeldInput,
     data,
+    compData,
   ]);
 
   // ── Comp data loading for the hero CompWorkspace ───────────────────
-  // The new Workstation reuses the screening modal's loadCompDataByRunAction
-  // which returns ScreeningCompData (the shape CompWorkspace consumes).
-  // Loaded client-side on mount because WorkstationData doesn't carry
-  // the full ScreeningCompData payload server-side. CompWorkspace handles
-  // the brief loading state internally.
-  const compSearchRunId = data.compModalData.latestRun?.id ?? null;
-  const realPropertyId = data.propertyId;
-  const [compData, setCompData] = useState<ScreeningCompData | null>(null);
-  const [compLoading, setCompLoading] = useState<boolean>(
-    compSearchRunId != null,
-  );
-
   const reloadCompData = useCallback(() => {
     if (!compSearchRunId) return;
     setCompLoading(true);
