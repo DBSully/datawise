@@ -369,12 +369,22 @@ function CompAdjustmentPanel({ comp }: { comp: ArvPerCompDetail }) {
   const handleSave = useCallback(async () => {
     if (!comp.candidateId) return;
     setSaving(true);
-    const toSave = { ...adj, other_note: otherNote.trim() || undefined };
-    await saveCompAdjustmentAction({
-      candidateId: comp.candidateId,
-      adjustments: toSave,
-    });
-    setSaving(false);
+    try {
+      const toSave = { ...adj, other_note: otherNote.trim() || undefined };
+      const result = await saveCompAdjustmentAction({
+        candidateId: comp.candidateId,
+        adjustments: toSave,
+      });
+      if (result.error) {
+        // eslint-disable-next-line no-console
+        console.error("[comp-adj] save failed:", result.error);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[comp-adj] save threw:", err);
+    } finally {
+      setSaving(false);
+    }
   }, [comp.candidateId, adj, otherNote]);
 
   return (
