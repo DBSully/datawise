@@ -507,29 +507,6 @@ export function ScreeningCompModal({
                     <> · {fmtNum(compStats.avgScore, 1)} avg score</>
                   )}
                 </span>
-                <CopyMlsButton
-                  label="Copy Selected"
-                  mlsNumbers={[
-                    ...(data.mlsNumber ? [data.mlsNumber] : []),
-                    ...data.candidates
-                      .filter((c) => c.selected_yn)
-                      .map((c) => ({ mls: String(c.metrics_json.listing_id ?? ""), arv: (c.comp_listing_row_id ? data.arvByCompListingId[c.comp_listing_row_id]?.arv : null) ?? 0 }))
-                      .filter((x) => x.mls)
-                      .sort((a, b) => b.arv - a.arv)
-                      .map((x) => x.mls),
-                  ]}
-                />
-                <CopyMlsButton
-                  label="Copy All"
-                  mlsNumbers={[
-                    ...(data.mlsNumber ? [data.mlsNumber] : []),
-                    ...data.candidates
-                      .map((c) => ({ mls: String(c.metrics_json.listing_id ?? ""), arv: (c.comp_listing_row_id ? data.arvByCompListingId[c.comp_listing_row_id]?.arv : null) ?? 0 }))
-                      .filter((x) => x.mls)
-                      .sort((a, b) => b.arv - a.arv)
-                      .map((x) => x.mls),
-                  ]}
-                />
               </div>
             }
           />
@@ -773,35 +750,4 @@ export function ScreeningCompModal({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Sub-components
-// ---------------------------------------------------------------------------
-
-function CopyMlsButton({
-  label,
-  mlsNumbers,
-}: {
-  label: string;
-  mlsNumbers: string[];
-}) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = useCallback(() => {
-    if (mlsNumbers.length === 0) return;
-    navigator.clipboard.writeText(mlsNumbers.join(", "));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }, [mlsNumbers]);
-
-  return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      disabled={mlsNumbers.length === 0}
-      className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-    >
-      {copied ? "Copied!" : `${label} (${mlsNumbers.length})`}
-    </button>
-  );
-}
 

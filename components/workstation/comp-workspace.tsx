@@ -247,7 +247,23 @@ export function CompWorkspace({
 
       {/* Right: Dense candidate table */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex items-center justify-end px-1 py-0.5">
+        <div className="flex items-center justify-between px-1 py-0.5">
+          <div className="flex items-center gap-1">
+            <CopyMlsButton
+              label="Copy Selected"
+              candidates={data.candidates}
+              arvByCompListingId={data.arvByCompListingId}
+              mlsNumber={data.mlsNumber ?? null}
+              selectedOnly
+            />
+            <CopyMlsButton
+              label="Copy All"
+              candidates={data.candidates}
+              arvByCompListingId={data.arvByCompListingId}
+              mlsNumber={data.mlsNumber ?? null}
+              selectedOnly={false}
+            />
+          </div>
           <button
             type="button"
             onClick={() => setShowSelectedOnly((v) => !v)}
@@ -622,5 +638,63 @@ export function CompWorkspace({
         </div>
       </div>
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CopyMlsButton — copies subject + comp MLS numbers to clipboard
+// ─────────────────────────────────────────────────────────────────────────────
+
+type CopyMlsButtonProps = {
+  label: string;
+  candidates: ScreeningCompData["candidates"];
+  arvByCompListingId: ScreeningCompData["arvByCompListingId"];
+  mlsNumber: string | null;
+  selectedOnly: boolean;
+};
+
+function CopyMlsButton({
+  label,
+  candidates,
+  arvByCompListingId,
+  mlsNumber,
+  selectedOnly,
+}: CopyMlsButtonProps) {
+  const [copied, setCopied] = useState(false);
+
+  const pool = selectedOnly
+    ? candidates.filter((c) => c.selected_yn)
+    : candidates;
+
+  const mlsNumbers = [
+    ...(mlsNumber ? [mlsNumber] : []),
+    ...pool
+      .map((c) => ({
+        mls: String(c.metrics_json.listing_id ?? ""),
+        arv: c.comp_listing_row_id
+          ? (arvByCompListingId[c.comp_listing_row_id]?.arv ?? 0)
+          : 0,
+      }))
+      .filter((x) => x.mls)
+      .sort((a, b) => b.arv - a.arv)
+      .map((x) => x.mls),
+  ];
+
+  const handleCopy = useCallback(() => {
+    if (mlsNumbers.length === 0) return;
+    navigator.clipboard.writeText(mlsNumbers.join(", "));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }, [mlsNumbers]);
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      disabled={mlsNumbers.length === 0}
+      className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+    >
+      {copied ? "Copied!" : `${label} (${mlsNumbers.length})`}
+    </button>
   );
 }

@@ -1,3 +1,9 @@
+## 2026-04-12 — Copy MLS Buttons Unified in CompWorkspace
+
+- **Copy Selected MLS / Copy All MLS buttons moved into CompWorkspace** — now appear above the comp table in both the screening modal and the analysis workstation. Previously only existed in the screening modal's Deal Stat Strip. Removes duplication: one implementation in `comp-workspace.tsx` serves all consumers. Dead `CopyMlsButton` in `screening-comp-modal.tsx` removed.
+
+---
+
 ## 2026-04-12 — Public Pages: Offerings & Methodology
 
 First real public-facing content on the site.
