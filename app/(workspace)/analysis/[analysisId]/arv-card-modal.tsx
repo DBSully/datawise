@@ -323,20 +323,45 @@ function CompRow({
 // CompAdjustmentPanel — the 6 adjustment inputs for a single comp
 // ─────────────────────────────────────────────────────────────────────────────
 
+function initInputs(adj: CompAnalystAdjustments): Record<AnalystAdjCategoryKey, string> {
+  const out: Record<string, string> = {};
+  for (const { key } of ANALYST_ADJ_CATEGORIES) {
+    out[key] = adj[key] === 0 ? "" : String(adj[key]);
+  }
+  return out as Record<AnalystAdjCategoryKey, string>;
+}
+
+function parseAdjInput(s: string): number {
+  const cleaned = s.replace(/[,$\s]/g, "");
+  if (cleaned === "" || cleaned === "-") return 0;
+  const n = parseInt(cleaned, 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function CompAdjustmentPanel({ comp }: { comp: ArvPerCompDetail }) {
-  const [adj, setAdj] = useState<CompAnalystAdjustments>(
-    comp.analystAdjustments ?? emptyAdjustments(),
+  const initial = comp.analystAdjustments ?? emptyAdjustments();
+  const [inputs, setInputs] = useState<Record<AnalystAdjCategoryKey, string>>(
+    () => initInputs(initial),
   );
   const [saving, setSaving] = useState(false);
   const [otherNote, setOtherNote] = useState(comp.analystAdjustments?.other_note ?? "");
+
+  // Derive numeric adjustments from raw input strings
+  const adj: CompAnalystAdjustments = {
+    view_location: parseAdjInput(inputs.view_location),
+    layout: parseAdjInput(inputs.layout),
+    lot_size: parseAdjInput(inputs.lot_size),
+    garage: parseAdjInput(inputs.garage),
+    condition: parseAdjInput(inputs.condition),
+    other: parseAdjInput(inputs.other),
+  };
 
   const total = sumAdjustments(adj);
   const sizeAdj = comp.arvBlended - comp.netSalePrice;
 
   const handleChange = useCallback(
     (key: AnalystAdjCategoryKey, value: string) => {
-      const num = value === "" || value === "-" ? 0 : parseInt(value.replace(/[,$]/g, ""), 10);
-      setAdj((prev) => ({ ...prev, [key]: Number.isFinite(num) ? num : 0 }));
+      setInputs((prev) => ({ ...prev, [key]: value }));
     },
     [],
   );
@@ -383,7 +408,7 @@ function CompAdjustmentPanel({ comp }: { comp: ArvPerCompDetail }) {
             </label>
             <input
               type="text"
-              value={adj[key] === 0 ? "" : String(adj[key])}
+              value={inputs[key]}
               onChange={(e) => handleChange(key, e.target.value)}
               placeholder="0"
               className="w-[80px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-right text-[11px] font-mono text-slate-900 placeholder:text-slate-300 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-200"
