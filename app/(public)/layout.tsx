@@ -1,3 +1,13 @@
+// app/(public)/layout.tsx
+// Main padding removed from <main> so full-bleed pages (methodology, offerings)
+// can reach the edges. Pages that need centered/padded content use the
+// dw-container pattern directly — see comment below.
+//
+// MIGRATION NOTE: If any existing page relied on the layout's px-4 py-10,
+// wrap that page's content in:
+//   <div className="max-w-5xl mx-auto px-6 md:px-12 py-10">...</div>
+// The contact page placeholder is the only current candidate.
+
 import Link from "next/link";
 
 export default function PublicLayout({
@@ -36,7 +46,7 @@ export default function PublicLayout({
         </div>
       </header>
 
-      <main className="px-4 py-10">{children}</main>
+      <main>{children}</main>
     </div>
   );
 }

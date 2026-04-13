@@ -1,3 +1,21 @@
+## 2026-04-12 — Public Pages: Offerings & Methodology
+
+First real public-facing content on the site.
+
+### What shipped
+
+- **Methodology page** — full-bleed design with hero slot, 6 numbered methodology sections (Comparable Selection, ARV, Rehab, Holding & Transaction, Financing, Deal Math), a dark deal-waterfall callout with example numbers, an honest Limitations section, and a CTA strip. Content explains the analytical process in investor-accessible language without dumbing down the math.
+
+- **Offerings page** — uses the same design framework as Methodology (placeholder content to be differentiated in a follow-up pass).
+
+- **Public layout update** — removed `px-4 py-10` padding from `<main>` so full-bleed hero sections can reach the edges. Individual pages manage their own container widths.
+
+### Note
+
+Both pages include a `HERO SLOT` placeholder for a future photo, video, or animation asset. The gradient overlay and headline are positioned on top of whatever asset fills the slot.
+
+---
+
 ## 2026-04-12 — Role-Based Access Control + Partner Portal Chrome
 
 Partners and analysts now have separate experiences. The kitchen is locked.
