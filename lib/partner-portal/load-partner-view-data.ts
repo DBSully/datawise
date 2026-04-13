@@ -100,7 +100,11 @@ export async function loadPartnerViewData(
     .eq("is_active", true)
     .maybeSingle();
 
-  if (shareError || !share) return null;
+  if (shareError || !share) {
+    // eslint-disable-next-line no-console
+    console.error("[partner-view] share lookup failed:", shareError?.message ?? "not found", "token:", shareToken);
+    return null;
+  }
 
   // 2. Increment view count + update last_viewed_at
   await supabase
@@ -135,7 +139,11 @@ export async function loadPartnerViewData(
     .eq("id", share.analysis_id)
     .maybeSingle();
 
-  if (!analysis) return null;
+  if (!analysis) {
+    // eslint-disable-next-line no-console
+    console.error("[partner-view] analysis lookup failed for share.analysis_id:", share.analysis_id);
+    return null;
+  }
 
   // Load WorkstationData using the analysis owner's perspective
   const workstationData = await loadWorkstationData(
@@ -145,7 +153,11 @@ export async function loadPartnerViewData(
     analysis.id,
   );
 
-  if (!workstationData) return null;
+  if (!workstationData) {
+    // eslint-disable-next-line no-console
+    console.error("[partner-view] loadWorkstationData returned null for analysis:", analysis.id, "property:", analysis.real_property_id, "owner:", analysis.created_by_user_id);
+    return null;
+  }
 
   // 4. Load the partner's private sandbox (if one exists)
   const { data: partnerVersion } = await supabase
