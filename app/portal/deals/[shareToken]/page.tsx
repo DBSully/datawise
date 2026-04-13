@@ -27,8 +27,19 @@ export default async function PartnerDealPage({
   noStore();
   const { shareToken } = await params;
 
-  const data = await loadPartnerViewData(shareToken);
-  if (!data) notFound();
+  let data;
+  try {
+    data = await loadPartnerViewData(shareToken);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[partner-deal] loadPartnerViewData crashed:", err);
+    notFound();
+  }
+  if (!data) {
+    // eslint-disable-next-line no-console
+    console.error("[partner-deal] loadPartnerViewData returned null for token:", shareToken);
+    notFound();
+  }
 
   // Auth check moved to CLIENT side (PartnerAnalysisView) to avoid
   // hydration mismatch. The server always renders the "locked" state;
