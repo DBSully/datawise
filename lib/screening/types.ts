@@ -30,6 +30,42 @@ export type CategoryScopeValue = CategoryScopeTier | { cost: number };
 export type RehabCategoryScopes = Partial<Record<RehabCategoryKey, CategoryScopeValue>>;
 
 // ---------------------------------------------------------------------------
+// ARV — Analyst adjustments
+// ---------------------------------------------------------------------------
+
+/** Per-comp manual dollar adjustments entered by the analyst. */
+export type CompAnalystAdjustments = {
+  view_location: number;
+  layout: number;
+  lot_size: number;
+  garage: number;
+  condition: number;
+  other: number;
+  other_note?: string;
+};
+
+export const ANALYST_ADJ_CATEGORIES = [
+  { key: "view_location" as const, label: "View / Location" },
+  { key: "layout" as const, label: "Layout / Floor Plan" },
+  { key: "lot_size" as const, label: "Lot Size / Yard" },
+  { key: "garage" as const, label: "Garage / Parking" },
+  { key: "condition" as const, label: "Condition / Updates" },
+  { key: "other" as const, label: "Other" },
+] as const;
+
+export type AnalystAdjCategoryKey = (typeof ANALYST_ADJ_CATEGORIES)[number]["key"];
+
+export function emptyAdjustments(): CompAnalystAdjustments {
+  return { view_location: 0, layout: 0, lot_size: 0, garage: 0, condition: 0, other: 0 };
+}
+
+export function sumAdjustments(adj: CompAnalystAdjustments | null | undefined): number {
+  if (!adj) return 0;
+  return (adj.view_location || 0) + (adj.layout || 0) + (adj.lot_size || 0) +
+    (adj.garage || 0) + (adj.condition || 0) + (adj.other || 0);
+}
+
+// ---------------------------------------------------------------------------
 // ARV
 // ---------------------------------------------------------------------------
 
@@ -50,6 +86,8 @@ export type CompArvInput = {
   propertyType: string | null;
   levelClass: string | null;
   mlsStatus: string | null;
+  /** Per-comp analyst adjustments (null during screening, populated during deep analysis). */
+  analystAdjustments?: CompAnalystAdjustments | null;
 };
 
 /** Per-comp ARV adjustment detail, stored for transparency / drill-in. */
@@ -71,6 +109,12 @@ export type CompArvDetail = {
   arvBlended: number;
   timeAdjustment: number;
   arvTimeAdjusted: number;
+  /** Per-comp analyst adjustments (null = not entered). */
+  analystAdjustments: CompAnalystAdjustments | null;
+  /** Sum of analyst adjustments (0 if null/empty). */
+  analystAdjustmentTotal: number;
+  /** Final adjusted ARV: arvTimeAdjusted + analystAdjustmentTotal. */
+  arvFinal: number;
   confidence: number;
   decayWeight: number;
 };

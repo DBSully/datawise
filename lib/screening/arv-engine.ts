@@ -8,8 +8,9 @@
 // ---------------------------------------------------------------------------
 
 import type { ArvConfig, ConfidenceTier } from "./strategy-profiles";
-import type { CompArvInput, CompArvDetail, ArvResult } from "./types";
+import type { CompArvInput, CompArvDetail, ArvResult, CompAnalystAdjustments } from "./types";
 import type { PropertyTypeKey } from "./types";
+import { sumAdjustments } from "./types";
 
 type CalculateArvInput = {
   subjectBuildingSqft: number;
@@ -106,6 +107,11 @@ export function calculateArv(input: CalculateArvInput): ArvResult | null {
     const timeAdjustment = arvBlended * (timeMultiplier - 1);
     const arvTimeAdjusted = arvBlended * timeMultiplier;
 
+    // Analyst adjustments (null during screening, populated during deep analysis)
+    const analystAdj: CompAnalystAdjustments | null = comp.analystAdjustments ?? null;
+    const analystAdjTotal = sumAdjustments(analystAdj);
+    const arvFinal = round(arvTimeAdjusted + analystAdjTotal, 0);
+
     // Confidence and decay weight
     const confidence = lookupConfidence(comp.distanceMiles, config.confidenceTiersByType[propertyType] ?? config.confidenceTiersByType["detached"] ?? []);
     const decayWeight = Math.exp(-(daysSinceClose / 365));
@@ -128,6 +134,9 @@ export function calculateArv(input: CalculateArvInput): ArvResult | null {
       arvBlended: round(arvBlended, 0),
       timeAdjustment: round(timeAdjustment, 0),
       arvTimeAdjusted: round(arvTimeAdjusted, 0),
+      analystAdjustments: analystAdj,
+      analystAdjustmentTotal: analystAdjTotal,
+      arvFinal,
       confidence,
       decayWeight: round(decayWeight, 6),
     });
@@ -135,11 +144,12 @@ export function calculateArv(input: CalculateArvInput): ArvResult | null {
 
   if (details.length === 0) return null;
 
-  // Exponential-decay weighted aggregate ARV
+  // Exponential-decay weighted aggregate ARV (uses arvFinal which
+  // includes analyst adjustments when present)
   let weightedSum = 0;
   let weightSum = 0;
   for (const d of details) {
-    weightedSum += d.arvTimeAdjusted * d.decayWeight;
+    weightedSum += d.arvFinal * d.decayWeight;
     weightSum += d.decayWeight;
   }
 

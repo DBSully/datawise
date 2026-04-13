@@ -1,3 +1,31 @@
+## 2026-04-12 — Per-Comp Analyst Adjustments
+
+A new layer of analyst judgment in the ARV calculation. The system's auto-computed size and time adjustments are now complemented by manual per-comp adjustments that the analyst enters during deep analysis.
+
+### What shipped
+
+- **6 adjustment categories per comp:** View/Location, Layout/Floor Plan, Lot Size/Yard, Garage/Parking, Condition/Updates, Other (with optional note). Each is a signed dollar amount that adds to or subtracts from the comp's implied ARV.
+
+- **ARV engine updated.** New per-comp flow: `net sale price → size adjustment (auto) → time adjustment (auto) → analyst adjustments → arvFinal`. The aggregate ARV is now the decay-weighted average of `arvFinal` values, incorporating analyst judgment into the final number.
+
+- **Expandable per-comp rows in ARV card modal.** Click any comp row to expand a panel showing auto adjustments (read-only), 6 editable adjustment inputs, a live total + implied ARV preview, and a Save button. Adjustments persist to `comparable_search_candidates.analyst_adjustments_json`.
+
+- **New columns in per-comp table:** Size Adj, Time Adj, Analyst Adj (indigo when non-zero), replacing the single "ARV Adj" column. Gives the analyst full transparency into what's driving each comp's implied value.
+
+### Architecture
+
+- Migration: `analyst_adjustments_json` JSONB column on `comparable_search_candidates`
+- Types: `CompAnalystAdjustments`, `ANALYST_ADJ_CATEGORIES`, `sumAdjustments()`, `emptyAdjustments()` in `lib/screening/types.ts`
+- Engine: `arv-engine.ts` reads `analystAdjustments` from `CompArvInput`, produces `analystAdjustmentTotal` and `arvFinal` on `CompArvDetail`
+- Persistence: `saveCompAdjustmentAction` in `lib/auto-persist/`
+- Loader: `load-workstation-data.ts` selects the JSON column, passes to ARV engine, maps `candidateId` through for save targeting
+
+### Design note
+
+Screening results carry no analyst adjustments (null → 0 → arvFinal = arvTimeAdjusted). Adjustments are a deep-analysis feature only. Follow-up items (reports flow-through, partner view display, live aggregate recalc) tracked in WORKSTATION_DESIGN_FOLLOWUPS.md #20.
+
+---
+
 ## 2026-04-12 — Copy MLS Buttons Unified in CompWorkspace
 
 - **Copy Selected MLS / Copy All MLS buttons moved into CompWorkspace** — now appear above the comp table in both the screening modal and the analysis workstation. Previously only existed in the screening modal's Deal Stat Strip. Removes duplication: one implementation in `comp-workspace.tsx` serves all consumers. Dead `CopyMlsButton` in `screening-comp-modal.tsx` removed.

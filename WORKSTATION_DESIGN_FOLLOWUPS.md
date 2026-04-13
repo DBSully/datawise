@@ -420,6 +420,29 @@ Adding Quick Status to un-promoted items would require either: (a) creating an a
 ### Recommended next step
 Discuss pros/cons when the screening workflow is next revisited. The current behavior (Quick Status after promotion only) may be the right design.
 
+## 20. Per-comp analyst adjustments — follow-up pass
+
+**Surfaced:** 2026-04-12 after initial implementation
+**Status:** Open
+**Severity:** Follow-up — core feature works, needs verification across surfaces
+
+### Follow-up items
+
+1. **Reports flow-through.** Verify that `arvFinal` (with analyst adjustments) is what appears in the report document at `components/reports/report-document.tsx`. The report snapshot may need to include `analystAdjustmentTotal` and the per-category breakdown so the report reflects the analyst's judgment, not just the auto-computed ARV.
+
+2. **Screening modal ARV tooltip.** The `ArvBreakdownTooltip` in the screening comp table uses `arvByCompListingId` which now carries `arvFinal`. Confirm the tooltip displays correctly and consider showing size/time/analyst adjustment breakdown there too.
+
+3. **Partner view transparency.** Decide what partners see: currently the partner ARV card modal shows per-comp details. Add read-only display of analyst adjustments (amounts only, not formulas) so partners understand the basis of each comp's implied ARV.
+
+4. **Live recalculation in modal.** Currently the modal shows the saved adjustment values and a preview of the implied ARV, but the aggregate ARV at the top doesn't update until the page reloads. Consider recalculating the aggregate live as the analyst types, matching the Quick Analysis liveDeal pattern.
+
+5. **Screening → analysis carry-over.** When a screening result is promoted to an analysis, analyst adjustments entered during deep analysis start from scratch (null). This is probably correct (screening has no adjustments), but worth confirming the UX is clear.
+
+6. **Bulk runner impact.** The bulk screening runner passes no `analystAdjustments` to the ARV engine. Confirm this still produces correct results (should be fine — null adjustments → 0 total → arvFinal = arvTimeAdjusted).
+
+### Recommended next step
+Walk through each surface (report, partner view, screening tooltip) and verify the adjustment data flows correctly. Address any gaps as bounded tasks.
+
 ---
 
 ## How to add new entries

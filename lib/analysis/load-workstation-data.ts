@@ -207,7 +207,7 @@ export async function loadWorkstationData(
   if (latestRun?.id) {
     const { data: rawCandidates } = await supabase
       .from("comparable_search_candidates")
-      .select("id, comp_listing_row_id, comp_real_property_id, distance_miles, days_since_close, sqft_delta_pct, raw_score, selected_yn, selected_as_is_yn, metrics_json, score_breakdown_json")
+      .select("id, comp_listing_row_id, comp_real_property_id, distance_miles, days_since_close, sqft_delta_pct, raw_score, selected_yn, selected_as_is_yn, metrics_json, score_breakdown_json, analyst_adjustments_json")
       .eq("comparable_search_run_id", latestRun.id)
       .order("raw_score", { ascending: false });
 
@@ -310,19 +310,7 @@ export async function loadWorkstationData(
     arvAggregate: number;
     arvPerSqft: number;
     compCount: number;
-    perCompDetails: Array<{
-      address: string;
-      netSalePrice: number;
-      closeDateIso: string;
-      daysSinceClose: number;
-      distanceMiles: number;
-      compBuildingSqft: number;
-      psfBuilding: number;
-      arvBlended: number;
-      arvTimeAdjusted: number;
-      confidence: number;
-      decayWeight: number;
-    }>;
+    perCompDetails: import("@/lib/reports/types").ArvPerCompDetail[];
   } | null = null;
 
   if (selectedComps.length > 0 && buildingSqft > 0) {
@@ -344,6 +332,8 @@ export async function loadWorkstationData(
         propertyType: m.property_type ? String(m.property_type) : null,
         levelClass: m.level_class_standardized ? String(m.level_class_standardized) : null,
         mlsStatus: null,
+        analystAdjustments: c.analyst_adjustments_json ?? null,
+        _candidateId: c.id,
       };
     });
 
@@ -356,6 +346,14 @@ export async function loadWorkstationData(
     });
 
     if (arvResult) {
+      // Build a lookup from compListingRowId → candidateId
+      const candidateIdByComp = new Map<string, string>();
+      for (const ci of compInputs) {
+        if (ci.compListingRowId && ci._candidateId) {
+          candidateIdByComp.set(ci.compListingRowId, ci._candidateId);
+        }
+      }
+
       selectedArvResult = {
         arvAggregate: arvResult.arvAggregate,
         arvPerSqft: arvResult.arvPerSqft,
@@ -369,9 +367,14 @@ export async function loadWorkstationData(
           compBuildingSqft: d.compBuildingSqft,
           psfBuilding: d.psfBuilding,
           arvBlended: d.arvBlended,
+          timeAdjustment: d.timeAdjustment,
           arvTimeAdjusted: d.arvTimeAdjusted,
+          analystAdjustments: d.analystAdjustments,
+          analystAdjustmentTotal: d.analystAdjustmentTotal,
+          arvFinal: d.arvFinal,
           confidence: d.confidence,
           decayWeight: d.decayWeight,
+          candidateId: candidateIdByComp.get(d.compListingRowId),
         })),
       };
     }
@@ -420,7 +423,7 @@ export async function loadWorkstationData(
       if (allArvResult) {
         for (const d of allArvResult.perCompDetails) {
           arvByCompListingId[d.compListingRowId] = {
-            arv: d.arvTimeAdjusted,
+            arv: d.arvFinal,
             weight: d.decayWeight,
             netSalePrice: d.netSalePrice,
             compBuildingSqft: d.compBuildingSqft,

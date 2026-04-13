@@ -2,6 +2,8 @@
  * Shared types for analysis workstation data and report snapshots.
  */
 
+import type { CompAnalystAdjustments } from "@/lib/screening/types";
+
 // ---------------------------------------------------------------------------
 // Analysis sub-types (used by both workstation and reports)
 // ---------------------------------------------------------------------------
@@ -115,9 +117,15 @@ export type ArvPerCompDetail = {
   compBuildingSqft: number;
   psfBuilding: number;
   arvBlended: number;
+  timeAdjustment: number;
   arvTimeAdjusted: number;
+  analystAdjustments: CompAnalystAdjustments | null;
+  analystAdjustmentTotal: number;
+  arvFinal: number;
   confidence: number;
   decayWeight: number;
+  /** Candidate row ID — needed for persisting adjustments. */
+  candidateId?: string;
 };
 
 /** Per-comp ARV breakdown for tooltip display. */
