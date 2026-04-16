@@ -82,7 +82,7 @@ export default async function ScreeningQueuePage({
   // Result: bounded cost per query, total load ~500-800ms instead of 8s+.
   // --------------------------------------------------------------------
 
-  // Normalize listing-date cutoff (used by pre-query + potentially elsewhere)
+  // Listing-date cutoff for the direct column filter (applied below)
   const listingDaysCutoffIso = (() => {
     if (!listingDays || listingDays <= 0) return null;
     const cutoff = new Date();
@@ -91,25 +91,7 @@ export default async function ScreeningQueuePage({
     return cutoff.toISOString().slice(0, 10);
   })();
 
-  // Pre-query A: property IDs matching mls_* filters. Only runs when at least
-  // one such filter is active; otherwise returns null meaning "no restriction."
-  async function loadMlsFilteredPropertyIds(): Promise<string[] | null> {
-    if (mlsStatusFilter === "all" && !listingDaysCutoffIso) return null;
-    let q = supabase.from("mls_listings").select("real_property_id");
-    if (mlsStatusFilter !== "all") q = q.eq("mls_status", mlsStatusFilter);
-    if (listingDaysCutoffIso) q = q.gte("listing_contract_date", listingDaysCutoffIso);
-    const { data, error } = await q.limit(10_000);
-    if (error) throw new Error(error.message);
-    return Array.from(
-      new Set(
-        (data ?? [])
-          .map((r) => (r as { real_property_id: string | null }).real_property_id)
-          .filter((v): v is string => v != null),
-      ),
-    );
-  }
-
-  // Pre-query B: the current analyst's active-analysis property IDs. We
+  // Pre-query: the current analyst's active-analysis property IDs. We
   // exclude these from the default queue (open your existing analysis
   // instead). Properties where ANOTHER analyst has an active analysis
   // remain visible — cross-analyst communication is the goal.
@@ -131,18 +113,19 @@ export default async function ScreeningQueuePage({
     );
   }
 
-  // Run filter options + both pre-queries in parallel
+  // Run filter options + pre-query in parallel. The mls_status /
+  // listing_contract_date filters now apply directly to the slim view
+  // (denormalized via migration 20260416240000), so no pre-query is
+  // needed for them.
   const [
     { data: cityRows },
     { data: typeRows },
     { data: statusRows },
-    mlsFilteredPropertyIds,
     myActiveAnalysisPropertyIds,
   ] = await Promise.all([
     supabase.from("property_city_options_v").select("city").order("city", { ascending: true }).range(0, 500),
     supabase.from("property_type_options_v").select("property_type").order("property_type", { ascending: true }).range(0, 100),
     supabase.from("mls_status_counts_v").select("mls_status").order("mls_status", { ascending: true }),
-    loadMlsFilteredPropertyIds(),
     loadMyActiveAnalysisPropertyIds(),
   ]);
 
@@ -157,14 +140,9 @@ export default async function ScreeningQueuePage({
   if (typeFilter !== "all") query = query.eq("subject_property_type", typeFilter);
   if (primeFilter === "true") query = query.eq("is_prime_candidate", true);
   if (!showReviewed) query = query.is("review_action", null);
-  if (mlsFilteredPropertyIds !== null) {
-    // No rows match mls filters → short-circuit to an empty query.
-    if (mlsFilteredPropertyIds.length === 0) {
-      query = query.in("real_property_id", ["00000000-0000-0000-0000-000000000000"]);
-    } else {
-      query = query.in("real_property_id", mlsFilteredPropertyIds);
-    }
-  }
+  // Denormalized MLS filters — direct column access, no pre-query.
+  if (mlsStatusFilter !== "all") query = query.eq("latest_mls_status", mlsStatusFilter);
+  if (listingDaysCutoffIso) query = query.gte("latest_listing_contract_date", listingDaysCutoffIso);
   if (myActiveAnalysisPropertyIds.length > 0) {
     query = query.not("real_property_id", "in", `(${myActiveAnalysisPropertyIds.join(",")})`);
   }
@@ -202,11 +180,6 @@ export default async function ScreeningQueuePage({
     new Set((results ?? []).map((r) => (r as { real_property_id: string }).real_property_id)),
   );
 
-  type MlsInfo = {
-    mls_status: string | null;
-    mls_major_change_type: string | null;
-    listing_contract_date: string | null;
-  };
   type ActiveAnalysis = {
     analysis_id: string;
     owner_id: string;
@@ -215,39 +188,19 @@ export default async function ScreeningQueuePage({
     analysis_created_at: string;
   };
 
-  const mlsByPropertyId = new Map<string, MlsInfo>();
   const activeAnalysisByPropertyId = new Map<string, ActiveAnalysis>();
   const ownerNameById = new Map<string, string>();
 
   if (visiblePropertyIds.length > 0) {
-    // Latest MLS listing per visible property — fetch a superset (all
-    // listings for these properties) and keep the latest per property in JS.
-    const [{ data: mlsRows }, { data: analysisRows }] = await Promise.all([
-      supabase
-        .from("mls_listings")
-        .select("real_property_id, mls_status, mls_major_change_type, listing_contract_date, created_at")
-        .in("real_property_id", visiblePropertyIds)
-        .order("listing_contract_date", { ascending: false, nullsFirst: false })
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("analyses")
-        .select("id, real_property_id, created_by_user_id, created_at, analysis_pipeline!inner(disposition, lifecycle_stage, interest_level)")
-        .in("real_property_id", visiblePropertyIds)
-        .in("analysis_pipeline.disposition", ["active", "closed"])
-        .order("created_at", { ascending: false }),
-    ]);
-
-    // Dedupe to latest-per-property (rows already ordered desc)
-    for (const row of mlsRows ?? []) {
-      const r = row as { real_property_id: string } & MlsInfo;
-      if (!mlsByPropertyId.has(r.real_property_id)) {
-        mlsByPropertyId.set(r.real_property_id, {
-          mls_status: r.mls_status,
-          mls_major_change_type: r.mls_major_change_type,
-          listing_contract_date: r.listing_contract_date,
-        });
-      }
-    }
+    // Active analyses — small batch query scoped to the 50 visible rows.
+    // MLS fields are now denormalized onto screening_results (migration
+    // 20260416240000), so no separate mls_listings lookup is needed.
+    const { data: analysisRows } = await supabase
+      .from("analyses")
+      .select("id, real_property_id, created_by_user_id, created_at, analysis_pipeline!inner(disposition, lifecycle_stage, interest_level)")
+      .in("real_property_id", visiblePropertyIds)
+      .in("analysis_pipeline.disposition", ["active", "closed"])
+      .order("created_at", { ascending: false });
 
     for (const row of analysisRows ?? []) {
       const r = row as {
@@ -311,12 +264,11 @@ export default async function ScreeningQueuePage({
     { value: "price_asc", label: "Price (low)" },
   ];
 
-  // Shape rows for client component. mls_* fields and active-analysis
-  // fields come from the batched follow-up queries above (Maps keyed by
-  // real_property_id), not from the slim view itself.
+  // Shape rows for client component. MLS fields come from the slim view
+  // (denormalized from mls_listings via trigger). Active-analysis fields
+  // come from the batched follow-up query above.
   const tableRows = (results ?? []).map((r: Record<string, unknown>) => {
     const propertyId = r.real_property_id as string;
-    const mls = mlsByPropertyId.get(propertyId);
     const active = activeAnalysisByPropertyId.get(propertyId);
     const isMine =
       currentUserId != null && active != null
@@ -331,9 +283,9 @@ export default async function ScreeningQueuePage({
     subject_city: r.subject_city as string,
     subject_property_type: r.subject_property_type as string | null,
     subject_list_price: r.subject_list_price as number | null,
-    mls_status: mls?.mls_status ?? null,
-    mls_major_change_type: mls?.mls_major_change_type ?? null,
-    listing_contract_date: mls?.listing_contract_date ?? null,
+    mls_status: r.latest_mls_status as string | null,
+    mls_major_change_type: r.latest_mls_major_change_type as string | null,
+    listing_contract_date: r.latest_listing_contract_date as string | null,
     arv_aggregate: r.arv_aggregate as number | null,
     trend_annual_rate: r.trend_annual_rate as number | null,
     trend_confidence: r.trend_confidence as string | null,
