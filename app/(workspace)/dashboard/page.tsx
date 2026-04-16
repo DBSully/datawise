@@ -2,6 +2,7 @@ import Link from "next/link";
 import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { UnreviewedPrimes } from "./unreviewed-primes";
+import { LocalTimestamp } from "@/components/common/local-timestamp";
 
 export const dynamic = "force-dynamic";
 
@@ -454,9 +455,7 @@ export default async function DashboardPage() {
                       </span>
                     </td>
                     <td className="text-right text-[11px] text-slate-500">
-                      {r.latest_unread_event_at
-                        ? new Date(r.latest_unread_event_at).toLocaleString()
-                        : "—"}
+                      <LocalTimestamp value={r.latest_unread_event_at} />
                     </td>
                   </tr>
                 ))}
@@ -619,7 +618,7 @@ export default async function DashboardPage() {
               {activityList.map((a, i) => (
                 <tr key={`${a.activity_type}-${a.real_property_id}-${i}`} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="whitespace-nowrap px-2 py-1 text-slate-500">
-                    {new Date(a.activity_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    <LocalTimestamp value={a.activity_at} format="time" />
                   </td>
                   <td className="px-2 py-1">
                     <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
