@@ -408,20 +408,29 @@ export default async function DashboardPage() {
         totalCount={unreviewedPrimeTotal}
       />
 
-      {/* Changes on your watchlist — unread property_events */}
-      {watchChanges.length > 0 && (
-        <div className="dw-card-tight space-y-2">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-800">
-              Changes on your watchlist
+      {/* Changes on your watchlist — unread property_events.
+       *  Always renders, with an empty state when there are no unread
+       *  events, so analysts have a predictable place to check. */}
+      <div className="dw-card-tight space-y-2">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-slate-800">
+            Changes on your watchlist
+            {watchChanges.length > 0 && (
               <span className="ml-2 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
                 {watchChanges.length} new
               </span>
-            </h2>
-            <Link href="/analysis" className="text-xs text-blue-600 hover:underline">
-              View Watch List →
-            </Link>
-          </div>
+            )}
+          </h2>
+          <Link href="/analysis" className="text-xs text-blue-600 hover:underline">
+            View Watch List →
+          </Link>
+        </div>
+
+        {watchChanges.length === 0 ? (
+          <p className="py-4 text-center text-sm text-slate-400">
+            No new activity on your watchlist.
+          </p>
+        ) : (
           <div className="dw-table-wrap">
             <table className="dw-table-compact">
               <thead>
@@ -462,8 +471,8 @@ export default async function DashboardPage() {
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Section 3: Watch List — Needs Attention */}
       <div className="dw-card-tight space-y-2">
