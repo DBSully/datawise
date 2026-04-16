@@ -1,3 +1,25 @@
+## 2026-04-16 — Watch List Query Denormalization
+
+`/analysis` (Watch List) was loading in ~1.9s. EXPLAIN ANALYZE confirmed 52% of the query time (588ms of 1132ms) was a LATERAL `COUNT(*)` over `comparable_search_candidates` running 294 times — once per watchlist row — and pulling 1,757 disk pages per render just to read `selected_yn`.
+
+### Fix
+
+Migration `20260416140000` adds `comps_total` + `comps_selected` columns directly on `screening_results`, maintained automatically by a trigger on `comparable_search_candidates` that fires on INSERT / DELETE / UPDATE of `selected_yn`. The view (`watch_list_v`) reads these denormalized fields in-line — the LATERAL subquery is gone.
+
+Trigger keeps the counts authoritative across every write path that mutates comp candidates (bulk-runner creating a screening, analyst toggling comps in the screening modal, analyst toggling in the workstation, any future bulk operations). No application-code changes needed.
+
+Backfill: single group-by over `comparable_search_candidates` joined to `screening_results` — one pass, well under Supabase's statement timeout.
+
+### Measured impact
+
+EXPLAIN ANALYZE before: **1132ms**. After: **809ms**. The `Aggregate` + `Index Scan using idx_comparable_search_candidates_run_id` subtree is gone entirely. Remaining time is the 4 per-row PK lookups against `real_properties`, `property_physical`, `screening_results`, and `mls_listings` — already optimal within the current plan shape. The `Buffers: shared read=1244` on the remaining plan indicates room for improvement on a warmer cache; real-world perceived improvement will be larger than the 29% EXPLAIN delta.
+
+### Earlier `/intake/imports` fix (same day)
+
+Pair with the earlier 4.4s → 1.65s drop on `/intake/imports` (commit `d96c856`): 7 queries merged into one Promise.all, and a `screening_results` stat that was transferring 8k+ rows to call `.length` swapped for `{ count: "exact", head: true }`.
+
+---
+
 ## 2026-04-16 — Split Trend Transparency: Analyst vs. Partner Surfaces
 
 Follow-up to the Trend Cap work earlier today. Transparency principle refined: analysts see the full audit trail (applied rate + raw market signal + cap mechanism + per-tier OLS breakdown); partners see only the final adjustment number. ARV methodology is a competitive moat and should not leak to partner-facing surfaces.
