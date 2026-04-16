@@ -9,6 +9,7 @@ import {
   closeDealAction,
   moveToWatchListAction,
 } from "./actions";
+import { LocalTimestamp } from "@/components/common/local-timestamp";
 
 type PipelineRow = {
   analysis_id: string;
@@ -33,11 +34,6 @@ type PipelineRow = {
 function $f(v: number | null | undefined) {
   if (v == null) return "—";
   return "$" + v.toLocaleString("en-US", { maximumFractionDigits: 0 });
-}
-
-function fmtDate(v: string | null | undefined) {
-  if (!v) return "—";
-  return new Date(v).toLocaleDateString();
 }
 
 const STAGE_DISPLAY: Record<string, { label: string; color: string }> = {
@@ -195,10 +191,10 @@ export function PipelineTable({ rows }: { rows: PipelineRow[] }) {
                   </select>
                 </td>
                 <td className="text-xs text-slate-500">
-                  {fmtDate(r.offer_submitted_date)}
+                  <LocalTimestamp value={r.offer_submitted_date} format="date" />
                 </td>
                 <td className="text-xs text-slate-500">
-                  {fmtDate(r.offer_deadline_date)}
+                  <LocalTimestamp value={r.offer_deadline_date} format="date" />
                 </td>
                 <td
                   className={`text-right ${

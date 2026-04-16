@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { LocalTimestamp } from "@/components/common/local-timestamp";
 
 const PAGE_SIZE = 200;
 
@@ -317,18 +318,10 @@ export default async function PropertiesPage({
                       : "—"}
                   </td>
                   <td>
-                    {property.latest_listing_date
-                      ? new Date(
-                          property.latest_listing_date,
-                        ).toLocaleDateString()
-                      : "—"}
+                    <LocalTimestamp value={property.latest_listing_date} format="date" />
                   </td>
                   <td>
-                    {property.latest_imported_at
-                      ? new Date(
-                          property.latest_imported_at,
-                        ).toLocaleDateString()
-                      : "—"}
+                    <LocalTimestamp value={property.latest_imported_at} format="date" />
                   </td>
                   <td>
                     <Link

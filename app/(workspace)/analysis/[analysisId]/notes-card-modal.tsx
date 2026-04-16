@@ -28,6 +28,7 @@ import {
   deleteAnalysisNoteAction,
 } from "@/app/(workspace)/deals/actions";
 import type { WorkstationData } from "@/lib/reports/types";
+import { LocalTimestamp } from "@/components/common/local-timestamp";
 
 const NOTE_CATEGORIES = [
   { value: "location", label: "Location", icon: "L" },
@@ -248,7 +249,7 @@ export function NotesCardModal({ data, onClose }: NotesCardModalProps) {
                   <p className="text-slate-800">{note.note_body}</p>
                   <div className="mt-0.5 flex items-center gap-2 text-[10px] text-slate-400">
                     <span>
-                      {new Date(note.created_at).toLocaleDateString()}
+                      <LocalTimestamp value={note.created_at} format="date" />
                     </span>
                   </div>
                 </div>

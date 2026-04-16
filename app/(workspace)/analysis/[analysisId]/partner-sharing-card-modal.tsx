@@ -24,6 +24,7 @@ import {
   type PartnerFeedbackRow,
   type PartnerVersionRow,
 } from "@/lib/partner-portal/share-actions";
+import { LocalTimestamp } from "@/components/common/local-timestamp";
 
 type PartnerSharingCardModalProps = {
   analysisId: string;
@@ -221,7 +222,7 @@ export function PartnerSharingCardModal({
 
                       <div className="mt-1 flex gap-3 text-[10px] text-slate-500">
                         <span>
-                          Sent {new Date(share.sent_at).toLocaleDateString()}
+                          Sent <LocalTimestamp value={share.sent_at} format="date" />
                         </span>
                         <span>
                           {share.view_count} view
@@ -229,10 +230,7 @@ export function PartnerSharingCardModal({
                         </span>
                         {share.first_viewed_at && (
                           <span>
-                            First viewed{" "}
-                            {new Date(
-                              share.first_viewed_at,
-                            ).toLocaleDateString()}
+                            First viewed <LocalTimestamp value={share.first_viewed_at} format="date" />
                           </span>
                         )}
                       </div>
@@ -270,9 +268,7 @@ export function PartnerSharingCardModal({
                                 </span>
                               )}
                               <span className="ml-auto text-[9px] text-slate-400">
-                                {new Date(
-                                  f.submitted_at,
-                                ).toLocaleDateString()}
+                                <LocalTimestamp value={f.submitted_at} format="date" />
                               </span>
                             </div>
                           ))}

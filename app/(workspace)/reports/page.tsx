@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { LocalTimestamp } from "@/components/common/local-timestamp";
 
 export const dynamic = "force-dynamic";
 
@@ -125,11 +126,7 @@ export default async function ReportsPage() {
                           </span>
                         </td>
                         <td className="text-slate-500">
-                          {new Date(r.created_at).toLocaleDateString("en-US", {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                          })}
+                          <LocalTimestamp value={r.created_at} format="date" />
                         </td>
                         <td className="text-right">
                           <Link

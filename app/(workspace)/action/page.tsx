@@ -15,6 +15,7 @@ import Link from "next/link";
 import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { PipelineTable } from "@/app/(workspace)/deals/pipeline/pipeline-table";
+import { LocalTimestamp } from "@/components/common/local-timestamp";
 
 export const dynamic = "force-dynamic";
 
@@ -90,11 +91,6 @@ async function PipelineSection() {
 function $f(v: number | null | undefined) {
   if (v == null) return "—";
   return "$" + v.toLocaleString("en-US", { maximumFractionDigits: 0 });
-}
-
-function fmtDate(v: string | null | undefined) {
-  if (!v) return "—";
-  return new Date(v).toLocaleDateString();
 }
 
 function formatNumber(v: number | null | undefined) {
@@ -226,7 +222,7 @@ async function ClosedDealsSection() {
                         : "—"}
                     </td>
                     <td className="text-xs text-slate-500">
-                      {fmtDate(d.closed_date ?? d.pipeline_updated_at)}
+                      <LocalTimestamp value={d.closed_date ?? d.pipeline_updated_at} format="date" />
                     </td>
                     <td className="max-w-[160px] truncate text-xs text-slate-500">
                       {!isWon ? (d.offer_status ?? "—") : "—"}

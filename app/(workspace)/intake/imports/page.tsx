@@ -3,6 +3,7 @@ import { ImportUploadPanel } from "@/components/imports/import-upload-panel";
 import { createClient } from "@/lib/supabase/server";
 import { runImportScreeningAction, runScreeningAction } from "@/app/(workspace)/screening/actions";
 import { processImportBatchAction } from "./actions";
+import { LocalTimestamp } from "@/components/common/local-timestamp";
 
 const ROLLING_LIMIT_30_DAY = 75_000;
 const DAILY_AVERAGE_LIMIT = ROLLING_LIMIT_30_DAY / 30;
@@ -35,11 +36,6 @@ function dayKey(date: Date) {
 
 function formatShortDate(date: Date) {
   return `${date.getUTCMonth() + 1}/${date.getUTCDate()}`;
-}
-
-function formatDate(value: string | null | undefined) {
-  if (!value) return "—";
-  return new Date(value).toLocaleString();
 }
 
 function formatNumber(value: number | null | undefined) {
@@ -490,7 +486,7 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
 
                   return (
                     <tr key={batch.id}>
-                      <td>{new Date(batch.created_at).toLocaleString()}</td>
+                      <td><LocalTimestamp value={batch.created_at} /></td>
                       <td>{batch.status}</td>
                       <td>{batch.source_system}</td>
                       <td>{batch.import_profile}</td>
@@ -752,10 +748,10 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
                         {formatNumber(sb.prime_candidate_count)}
                       </td>
                       <td className="text-slate-500">
-                        {formatDate(sb.created_at)}
+                        <LocalTimestamp value={sb.created_at} />
                       </td>
                       <td className="text-slate-500">
-                        {formatDate(sb.completed_at)}
+                        <LocalTimestamp value={sb.completed_at} />
                       </td>
                       <td>
                         <Link

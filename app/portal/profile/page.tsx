@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { ProfileForm } from "./profile-form";
+import { LocalTimestamp } from "@/components/common/local-timestamp";
 
 export const dynamic = "force-dynamic";
 
@@ -52,11 +53,7 @@ export default async function ProfilePage() {
             Member since
           </label>
           <p className="mt-0.5 text-sm text-slate-900">
-            {new Date(profile.created_at).toLocaleDateString("en-US", {
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })}
+            <LocalTimestamp value={profile.created_at} format="date" />
           </p>
         </div>
 

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { QueueResultsTable } from "@/components/screening/queue-results-table";
+import { LocalTimestamp } from "@/components/common/local-timestamp";
 
 export const dynamic = "force-dynamic";
 
@@ -26,10 +27,6 @@ function formatNumber(value: number | null | undefined, decimals = 0) {
   }).format(value);
 }
 
-function formatDate(value: string | null | undefined) {
-  if (!value) return "—";
-  return new Date(value).toLocaleString();
-}
 
 function buildHref(
   base: string,
@@ -251,7 +248,7 @@ export default async function BatchResultsPage({
           <span className="font-semibold text-emerald-700">
             {formatNumber(batch.prime_candidate_count)} Prime Candidates
           </span>{" "}
-          &middot; {formatDate(batch.completed_at)}
+          &middot; <LocalTimestamp value={batch.completed_at} />
           {tableRows.length > 0 && (
             <> &middot; {formatNumber(tableRows.length)} showing</>
           )}

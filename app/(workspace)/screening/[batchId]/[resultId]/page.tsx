@@ -4,6 +4,7 @@ import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { promoteAndOpenAction } from "../../actions";
 import { TrendDirectionBadge } from "@/components/workstation/trend-badges";
+import { LocalTimestamp } from "@/components/common/local-timestamp";
 
 export const dynamic = "force-dynamic";
 
@@ -526,7 +527,7 @@ export default async function DealDetailPage({ params }: DealDetailPageProps) {
                       <td className="font-mono text-xs">{String(m.listing_id ?? "—")}</td>
                       <td>{String(m.address ?? "—")}</td>
                       <td className="text-right">{formatCurrency((m.net_price as number) ?? (m.close_price as number))}</td>
-                      <td className="text-xs">{m.close_date ? new Date(String(m.close_date)).toLocaleDateString() : "—"}</td>
+                      <td className="text-xs">{m.close_date ? <LocalTimestamp value={String(m.close_date)} format="date" /> : "—"}</td>
                       <td className="text-right">{formatNumber(c.distance_miles, 2)}</td>
                       <td className="text-right">{c.days_since_close ?? "—"}</td>
                       <td className="text-right">{formatNumber(m.building_area_total_sqft as number)}</td>
@@ -569,7 +570,7 @@ export default async function DealDetailPage({ params }: DealDetailPageProps) {
                     <td className="font-mono text-xs">{comp.listingId}</td>
                     <td>{comp.address}</td>
                     <td className="text-right">{formatCurrency(comp.closePrice)}</td>
-                    <td className="text-xs">{new Date(comp.closeDateIso).toLocaleDateString()}</td>
+                    <td className="text-xs"><LocalTimestamp value={comp.closeDateIso} format="date" /></td>
                     <td className="text-right">{formatNumber(comp.distanceMiles, 2)}</td>
                     <td className="text-right">{comp.daysSinceClose}</td>
                     <td className="text-right">{formatNumber(comp.compBuildingSqft)}</td>

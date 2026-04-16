@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAnalysisScenarioAction } from "@/app/(workspace)/deals/actions";
+import { LocalTimestamp } from "@/components/common/local-timestamp";
 
 type PropertyHubPageProps = {
   params: Promise<{ id: string }>;
@@ -23,11 +24,6 @@ function formatNumber(value: number | null | undefined, decimals = 0) {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   }).format(value);
-}
-
-function formatDateTime(value: string | null | undefined) {
-  if (!value) return "—";
-  return new Date(value).toLocaleString();
 }
 
 function DetailItem({ label, value }: { label: string; value: ReactNode }) {
@@ -338,7 +334,7 @@ export default async function PropertyHubPage({
                     <td>{analysis.scenario_name ?? "Untitled Analysis"}</td>
                     <td>{analysis.strategy_type ?? "general"}</td>
                     <td>{analysis.status ?? "draft"}</td>
-                    <td>{formatDateTime(analysis.updated_at)}</td>
+                    <td><LocalTimestamp value={analysis.updated_at} /></td>
                     <td>
                       <Link
                         href={`/analysis/${analysis.id}`}
