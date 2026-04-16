@@ -544,6 +544,8 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
         rehabTotal={liveDeal.rehabTotal}
         targetProfit={liveDeal.targetProfit}
         trendAnnualRate={data.trend?.blendedAnnualRate ?? null}
+        trendRawRate={data.trend?.rawBlendedRate ?? null}
+        trendCapApplied={data.trend?.positiveRateCapApplied ?? false}
         manualOverrides={{
           arv: liveDeal.arvManual,
           rehab: liveDeal.rehabManual,

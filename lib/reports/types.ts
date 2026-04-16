@@ -170,6 +170,9 @@ export type TrendDirection =
 
 export type TrendData = {
   blendedAnnualRate: number;
+  rawBlendedRate: number;
+  positiveRateCap: number;
+  positiveRateCapApplied: boolean;
   rawLocalRate: number | null;
   rawMetroRate: number | null;
   localCompCount: number;
@@ -470,6 +473,18 @@ export type ReportContentJson = {
     spread: number | null;
     estGapPerSqft: number | null;
     negotiationGap: number | null;
+  } | null;
+
+  /** Market trend rate used to build ARV. Preserved in the snapshot so the
+   *  applied rate (and raw pre-cap signal) are visible on printed reports. */
+  trend: {
+    blendedAnnualRate: number;
+    rawBlendedRate: number;
+    positiveRateCap: number;
+    positiveRateCapApplied: boolean;
+    confidence: "high" | "low" | "fallback";
+    isFallback: boolean;
+    summary: string | null;
   } | null;
 
   cashRequired: {

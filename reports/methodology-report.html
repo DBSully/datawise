@@ -431,7 +431,9 @@ daysSinceClose = floor((referenceDate - closeDate) / 86,400,000)
 timeMultiplier = 1 + timeAdjustmentAnnualRate &times; (daysSinceClose / 365)
 arvTimeAdjusted = arvBlended &times; timeMultiplier
 </div>
-<p><strong>Current rate:</strong> -5% per year. A comp that closed 6 months ago receives a multiplier of 0.975 (2.5% downward adjustment).</p>
+<p><strong>Rate source:</strong> Data-driven. The Market Trend engine (<code>lib/screening/trend-engine.ts</code>) runs an OLS regression of $/sqft vs. close date across similar sales (same property type, &plusmn;20% sqft, &plusmn;25% price tier, &plusmn;15 yrs age) inside a rolling 12-month window, blends local (0.75 mi, weight 0.1) and metro (12 mi, weight 0.9) tiers, and applies the result as <code>timeAdjustmentAnnualRate</code>.</p>
+<p><strong>Defensibility guardrail (positive-rate cap).</strong> Thin-volume regression can produce positive rates of +10&ndash;20%/year that we cannot support in print. The engine applies an asymmetric cap: <em>negative rates pass through unchanged</em>, positive rates are capped at <strong>+2%/year</strong>. The pre-cap market signal is stored alongside the applied rate so every analyst surface and printed report can show both (&quot;Applied +2.0%/yr (market: +15.3%/yr)&quot;).</p>
+<p><strong>Fallback:</strong> When a property has fewer than 8 similar comps in the window, the engine uses a property-type-specific fixed fallback (detached/townhome: -5%/year; condo: -10%/year) and flags the result as low-confidence.</p>
 
 <h4>Step 5: Confidence Score (Reference Only)</h4>
 <table>
@@ -473,10 +475,17 @@ arvPerSqft = arvAggregate / subjectBuildingSqft
 <h3 id="arv-config">4.3 Configuration Parameters</h3>
 <table>
   <tr><th>Parameter</th><th>Value</th><th>Location</th></tr>
-  <tr><td><code>timeAdjustmentAnnualRate</code></td><td>-0.05 (-5%/year)</td><td>Strategy profile</td></tr>
-  <tr><td><code>confidenceTiers</code></td><td>5 distance bands</td><td>Strategy profile</td></tr>
-  <tr><td><code>blendByPropertyType</code></td><td>Per-type weights/dampening</td><td>Strategy profile</td></tr>
+  <tr><td><code>timeAdjustmentAnnualRate</code></td><td>Market-derived per-subject (see §4.4 Trend)</td><td>Strategy profile &rarr; Trend</td></tr>
+  <tr><td><code>trend.positiveRateCap</code></td><td>+0.02 (+2%/year)</td><td>Strategy profile &rarr; Trend</td></tr>
+  <tr><td><code>trend.fallbackRateByType</code></td><td>detached/townhome: -0.05; condo: -0.10</td><td>Strategy profile &rarr; Trend</td></tr>
+  <tr><td><code>trend.localRadiusMiles</code> / <code>trend.metroRadiusMiles</code></td><td>0.75 / 12</td><td>Strategy profile &rarr; Trend</td></tr>
+  <tr><td><code>trend.localWeight</code> / <code>trend.metroWeight</code></td><td>0.1 / 0.9</td><td>Strategy profile &rarr; Trend</td></tr>
+  <tr><td><code>trend.windowMonths</code></td><td>12</td><td>Strategy profile &rarr; Trend</td></tr>
+  <tr><td><code>trend.minComps</code></td><td>8</td><td>Strategy profile &rarr; Trend</td></tr>
+  <tr><td><code>confidenceTiers</code></td><td>5 distance bands</td><td>Strategy profile &rarr; ARV</td></tr>
+  <tr><td><code>blendByPropertyType</code></td><td>Per-type weights/dampening</td><td>Strategy profile &rarr; ARV</td></tr>
 </table>
+<p><strong>Stored audit trail:</strong> <code>screening_results.trend_annual_rate</code> (applied, capped), <code>screening_results.trend_raw_rate</code> (pre-cap market signal), <code>screening_results.trend_positive_cap_applied</code> (flag), plus per-tier rates, comp counts, radii, confidence level, and a full <code>trend_detail_json</code> blob.</p>
 
 <h3>4.4 Assessment</h3>
 
@@ -487,13 +496,14 @@ arvPerSqft = arvAggregate / subjectBuildingSqft
   <li><strong>Dampening factors</strong> prevent extreme size adjustments from distorting value estimates.</li>
   <li><strong>Exponential decay</strong> is mathematically superior to linear time adjustments &mdash; older comps fade smoothly rather than falling off a cliff.</li>
   <li><strong>Property-type-aware blending</strong> correctly gives condos heavier above-grade weight (no exterior) while detached homes use more balanced weights.</li>
+  <li><strong>Data-driven time adjustment with a defensibility cap.</strong> The rate is derived from actual closed sales, with an asymmetric cap that lets negative (softening) signals pass through fully while bounding positive (appreciating) signals at a rate the analyst can defend in print. The raw market rate is preserved alongside the applied rate on every surface &mdash; workstation, screening detail page, printed report &mdash; so the reviewer always sees both numbers.</li>
 </ul>
 </div>
 
 <div class="weakness-box">
 <strong>Weaknesses &amp; Suggestions:</strong>
 <ul>
-  <li><strong>Fixed -5% annual time adjustment.</strong> This assumes a declining market. In an appreciating market, it understates ARV. Consider deriving this rate from actual market data (e.g., rolling 6-month median price change in the target area).</li>
+  <li><strong>Cap asymmetry is opinionated.</strong> The positive-rate cap (+2%/year) is a defensibility guardrail based on what we can support in print, not a market-derived value. In a genuinely appreciating submarket the cap will understate ARV. The raw market signal is preserved in <code>trend_raw_rate</code> for transparency and makes it easy to revisit the cap when conditions change.</li>
   <li><strong>Confidence tiers are computed but unused.</strong> Distance-based confidence could be incorporated as a second weighting dimension (multiply decay weight &times; confidence) to favor closer comps more strongly.</li>
   <li><strong>No condition adjustment.</strong> A renovated comp and a dated comp at the same distance receive the same treatment. Consider adding a condition adjustment factor per comp.</li>
   <li><strong>No feature adjustments beyond size.</strong> Garage, lot size, bed/bath differences are captured in scoring but not in ARV adjustment. These are secondary but could be added as optional refinements.</li>

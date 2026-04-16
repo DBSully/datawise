@@ -189,7 +189,7 @@ export async function loadWorkstationData(
   // Load screening result (if promoted from screening)
   const { data: screeningResult } = await supabase
     .from("screening_results")
-    .select("arv_aggregate, arv_per_sqft, arv_comp_count, rehab_total, hold_total, hold_days, transaction_total, max_offer, est_gap_per_sqft, spread, offer_pct, rehab_composite_multiplier, target_profit, trend_annual_rate, trend_local_rate, trend_metro_rate, trend_local_comp_count, trend_metro_comp_count, trend_local_radius, trend_metro_radius, trend_is_fallback, trend_confidence, trend_low_end_rate, trend_high_end_rate, trend_summary, trend_detail_json")
+    .select("arv_aggregate, arv_per_sqft, arv_comp_count, rehab_total, hold_total, hold_days, transaction_total, max_offer, est_gap_per_sqft, spread, offer_pct, rehab_composite_multiplier, target_profit, trend_annual_rate, trend_raw_rate, trend_positive_cap_applied, trend_local_rate, trend_metro_rate, trend_local_comp_count, trend_metro_comp_count, trend_local_radius, trend_metro_radius, trend_is_fallback, trend_confidence, trend_low_end_rate, trend_high_end_rate, trend_summary, trend_detail_json")
     .eq("promoted_analysis_id", analysisId)
     .maybeSingle();
 
@@ -280,6 +280,12 @@ export async function loadWorkstationData(
   const trendDetailJson = screeningResult?.trend_detail_json as Record<string, unknown> | null;
   const trendData = screeningResult?.trend_annual_rate != null ? {
     blendedAnnualRate: toNum(screeningResult.trend_annual_rate),
+    // rawBlendedRate falls back to the applied rate for pre-migration rows
+    rawBlendedRate: screeningResult.trend_raw_rate != null
+      ? toNum(screeningResult.trend_raw_rate)
+      : toNum(screeningResult.trend_annual_rate),
+    positiveRateCap: 0.02,
+    positiveRateCapApplied: screeningResult.trend_positive_cap_applied ?? false,
     rawLocalRate: screeningResult.trend_local_rate != null ? toNum(screeningResult.trend_local_rate) : null,
     rawMetroRate: screeningResult.trend_metro_rate != null ? toNum(screeningResult.trend_metro_rate) : null,
     localCompCount: screeningResult.trend_local_comp_count ?? 0,

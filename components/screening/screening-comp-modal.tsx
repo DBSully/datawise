@@ -501,6 +501,8 @@ export function ScreeningCompModal({
             rehabTotal={liveDeal.rehabTotal}
             targetProfit={liveDeal.targetProfit}
             trendAnnualRate={data.trendAnnualRate ?? null}
+            trendRawRate={data.trendRawRate ?? null}
+            trendCapApplied={data.trendPositiveCapApplied ?? false}
             rightSlot={
               <div className="flex items-center gap-2 text-xs text-slate-400">
                 <span>

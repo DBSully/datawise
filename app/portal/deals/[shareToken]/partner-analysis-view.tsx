@@ -397,6 +397,8 @@ export function PartnerAnalysisView({
           rehabTotal={partnerLiveDeal.rehabTotal}
           targetProfit={partnerLiveDeal.targetProfit}
           trendAnnualRate={data.trend?.blendedAnnualRate ?? null}
+          trendRawRate={data.trend?.rawBlendedRate ?? null}
+          trendCapApplied={data.trend?.positiveRateCapApplied ?? false}
         />
       ) : dealMath ? (
         <DealStatStrip
@@ -408,6 +410,8 @@ export function PartnerAnalysisView({
           rehabTotal={dealMath.rehabTotal}
           targetProfit={dealMath.targetProfit}
           trendAnnualRate={data.trend?.blendedAnnualRate ?? null}
+          trendRawRate={data.trend?.rawBlendedRate ?? null}
+          trendCapApplied={data.trend?.positiveRateCapApplied ?? false}
         />
       ) : null}
 
@@ -448,6 +452,8 @@ export function PartnerAnalysisView({
                     financingTotal: data.financing?.total ?? null,
                     targetProfit: dealMath?.targetProfit ?? null,
                     trendAnnualRate: data.trend?.blendedAnnualRate ?? null,
+                    trendRawRate: data.trend?.rawBlendedRate ?? null,
+                    trendPositiveCapApplied: data.trend?.positiveRateCapApplied ?? false,
                     trendConfidence: data.trend?.confidence ?? null,
                     isPrimeCandidate: false,
                     reviewAction: null,

@@ -331,8 +331,15 @@ export type TrendDirection =
 
 /** Full trend calculation result for a single subject property. */
 export type TrendResult = {
-  /** Blended annual rate actually applied (clamped). */
+  /** Blended annual rate actually applied (clamped + positive-cap enforced). */
   blendedAnnualRate: number;
+  /** Pre-cap blended rate — the market signal before the positive-rate
+   *  defensibility guardrail. Equals blendedAnnualRate when no cap applied. */
+  rawBlendedRate: number;
+  /** The positive-rate cap value in effect when this was computed. */
+  positiveRateCap: number;
+  /** True when rawBlendedRate exceeded positiveRateCap and was capped. */
+  positiveRateCapApplied: boolean;
   /** Unclamped local-tier rate (null if insufficient comps). */
   rawLocalRate: number | null;
   /** Unclamped metro-tier rate (null if insufficient comps). */

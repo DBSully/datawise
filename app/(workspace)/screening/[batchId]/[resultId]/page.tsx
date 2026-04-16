@@ -309,15 +309,26 @@ export default async function DealDetailPage({ params }: DealDetailPageProps) {
                   Insufficient comps — fixed {formatPercent(result.trend_annual_rate)}/yr applied
                 </span>
               )}
+              {result.trend_positive_cap_applied && (
+                <span className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800">
+                  Capped at +2.0%/yr
+                </span>
+              )}
             </div>
 
-            {/* Applied rate */}
+            {/* Applied rate (+ raw market rate when capped) */}
             <div className="dw-detail-grid">
               <DetailItem
                 label="Applied Rate"
                 value={`${formatPercent(result.trend_annual_rate)}/yr`}
                 highlight
               />
+              {result.trend_positive_cap_applied && result.trend_raw_rate != null && (
+                <DetailItem
+                  label="Market Rate (pre-cap)"
+                  value={`${formatPercent(result.trend_raw_rate)}/yr`}
+                />
+              )}
             </div>
 
             {/* Two-column: Local / Metro */}

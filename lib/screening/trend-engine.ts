@@ -151,11 +151,21 @@ export function calculateTrend(input: CalculateTrendInput): TrendResult {
   } else if (metroRate != null) {
     blendedRate = metroRate;
   } else {
-    blendedRate = config.fallbackRate;
+    blendedRate = config.fallbackRateByType[subjectPropertyType]
+      ?? config.fallbackRateByType["detached"];
     isFallback = true;
   }
 
   const clampedRate = Math.max(config.clampMin, Math.min(config.clampMax, blendedRate));
+
+  // Asymmetric defensibility guardrail: negative rates pass through unchanged,
+  // positive rates are capped. rawBlendedRate preserves the pre-cap market
+  // signal so the UI can show "+2.0% (market: +15.3%)" for full transparency.
+  const rawBlendedRate = clampedRate;
+  const cappedRate = rawBlendedRate > config.positiveRateCap
+    ? config.positiveRateCap
+    : rawBlendedRate;
+  const positiveRateCapApplied = cappedRate !== rawBlendedRate;
 
   // -----------------------------------------------------------------------
   // Step 4: Confidence
@@ -187,10 +197,14 @@ export function calculateTrend(input: CalculateTrendInput): TrendResult {
   // Step 6: Direction and summary
   // -----------------------------------------------------------------------
 
-  const direction = classifyDirection(clampedRate);
+  // Direction is classified off the APPLIED (capped) rate — UI labels
+  // like "appreciating" should reflect what we'd actually bake into ARV.
+  const direction = classifyDirection(cappedRate);
 
   const summary = buildSummary(
-    clampedRate,
+    cappedRate,
+    rawBlendedRate,
+    positiveRateCapApplied,
     isFallback,
     localStats,
     metroStats,
@@ -200,7 +214,10 @@ export function calculateTrend(input: CalculateTrendInput): TrendResult {
   );
 
   return {
-    blendedAnnualRate: round(clampedRate, 5),
+    blendedAnnualRate: round(cappedRate, 5),
+    rawBlendedRate: round(rawBlendedRate, 5),
+    positiveRateCap: config.positiveRateCap,
+    positiveRateCapApplied,
     rawLocalRate: localRate != null ? round(localRate, 5) : null,
     rawMetroRate: metroRate != null ? round(metroRate, 5) : null,
     localStats,
@@ -370,7 +387,9 @@ const DIRECTION_LABELS: Record<TrendDirection, string> = {
 };
 
 function buildSummary(
-  rate: number,
+  appliedRate: number,
+  rawRate: number,
+  capApplied: boolean,
   isFallback: boolean,
   localStats: TrendCompStats,
   metroStats: TrendCompStats,
@@ -379,7 +398,7 @@ function buildSummary(
   direction: TrendDirection,
 ): string {
   if (isFallback) {
-    return `Insufficient market data (${metroStats.compCount} similar sales within ${config.metroRadiusMiles} mi). Using fixed ${fmtPct(config.fallbackRate)}/year fallback rate.`;
+    return `Insufficient market data (${metroStats.compCount} similar sales within ${config.metroRadiusMiles} mi). Using fixed ${fmtPct(appliedRate)}/year fallback rate.`;
   }
 
   const totalComps = metroStats.compCount;
@@ -387,7 +406,11 @@ function buildSummary(
     ? config.localRadiusMiles
     : config.metroRadiusMiles;
 
-  let text = `Based on ${totalComps} similar sales within ${radiusUsed} mi over ${config.windowMonths} months, this submarket is ${DIRECTION_LABELS[direction]} at ${fmtPct(rate)}/year.`;
+  let text = `Based on ${totalComps} similar sales within ${radiusUsed} mi over ${config.windowMonths} months, this submarket is ${DIRECTION_LABELS[direction]} at ${fmtPct(appliedRate)}/year.`;
+
+  if (capApplied) {
+    text += ` Raw market signal was ${fmtPct(rawRate)}/year; capped at ${fmtPct(config.positiveRateCap)}/year for defensibility.`;
+  }
 
   if (confidence === "low") {
     text += ` (Low confidence — only ${totalComps} comps.)`;

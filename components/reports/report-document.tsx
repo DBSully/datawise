@@ -144,6 +144,25 @@ export function ReportDocument({ report, title, mapSlot }: Props) {
               label="Negotiation Gap (Max Offer − List)"
               value={dm.negotiationGap != null ? fmt(dm.negotiationGap) : "—"}
             />
+            {r.trend && (
+              <>
+                <div className="my-1 border-t border-slate-100" />
+                <Row
+                  label={
+                    r.trend.positiveRateCapApplied
+                      ? "Market Trend (applied, capped)"
+                      : "Market Trend (applied)"
+                  }
+                  value={`${r.trend.blendedAnnualRate >= 0 ? "+" : ""}${(r.trend.blendedAnnualRate * 100).toFixed(1)}%/yr`}
+                />
+                {r.trend.positiveRateCapApplied && (
+                  <Row
+                    label="Market Rate (pre-cap)"
+                    value={`${r.trend.rawBlendedRate >= 0 ? "+" : ""}${(r.trend.rawBlendedRate * 100).toFixed(1)}%/yr`}
+                  />
+                )}
+              </>
+            )}
           </div>
 
           {r.cashRequired && (

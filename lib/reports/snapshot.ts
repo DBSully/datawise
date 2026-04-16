@@ -83,6 +83,17 @@ export function buildReportSnapshot(data: WorkstationData): ReportContentJson {
     transaction: data.transaction,
     financing: data.financing,
     dealMath: data.dealMath,
+    trend: data.trend
+      ? {
+          blendedAnnualRate: data.trend.blendedAnnualRate,
+          rawBlendedRate: data.trend.rawBlendedRate,
+          positiveRateCap: data.trend.positiveRateCap,
+          positiveRateCapApplied: data.trend.positiveRateCapApplied,
+          confidence: data.trend.confidence,
+          isFallback: data.trend.isFallback,
+          summary: data.trend.summary,
+        }
+      : null,
 
     cashRequired: data.cashRequired
       ? {

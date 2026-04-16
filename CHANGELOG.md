@@ -1,3 +1,58 @@
+## 2026-04-16 — Price Trend Positive-Rate Cap + ARV Backfill
+
+The data-driven market-trend engine occasionally produced +15–20%/year rates from thin-volume OLS regression. Those rates flowed straight into ARV (`arvBlended × (1 + rate × years)`), inflating every downstream number by the same amount and making Gap, Max Offer, and Spread undefensible in print. Defensibility trumps mathematical purity here: an analyst who quotes a +15%/year comp adjustment to a seller is going to lose the conversation.
+
+### Fix
+
+Asymmetric positive-rate cap at the trend engine, with the raw market signal preserved end-to-end:
+
+```
+rawBlendedRate   = <OLS blend, after existing symmetric clamp>
+blendedAnnualRate = min(rawBlendedRate, +2%/yr)   if rawBlendedRate > 0
+                  = rawBlendedRate                otherwise
+```
+
+Negative rates pass through unchanged (the system should fully honor softening markets). Positive rates are capped at **+2%/year** by default.
+
+### Why the raw rate stays visible everywhere
+
+Per Dan's project principle of transparency on numbers, the pre-cap signal is **not overwritten**. Stored on `screening_results.trend_raw_rate`, flagged via `trend_positive_cap_applied`, surfaced on:
+
+- Deal stat strip pill: `+2.0%/yr · capped from +15.3%` (indigo italic note below the rate)
+- Price Trend card modal: "Capped at +2.0%/yr" badge + dedicated "Market Rate (pre-cap)" row + an indigo transparency banner explaining the cap
+- Screening detail page: "Capped at +2.0%/yr" pill + side-by-side Applied / Market Rate cells
+- Printed report: new "Market Trend (applied, capped)" and "Market Rate (pre-cap)" rows in the Deal Math waterfall
+
+An analyst or partner can always see what the market data suggested vs. what we baked into ARV.
+
+### Condo-specific fallback
+
+Per Dan's call, the fallback rate used when a subject has fewer than 8 similar comps is now property-type-aware: detached/townhome keep -5%/year; **condo falls back to -10%/year** to reflect that condo stock historically behaves differently from SFR in down markets.
+
+`TrendConfig.fallbackRate: number` replaced with `fallbackRateByType: Record<PropertyTypeKey, number>`.
+
+### Backfill scope — 8,202 rows, 6,719 recomputed
+
+Existing screening_results had ARV/Max Offer/Spread/Gap computed at pre-cap rates. Two-stage correction:
+
+1. **Migration `20260416100000`** — adds `trend_raw_rate` and `trend_positive_cap_applied` columns, copies the historical (uncapped) `trend_annual_rate` into `trend_raw_rate`, and retroactively caps any `trend_annual_rate > 0.02`.
+
+2. **Node script `scripts/backfill-trend-cap.ts`** — for each capped row with a stored `arv_detail_json`, rebuilds per-comp `arvTimeAdjusted`/`arvFinal` from the preserved `arvBlended` + `daysSinceClose` at the capped rate, recomputes decay-weighted `arvAggregate`, re-invokes `calculateDealMath` for `max_offer`/`spread`/`est_gap_per_sqft`/`negotiation_gap`/`offer_pct`, patches `arv_detail_json` and `trend_detail_json`, and regenerates snapshots for every analysis_reports row linked to an affected analysis (via the same `loadWorkstationData` + `buildReportSnapshot` pipeline the Regenerate button uses).
+
+Results: **8,202** screening_results rows had the cap applied; **6,719** recomputed in place; **1,483** skipped (screenings that had no ARV detail or sqft to recompute against); **3** analysis_reports regenerated out of 61 affected analyses (most affected analyses don't have reports yet).
+
+### What did NOT change
+
+- `clampMin: -0.20` and `clampMax: +0.12` (the existing sanity bounds) stay put. The positive-rate cap is a *second* ceiling applied on top, narrower than the sanity bound.
+- The OLS regression logic — inputs, window, blend weights, confidence thresholds — is unchanged.
+- Per-comp Prime Candidate qualification math is unchanged (uses the applied rate, same as ARV).
+
+### Side effect worth naming
+
+A first-pass SQL migration included a bulk `jsonb_set` on `trend_detail_json` to inject the three new keys across every row. That statement exceeded Supabase's per-statement timeout and the whole migration rolled back. The fix was to move JSON patching into the Node script (where it's per-row and interruptible) and keep the SQL migration to flat-column updates only. Documented in-file on the migration.
+
+---
+
 ## 2026-04-15 — Report Snapshot Backfill + Regenerate Button
 
 Existing `analysis_reports` rows were snapshotted before the Spread/Gap rework earlier today, so their `content_json.dealMath` block still carried the old inverted Spread and the pre-analysis Gap formula. Two fixes:

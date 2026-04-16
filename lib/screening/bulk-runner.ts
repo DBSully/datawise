@@ -688,8 +688,11 @@ function screenSubject(
 
   // --- Two-pass ARV with data-driven trend rate ---
 
-  // Pass 1: Rough ARV using the fixed fallback rate (for price tier filtering)
-  const roughArvConfig = { ...profile.arv, timeAdjustmentAnnualRate: profile.trend.fallbackRate };
+  // Pass 1: Rough ARV using the property-type-specific fallback rate
+  // (for price tier filtering). Condos get a steeper default decay.
+  const fallbackRate = profile.trend.fallbackRateByType[propertyType]
+    ?? profile.trend.fallbackRateByType["detached"];
+  const roughArvConfig = { ...profile.arv, timeAdjustmentAnnualRate: fallbackRate };
   const roughArv = calculateArv({
     subjectBuildingSqft: buildingSqft,
     subjectAboveGradeSqft: aboveGradeSqft,
@@ -908,6 +911,8 @@ async function writeScreeningResults(
       arv_detail_json: r.arv?.perCompDetails ?? null,
 
       trend_annual_rate: r.trend?.blendedAnnualRate ?? null,
+      trend_raw_rate: r.trend?.rawBlendedRate ?? null,
+      trend_positive_cap_applied: r.trend?.positiveRateCapApplied ?? false,
       trend_local_rate: r.trend?.rawLocalRate ?? null,
       trend_metro_rate: r.trend?.rawMetroRate ?? null,
       trend_local_comp_count: r.trend?.localStats.compCount ?? null,

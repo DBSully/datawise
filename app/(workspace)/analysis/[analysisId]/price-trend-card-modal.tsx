@@ -33,7 +33,11 @@ export function PriceTrendCardModal({
     );
   }
 
-  const rateDisplay = `${trend.blendedAnnualRate >= 0 ? "+" : ""}${(trend.blendedAnnualRate * 100).toFixed(1)}%/yr`;
+  const fmtRate = (r: number) =>
+    `${r >= 0 ? "+" : ""}${(r * 100).toFixed(1)}%/yr`;
+  const rateDisplay = fmtRate(trend.blendedAnnualRate);
+  const rawDisplay = fmtRate(trend.rawBlendedRate);
+  const capPctDisplay = `${(trend.positiveRateCap * 100).toFixed(1)}%/yr`;
 
   return (
     <DetailModal title="Price Trend" onClose={onClose}>
@@ -51,6 +55,11 @@ export function PriceTrendCardModal({
           Confidence: {trend.confidence === "high" ? "High" : trend.confidence === "low" ? "Low" : "Fallback"}
         </span>
         <TrendDirectionBadge direction={trend.direction} variant="prominent" />
+        {trend.positiveRateCapApplied && (
+          <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
+            Capped at +{capPctDisplay}
+          </span>
+        )}
       </div>
 
       {/* Fallback warning */}
@@ -58,6 +67,15 @@ export function PriceTrendCardModal({
         <div className="mt-2 rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
           Insufficient local comps — a fixed fallback rate was applied instead
           of the market-derived rate.
+        </div>
+      )}
+
+      {/* Cap transparency note */}
+      {trend.positiveRateCapApplied && (
+        <div className="mt-2 rounded border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-800">
+          Market-derived signal was <strong>{rawDisplay}</strong>, but positive rates
+          are capped at <strong>+{capPctDisplay}</strong> for defensibility. ARV
+          and downstream deal math use the applied (capped) rate.
         </div>
       )}
 
@@ -74,6 +92,18 @@ export function PriceTrendCardModal({
           {rateDisplay}
         </span>
       </div>
+
+      {/* Raw (pre-cap) rate — shown only when different from applied */}
+      {trend.positiveRateCapApplied && (
+        <div className="mt-1 flex items-baseline justify-between rounded-md border border-slate-100 bg-white px-3 py-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+            Market Rate (pre-cap)
+          </span>
+          <span className="font-mono text-sm font-semibold text-slate-500">
+            {rawDisplay}
+          </span>
+        </div>
+      )}
 
       {/* Local / Metro tier columns */}
       <div className="mt-4 grid grid-cols-2 gap-4">

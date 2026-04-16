@@ -347,6 +347,8 @@ export type ScreeningCompData = {
   financingTotal: number | null;
   targetProfit: number | null;
   trendAnnualRate: number | null;
+  trendRawRate: number | null;
+  trendPositiveCapApplied: boolean;
   trendConfidence: string | null;
   isPrimeCandidate: boolean;
   // Review status
@@ -401,7 +403,7 @@ export async function loadScreeningCompDataAction(
   const { data: result, error: resultError } = await supabase
     .from("screening_results")
     .select(
-      "id, real_property_id, listing_row_id, comp_search_run_id, subject_address, subject_city, subject_list_price, subject_building_sqft, subject_above_grade_sqft, subject_below_grade_total_sqft, subject_below_grade_finished_sqft, subject_year_built, subject_property_type, est_gap_per_sqft, arv_aggregate, arv_detail_json, max_offer, offer_pct, spread, rehab_total, hold_total, transaction_total, financing_total, target_profit, trend_annual_rate, trend_confidence, is_prime_candidate, review_action, pass_reason",
+      "id, real_property_id, listing_row_id, comp_search_run_id, subject_address, subject_city, subject_list_price, subject_building_sqft, subject_above_grade_sqft, subject_below_grade_total_sqft, subject_below_grade_finished_sqft, subject_year_built, subject_property_type, est_gap_per_sqft, arv_aggregate, arv_detail_json, max_offer, offer_pct, spread, rehab_total, hold_total, transaction_total, financing_total, target_profit, trend_annual_rate, trend_raw_rate, trend_positive_cap_applied, trend_confidence, is_prime_candidate, review_action, pass_reason",
     )
     .eq("id", resultId)
     .single();
@@ -453,6 +455,8 @@ export async function loadScreeningCompDataAction(
     financingTotal: result.financing_total,
     targetProfit: result.target_profit,
     trendAnnualRate: result.trend_annual_rate,
+    trendRawRate: result.trend_raw_rate ?? null,
+    trendPositiveCapApplied: result.trend_positive_cap_applied ?? false,
     trendConfidence: result.trend_confidence,
     isPrimeCandidate: result.is_prime_candidate ?? false,
     reviewAction: result.review_action,
@@ -901,7 +905,7 @@ export async function loadCompDataByRunAction(
   // Load screening result linked to this property + run (if any) for deal math
   const { data: sr } = await supabase
     .from("screening_results")
-    .select("arv_aggregate, arv_detail_json, max_offer, offer_pct, spread, rehab_total, hold_total, transaction_total, financing_total, target_profit, trend_annual_rate, trend_confidence, is_prime_candidate, est_gap_per_sqft, review_action, pass_reason")
+    .select("arv_aggregate, arv_detail_json, max_offer, offer_pct, spread, rehab_total, hold_total, transaction_total, financing_total, target_profit, trend_annual_rate, trend_raw_rate, trend_positive_cap_applied, trend_confidence, is_prime_candidate, est_gap_per_sqft, review_action, pass_reason")
     .eq("real_property_id", realPropertyId)
     .eq("comp_search_run_id", compSearchRunId)
     .maybeSingle();
@@ -929,6 +933,8 @@ export async function loadCompDataByRunAction(
     financingTotal: sr?.financing_total ?? null,
     targetProfit: sr?.target_profit ?? null,
     trendAnnualRate: sr?.trend_annual_rate ?? null,
+    trendRawRate: sr?.trend_raw_rate ?? null,
+    trendPositiveCapApplied: sr?.trend_positive_cap_applied ?? false,
     trendConfidence: sr?.trend_confidence ?? null,
     isPrimeCandidate: sr?.is_prime_candidate ?? false,
     reviewAction: sr?.review_action ?? null,

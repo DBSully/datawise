@@ -196,10 +196,23 @@ export type TrendConfig = {
   lowConfidenceThreshold: number;
   /** Asymmetric floor for the blended annual rate (e.g. -0.20). */
   clampMin: number;
-  /** Asymmetric ceiling for the blended annual rate (e.g. +0.12). */
+  /** Asymmetric ceiling for the blended annual rate (e.g. +0.12). Sanity bound
+   *  only — the defensibility guardrail is `positiveRateCap` below. */
   clampMax: number;
-  /** Fixed fallback rate when comp count < minComps. */
-  fallbackRate: number;
+  /**
+   * Defensibility cap applied to positive blended rates AFTER the symmetric
+   * clamp. Thin-volume regression can produce +10–20% annual signals that we
+   * cannot support in print. Negative rates pass through unchanged.
+   * `rawBlendedRate` on the result preserves the pre-cap market signal for
+   * the audit trail.
+   */
+  positiveRateCap: number;
+  /**
+   * Fixed fallback rate per property type when comp count < minComps.
+   * Condos historically behave differently from SFR/townhome stock, so
+   * the fallback is typed rather than global.
+   */
+  fallbackRateByType: Record<PropertyTypeKey, number>;
   /** Subject sqft tolerance for similar-property matching (e.g. 0.20 = ±20%). */
   sqftTolerancePct: number;
   /** Subject year-built tolerance in years (e.g. 15 = ±15 years). */
@@ -325,7 +338,12 @@ export const DENVER_FLIP_V1: FlipStrategyProfile = {
     lowConfidenceThreshold: 15,
     clampMin: -0.20,
     clampMax: 0.12,
-    fallbackRate: -0.05,
+    positiveRateCap: 0.02,
+    fallbackRateByType: {
+      detached: -0.05,
+      townhome: -0.05,
+      condo: -0.10,
+    },
     sqftTolerancePct: 0.20,
     yearBuiltToleranceYears: 15,
     priceTierTolerancePct: 0.25,

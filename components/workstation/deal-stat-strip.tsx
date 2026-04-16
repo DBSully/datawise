@@ -91,6 +91,11 @@ type DealStatStripProps = {
   targetProfit: number | null;
   /** Decimal — 0.05 means 5%/yr. When null the Trend pill is hidden entirely. */
   trendAnnualRate: number | null;
+  /** Pre-cap market signal. When different from trendAnnualRate, the pill
+   *  shows "(capped from +X.X%)" so the analyst sees the raw rate too. */
+  trendRawRate?: number | null;
+  /** True when the positive-rate defensibility cap was applied. */
+  trendCapApplied?: boolean;
   /** Per-spec §3.3 + Decision 6.1: per-value override indicators on
    *  the strip. Each flag means the corresponding Quick Analysis input
    *  has a manual value set; the strip computes which downstream stats
@@ -112,12 +117,20 @@ export function DealStatStrip({
   rehabTotal,
   targetProfit,
   trendAnnualRate,
+  trendRawRate,
+  trendCapApplied,
   manualOverrides,
   rightSlot,
 }: DealStatStripProps) {
   const trendDisplay =
     trendAnnualRate != null
       ? `${trendAnnualRate >= 0 ? "+" : ""}${(trendAnnualRate * 100).toFixed(1)}%/yr`
+      : null;
+  // When the cap fired, annotate with the raw market signal so the analyst
+  // can see "+2.0%/yr (market: +15.3%)" at a glance.
+  const trendCapNote =
+    trendCapApplied && trendRawRate != null
+      ? `capped from ${trendRawRate >= 0 ? "+" : ""}${(trendRawRate * 100).toFixed(1)}%`
       : null;
 
   // Per-stat override resolution per spec §3.3 cascade rules.
@@ -185,11 +198,21 @@ export function DealStatStrip({
         override={targetProfitPillOverride}
       />
       {trendDisplay != null && (
-        <DealStat
-          label="Trend"
-          value={trendDisplay}
-          tone={trendTone(trendAnnualRate)}
-        />
+        <div className="flex flex-col leading-tight">
+          <DealStat
+            label={trendCapNote ? "Trend (capped)" : "Trend"}
+            value={trendDisplay}
+            tone={trendTone(trendAnnualRate)}
+          />
+          {trendCapNote && (
+            <span
+              className="mt-0.5 text-[9px] italic text-indigo-600"
+              title="Positive market rate was capped for defensibility. Click the Price Trend card for full detail."
+            >
+              {trendCapNote}
+            </span>
+          )}
+        </div>
       )}
       {rightSlot && <div className="ml-auto">{rightSlot}</div>}
     </div>
