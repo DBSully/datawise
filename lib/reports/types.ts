@@ -297,6 +297,7 @@ export type WorkstationData = {
     offerPct: number | null;
     spread: number | null;
     estGapPerSqft: number | null;
+    negotiationGap: number | null;
   } | null;
   compSummary: {
     totalComps: number;
@@ -468,6 +469,7 @@ export type ReportContentJson = {
     offerPct: number | null;
     spread: number | null;
     estGapPerSqft: number | null;
+    negotiationGap: number | null;
   } | null;
 
   cashRequired: {

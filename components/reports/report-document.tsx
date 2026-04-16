@@ -115,8 +115,8 @@ export function ReportDocument({ report, title, mapSlot }: Props) {
             {[
               { label: "ARV", value: fmt(dm.arv) },
               { label: "Max Offer", value: fmt(dm.maxOffer) },
-              { label: "Spread", value: fmt(dm.spread) },
               { label: "Gap/SqFt", value: `$${fmtNum(dm.estGapPerSqft)}` },
+              { label: "Neg Gap", value: dm.negotiationGap != null ? fmt(dm.negotiationGap) : "—" },
             ].map((card) => (
               <div key={card.label} className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-center">
                 <div className="text-[10px] uppercase tracking-wider text-slate-500">{card.label}</div>
@@ -139,7 +139,11 @@ export function ReportDocument({ report, title, mapSlot }: Props) {
             <div className="my-1 border-t border-slate-300" />
             <Row label="Maximum Offer" value={fmt(dm.maxOffer)} bold />
             <Row label="Offer as % of List" value={fmtPct(dm.offerPct)} />
-            <Row label="Spread (List - Max Offer)" value={fmt(dm.spread)} />
+            <Row label="Spread (ARV − Max Offer)" value={fmt(dm.spread)} />
+            <Row
+              label="Negotiation Gap (Max Offer − List)"
+              value={dm.negotiationGap != null ? fmt(dm.negotiationGap) : "—"}
+            />
           </div>
 
           {r.cashRequired && (

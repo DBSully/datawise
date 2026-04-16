@@ -187,15 +187,23 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
     const offerPct =
       listPrice > 0 ? Math.round((maxOffer / listPrice) * 10000) / 10000 : null;
 
+    // Analysis-phase Spread and Gap evolve off adjusted ARV and max offer
+    // (not list price). Gap is always computable once we have an ARV and sqft;
+    // Negotiation Gap measures max-offer-vs-list and is null off-market.
     const sqft = data.physical?.buildingSqft ?? 0;
+    const spread = sqft > 0 && arv > 0 ? Math.round(arv - maxOffer) : null;
     const gapPerSqft =
-      listPrice > 0 && sqft > 0 ? Math.round((arv - listPrice) / sqft) : null;
+      sqft > 0 && arv > 0 ? Math.round((arv - maxOffer) / sqft) : null;
+    const negotiationGap =
+      listPrice > 0 ? Math.round(maxOffer - listPrice) : null;
 
     return {
       arv,
       maxOffer,
       offerPct,
+      spread,
       gapPerSqft,
+      negotiationGap,
       rehabTotal,
       targetProfit,
       holdTotal,
@@ -532,6 +540,7 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
         maxOffer={liveDeal.maxOffer}
         offerPct={liveDeal.offerPct}
         gapPerSqft={liveDeal.gapPerSqft}
+        negotiationGap={liveDeal.negotiationGap}
         rehabTotal={liveDeal.rehabTotal}
         targetProfit={liveDeal.targetProfit}
         trendAnnualRate={data.trend?.blendedAnnualRate ?? null}

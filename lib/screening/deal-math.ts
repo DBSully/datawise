@@ -1,8 +1,14 @@
 // ---------------------------------------------------------------------------
-// Deal Math — max offer, spread, and gap calculations
+// Deal Math — max offer, spread, gap, and negotiation gap calculations
 //
-// When list price is null (off-market), maxOffer is still computed from
-// ARV minus costs. Spread, offerPct, and estGapPerSqft are null.
+// Metric definitions (screening phase):
+//   spread          = ARV - listPrice                     (opportunity signal)
+//   estGapPerSqft   = spread / buildingSqft               (normalized opportunity)
+//   negotiationGap  = maxOffer - listPrice                (negotiation room;
+//                                                          positive = max offer >= list)
+//
+// All three metrics are null when list price is null (off-market). maxOffer is
+// still computed from ARV minus costs regardless of list price.
 // ---------------------------------------------------------------------------
 
 import type { DealMathResult } from "./types";
@@ -33,14 +39,15 @@ export function calculateDealMath(input: CalculateDealMathInput): DealMathResult
   const totalCosts = rehabTotal + holdTotal + transactionTotal + financingTotal;
   const maxOffer = Math.round(arv - totalCosts - targetProfit);
 
-  // Spread-based metrics require a list price
+  // All spread-based metrics require a list price
   const hasListPrice = listPrice !== null && listPrice > 0;
-  const spread = hasListPrice ? Math.round(listPrice - maxOffer) : null;
+  const spread = hasListPrice ? Math.round(arv - listPrice) : null;
   const offerPct = hasListPrice ? roundTo(maxOffer / listPrice, 4) : null;
   const estGapPerSqft =
     hasListPrice && buildingSqft > 0
       ? Math.round((arv - listPrice) / buildingSqft)
       : null;
+  const negotiationGap = hasListPrice ? Math.round(maxOffer - listPrice) : null;
 
   return {
     arv,
@@ -55,6 +62,7 @@ export function calculateDealMath(input: CalculateDealMathInput): DealMathResult
     offerPct,
     spread,
     estGapPerSqft,
+    negotiationGap,
   };
 }
 

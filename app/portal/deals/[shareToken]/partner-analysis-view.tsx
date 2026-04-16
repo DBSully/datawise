@@ -156,9 +156,11 @@ export function PartnerAnalysisView({
     const listPrice = data.listing?.listPrice ?? 0;
     const offerPct = listPrice > 0 ? Math.round((maxOffer / listPrice) * 10000) / 10000 : null;
     const sqft = data.physical?.buildingSqft ?? 0;
-    const gapPerSqft = listPrice > 0 && sqft > 0 ? Math.round((arv - listPrice) / sqft) : null;
+    // Analysis-phase Gap: opportunity at our max offer.
+    const gapPerSqft = sqft > 0 && arv > 0 ? Math.round((arv - maxOffer) / sqft) : null;
+    const negotiationGap = listPrice > 0 ? Math.round(maxOffer - listPrice) : null;
 
-    return { arv, maxOffer, offerPct, gapPerSqft, rehabTotal, targetProfit };
+    return { arv, maxOffer, offerPct, gapPerSqft, negotiationGap, rehabTotal, targetProfit };
   }, [partnerArvInput, partnerRehabInput, partnerProfitInput, dealMath, data]);
 
   // ── Comp data from server (loaded via service-role client, no
@@ -391,6 +393,7 @@ export function PartnerAnalysisView({
           maxOffer={partnerLiveDeal.maxOffer}
           offerPct={partnerLiveDeal.offerPct}
           gapPerSqft={partnerLiveDeal.gapPerSqft}
+          negotiationGap={partnerLiveDeal.negotiationGap}
           rehabTotal={partnerLiveDeal.rehabTotal}
           targetProfit={partnerLiveDeal.targetProfit}
           trendAnnualRate={data.trend?.blendedAnnualRate ?? null}
@@ -401,6 +404,7 @@ export function PartnerAnalysisView({
           maxOffer={dealMath.maxOffer}
           offerPct={dealMath.offerPct}
           gapPerSqft={dealMath.estGapPerSqft}
+          negotiationGap={dealMath.negotiationGap ?? null}
           rehabTotal={dealMath.rehabTotal}
           targetProfit={dealMath.targetProfit}
           trendAnnualRate={data.trend?.blendedAnnualRate ?? null}

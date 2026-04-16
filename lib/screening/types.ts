@@ -275,10 +275,12 @@ export type DealMathResult = {
   maxOffer: number;
   /** null when no list price (off-market). */
   offerPct: number | null;
-  /** null when no list price (off-market). */
+  /** Opportunity signal: ARV - listPrice. Null when no list price. */
   spread: number | null;
-  /** null when no list price (off-market). */
+  /** Opportunity signal per sqft: spread / buildingSqft. Null when no list price. */
   estGapPerSqft: number | null;
+  /** Negotiation room: maxOffer - listPrice. Positive = max offer above list. Null when no list price. */
+  negotiationGap: number | null;
 };
 
 // ---------------------------------------------------------------------------

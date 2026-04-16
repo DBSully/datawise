@@ -949,6 +949,7 @@ async function writeScreeningResults(
       max_offer: r.dealMath?.maxOffer ?? null,
       est_gap_per_sqft: r.dealMath?.estGapPerSqft ?? null,
       spread: r.dealMath?.spread ?? null,
+      negotiation_gap: r.dealMath?.negotiationGap ?? null,
       offer_pct: r.dealMath?.offerPct ?? null,
 
       is_prime_candidate: r.qualification.isPrimeCandidate,

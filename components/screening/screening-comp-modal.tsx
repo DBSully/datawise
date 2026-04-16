@@ -331,10 +331,14 @@ export function ScreeningCompModal({
     const listPrice = data.subjectListPrice ?? 0;
     const offerPct = listPrice > 0 ? Math.round((maxOffer / listPrice) * 10000) / 10000 : null;
     const sqft = data.subjectBuildingSqft ?? 0;
+    // Screening-phase Gap: opportunity vs list price.
     const gapPerSqft = listPrice > 0 && sqft > 0
       ? Math.round((arv - listPrice) / sqft)
       : null;
-    return { arv, maxOffer, offerPct, gapPerSqft, rehabTotal, targetProfit };
+    const negotiationGap = listPrice > 0
+      ? Math.round(maxOffer - listPrice)
+      : null;
+    return { arv, maxOffer, offerPct, gapPerSqft, negotiationGap, rehabTotal, targetProfit };
   }, [data, manualArvInput, manualTargetProfitInput, manualRehabInput]);
 
   // Promote handler
@@ -493,6 +497,7 @@ export function ScreeningCompModal({
             maxOffer={liveDeal.maxOffer}
             offerPct={liveDeal.offerPct}
             gapPerSqft={liveDeal.gapPerSqft}
+            negotiationGap={liveDeal.negotiationGap}
             rehabTotal={liveDeal.rehabTotal}
             targetProfit={liveDeal.targetProfit}
             trendAnnualRate={data.trendAnnualRate ?? null}

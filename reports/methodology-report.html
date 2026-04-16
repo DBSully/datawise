@@ -837,27 +837,40 @@ dailyInterest   = loanAmount &times; annualRate / 365
 <div class="page-break"></div>
 <h2 id="dealmatch">8. Deal Math &amp; Max Offer</h2>
 
-<p><strong>Goal:</strong> Compute the maximum acceptable purchase price that achieves the target profit, and measure the opportunity gap between ARV and list price.</p>
+<p><strong>Goal:</strong> Compute the maximum acceptable purchase price that achieves the target profit, and measure (a) the market opportunity per square foot available to fund rehab + profit, and (b) the negotiation room between that max offer and the seller's asking price. The opportunity measures (Spread, Gap) evolve between phases: screening compares ARV to list price; analysis compares ARV to our calculated max offer.</p>
 
-<p><strong>Source:</strong> <code>lib/screening/deal-math.ts</code></p>
+<p><strong>Source:</strong> <code>lib/screening/deal-math.ts</code>, <code>lib/analysis/load-workstation-data.ts</code></p>
 
 <h3 id="deal-formulas">8.1 Core Formulas</h3>
 
 <div class="formula-box">
-totalCosts = rehabTotal + holdTotal + transactionTotal + financingTotal
-maxOffer   = ARV - totalCosts - targetProfit
-spread     = ARV - listPrice
-offerPct   = maxOffer / listPrice
-estGapPerSqft = spread / buildingSqft
+totalCosts     = rehabTotal + holdTotal + transactionTotal + financingTotal
+maxOffer       = ARV - totalCosts - targetProfit
+offerPct       = maxOffer / listPrice
+
+# Screening phase — opportunity vs the market asking price
+spread_s       = ARV_aggregate - listPrice
+estGapPerSqft_s = spread_s / buildingSqft
+
+# Analysis phase — opportunity vs our calculated ceiling
+spread_a       = adjustedARV - maxOffer
+estGapPerSqft_a = spread_a / buildingSqft
+
+# Negotiation room — identical in both phases
+negotiationGap = maxOffer - listPrice   (positive = OK to offer above list)
 </div>
+
+<p><strong>buildingSqft</strong> denominator is <code>building_area_total_sqft</code> (with fallback to <code>above_grade_finished_area_sqft</code> when total is null). Using total-building sqft treats Gap as a rehab-scope-aware measure: "how much do we have available per square foot to underwrite."</p>
 
 <table>
   <tr><th>Output</th><th>Formula</th><th>Stored In</th><th>Meaning</th></tr>
   <tr><td><code>totalCosts</code></td><td>rehab + hold + transaction + financing</td><td>Derived</td><td>All-in cost to renovate and sell</td></tr>
   <tr><td><code>maxOffer</code></td><td>ARV - costs - profit</td><td><code>screening_results.max_offer</code></td><td>Highest price to pay and still hit profit target</td></tr>
-  <tr><td><code>spread</code></td><td>ARV - list price</td><td><code>screening_results.spread</code></td><td>Raw gap between value and asking price</td></tr>
+  <tr><td><code>spread</code> (screening)</td><td>ARV - listPrice</td><td><code>screening_results.spread</code></td><td>Raw opportunity signal — how far ARV exceeds asking</td></tr>
+  <tr><td><code>spread</code> (analysis)</td><td>adjustedARV - maxOffer</td><td>Recomputed live; snapshotted into reports</td><td>Dollar margin between value and our ceiling</td></tr>
   <tr><td><code>offerPct</code></td><td>maxOffer / listPrice</td><td><code>screening_results.offer_pct</code></td><td>Offer as % of asking (e.g., 0.72 = 72%)</td></tr>
   <tr><td><code>estGapPerSqft</code></td><td>spread / buildingSqft</td><td><code>screening_results.est_gap_per_sqft</code></td><td>Normalized opportunity measure ($/sqft)</td></tr>
+  <tr><td><code>negotiationGap</code></td><td>maxOffer - listPrice</td><td><code>screening_results.negotiation_gap</code></td><td>Raw negotiation room: positive = max offer ≥ list</td></tr>
 </table>
 
 <p><strong>Default target profit:</strong> $40,000 (configurable, overridable per analysis via <code>manual_analysis.target_profit_manual</code>)</p>
@@ -865,18 +878,27 @@ estGapPerSqft = spread / buildingSqft
 <h3 id="deal-waterfall">8.2 Deal Waterfall (as displayed in UI)</h3>
 
 <div class="flow-diagram">
-  Effective ARV           $450,000
-- Rehab                  - $62,000
-- Holding                -  $8,500
-- Transaction            - $19,800
-- Financing              - $24,214   (11% on $360k loan, 190 days + 1 pt)
-- Target Profit          - $40,000
-  ────────────────────────────────
-= Max Offer              $295,486
+  Effective ARV                $780,000
+- Rehab                       - $95,000
+- Holding                     - $12,500
+- Transaction                 - $23,400
+- Financing                   -  $0     (cash purchase)
+- Target Profit               - $40,000
+  ──────────────────────────────────────
+= Max Offer                    $609,100
 
-  Spread (ARV - List)    = $450,000 - $385,000 = $65,000
-  Offer %                = $295,486 / $385,000 = 76.7%
-  Gap/sqft               = $65,000 / 1,800 sqft = $36.11/sqft
+  List Price                   $540,000
+  Offer %                      = $609,100 / $540,000 = 112.8%
+
+  Screening-phase (pre-analysis snapshot)
+    Spread     = $780,000 - $540,000     = $240,000
+    Gap/sqft   = $240,000 / 2,750 sqft   = $87.27/sqft   ← worth investigating
+
+  Analysis-phase (after rehab/costs/profit dialed in)
+    Spread     = $780,000 - $609,100     = $170,900
+    Gap/sqft   = $170,900 / 2,750 sqft   = $62.15/sqft
+
+  Negotiation Gap = $609,100 - $540,000  = +$69,100       ← can bid above list
 </div>
 
 <h3>8.3 Assessment</h3>
@@ -887,6 +909,8 @@ estGapPerSqft = spread / buildingSqft
   <li><strong>Clean, transparent waterfall</strong> makes it easy for analysts to see exactly how the max offer is derived.</li>
   <li><strong>Target profit is overridable</strong> per deal, allowing flexibility for different risk profiles.</li>
   <li><strong>Gap/sqft normalization</strong> enables apples-to-apples comparison across different-sized properties.</li>
+  <li><strong>Phased Spread/Gap</strong> — one pair of metrics for bulk opportunity scanning (vs. asking), a second pair for analysis viability (vs. our ceiling) — keeps both questions cleanly separated.</li>
+  <li><strong>Negotiation Gap is signed</strong> — a positive value explicitly tells the analyst an at-or-above-list offer still clears the profit target.</li>
 </ul>
 </div>
 

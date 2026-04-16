@@ -1,3 +1,55 @@
+## 2026-04-15 — Spread / Gap Rework + Negotiation Gap
+
+Fixed a long-standing inversion in Spread and gave Gap a phased definition so it evolves with the analysis. Added Negotiation Gap as a distinct metric for the "can we offer at or above list?" question.
+
+### Why
+
+Two related problems were surfaced during methodology review:
+
+1. **Spread was inverted.** The methodology defined `spread = ARV − listPrice` (opportunity signal), but the engine computed `spread = listPrice − maxOffer` (negotiation distance). The screening table color coding was keyed to the methodology's sign convention, so positive-equals-green was silently meaning "bad deal — we'd have to overpay." The stored column and the UI were drifting apart.
+
+2. **Gap never evolved.** Both the screening snapshot and the live analysis workstation computed `Gap = (ARV − listPrice) / sqft`. Once the analyst had adjusted comp ARVs and dialed in rehab/holding/profit, the list price was no longer the relevant anchor — but Gap kept quoting it. Final deal numbers stopped making sense.
+
+### Phased definitions (new)
+
+| Metric | Screening | Analysis |
+|---|---|---|
+| Spread | `ARV_aggregate − listPrice` | `adjustedARV − maxOffer` |
+| Gap/sqft | `Spread / buildingSqft` | `Spread / buildingSqft` |
+| Negotiation Gap | `maxOffer − listPrice` (positive = OK to offer above list) | same |
+| Per-comp Gap (Prime qualification) | `(comp.arvTimeAdjusted − listPrice) / buildingSqft` — unchanged | — |
+
+`buildingSqft` uses `building_area_total_sqft` (with fallback to `above_grade_finished_area_sqft`). This is the rehab-scope view — "how much do we have available per square foot to underwrite."
+
+All three metrics are null when list price is null, except analysis-phase Gap/Spread (which are calculable from ARV and maxOffer alone).
+
+### What shipped
+
+- **Migration `20260415120000_rework_spread_and_add_negotiation_gap.sql`** — adds `screening_results.negotiation_gap` column and backfills existing rows: `spread = arv_aggregate − subject_list_price`, `negotiation_gap = max_offer − subject_list_price`. Rows missing any of those inputs stay null.
+
+- **Screening engine** (`lib/screening/deal-math.ts`, `types.ts`, `bulk-runner.ts`) — Spread formula flipped, `negotiationGap` added to `DealMathResult` and persisted on every new screening row.
+
+- **Analysis workstation** (`app/(workspace)/analysis/[analysisId]/analysis-workstation.tsx`, `components/workstation/deal-stat-strip.tsx`) — Gap/sqft now recomputes off `(adjustedARV − maxOffer)` so it reacts to every manual override. New "Neg Gap" pill added to the stat strip with signed green/red tone. Gap's cascade indicator now fires on any ARV-affecting override (not just manual ARV), since Gap depends on maxOffer.
+
+- **Workstation data loader** (`lib/analysis/load-workstation-data.ts`) — post-processes `calculateDealMath()` output to emit analysis-phase Spread and Gap, so snapshotted reports stay consistent with the live workstation.
+
+- **Partner portal** (`app/portal/deals/[shareToken]/partner-analysis-view.tsx`) — partner live-deal memo switched to analysis-phase formula, negotiationGap threaded into the DealStatStrip.
+
+- **Reports** (`components/reports/report-document.tsx`, `lib/reports/types.ts`) — summary cards now show **ARV / Max Offer / Gap/SqFt / Neg Gap**; waterfall row relabeled `Spread (ARV − Max Offer)` with a new `Negotiation Gap (Max Offer − List)` row underneath.
+
+- **Methodology report** (`reports/methodology-report.html` §8) — rewrote Goal, Core Formulas, Waterfall, and Strengths to describe the phased metric system and the signed Negotiation Gap. Waterfall example updated to a realistic flip ($780k ARV / $540k list / 2,750 sqft → $87/sqft screening Gap).
+
+### Side effect (bug fix)
+
+The batch and queue results tables already color-coded positive Spread as green — correct for the methodology's sign convention but silently backwards under the old inverted formula. Flipping Spread fixes the color semantics with no UI change required.
+
+### Not changed
+
+- Per-comp Gap in Prime Candidate qualification (`lib/screening/qualification-engine.ts`) already matched the methodology — left as-is.
+- Offer % (`maxOffer / listPrice`) — unchanged; still the primary negotiation-ratio view.
+
+---
+
 ## 2026-04-12 — Per-Comp Analyst Adjustments
 
 A new layer of analyst judgment in the ARV calculation. The system's auto-computed size and time adjustments are now complemented by manual per-comp adjustments that the analyst enters during deep analysis.

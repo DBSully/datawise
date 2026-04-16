@@ -606,8 +606,12 @@ export async function loadWorkstationData(
   const manualTargetProfit = manualAnalysis?.target_profit_manual ? toNum(manualAnalysis.target_profit_manual) : null;
   const effectiveTargetProfit = manualTargetProfit ?? profile.targetProfitDefault;
 
-  // Deal math
-  const dealMath = effectiveArv > 0 ? calculateDealMath({
+  // Deal math. calculateDealMath returns screening-phase spread/gap
+  // (ARV - listPrice). For analyst-facing surfaces we override with the
+  // analysis-phase formulas: Spread = ARV - maxOffer, Gap = Spread / sqft.
+  // negotiationGap (maxOffer - listPrice) is the raw dollar version of
+  // "how much above/below list our max is" and stays as calculated.
+  const screeningDealMath = effectiveArv > 0 ? calculateDealMath({
     arv: effectiveArv,
     listPrice: listPrice > 0 ? listPrice : null,
     buildingSqft,
@@ -617,6 +621,14 @@ export async function loadWorkstationData(
     financingTotal: finResult?.total ?? 0,
     targetProfit: effectiveTargetProfit,
   }) : null;
+
+  const dealMath = screeningDealMath ? {
+    ...screeningDealMath,
+    spread: Math.round(screeningDealMath.arv - screeningDealMath.maxOffer),
+    estGapPerSqft: buildingSqft > 0
+      ? Math.round((screeningDealMath.arv - screeningDealMath.maxOffer) / buildingSqft)
+      : null,
+  } : null;
 
   // Cash out of pocket
   const downPaymentRate = profile.financing.downPaymentRate;

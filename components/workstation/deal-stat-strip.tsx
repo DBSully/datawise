@@ -85,6 +85,8 @@ type DealStatStripProps = {
   /** Decimal — 0.85 means 85% */
   offerPct: number | null;
   gapPerSqft: number | null;
+  /** maxOffer - listPrice. Positive = OK to offer above list. Null when off-market. */
+  negotiationGap: number | null;
   rehabTotal: number | null;
   targetProfit: number | null;
   /** Decimal — 0.05 means 5%/yr. When null the Trend pill is hidden entirely. */
@@ -106,6 +108,7 @@ export function DealStatStrip({
   maxOffer,
   offerPct,
   gapPerSqft,
+  negotiationGap,
   rehabTotal,
   targetProfit,
   trendAnnualRate,
@@ -131,9 +134,11 @@ export function DealStatStrip({
   // Offer% derives from Max Offer (which derives from ARV/Rehab/Target)
   // — same cascade as Max Offer.
   const offerPctOverride = anyArvAffectingOverride ? "cascading" : "none";
-  // Gap/sqft = (ARV - listPrice) / sqft. Cascades only when ARV is
-  // overridden — Rehab and Target Profit don't affect Gap.
-  const gapOverride = arvManual ? "cascading" : "none";
+  // Gap/sqft = (ARV - maxOffer) / sqft during analysis — evolves with
+  // every cost input, so cascades from any ARV-affecting override.
+  const gapOverride = anyArvAffectingOverride ? "cascading" : "none";
+  // Negotiation Gap = maxOffer - listPrice. Same cascade as Max Offer.
+  const negotiationGapOverride = anyArvAffectingOverride ? "cascading" : "none";
   // Rehab pill renders the user's override directly (manual) or the
   // computed value (none).
   const rehabOverride = rehabManual ? "manual" : "none";
@@ -160,6 +165,18 @@ export function DealStatStrip({
         value={gapPerSqft != null ? `$${fmtNum(gapPerSqft)}` : "\u2014"}
         tone={gapPerSqftTone(gapPerSqft)}
         override={gapOverride}
+      />
+      <DealStat
+        label="Neg Gap"
+        value={negotiationGap != null ? fmt(negotiationGap) : "\u2014"}
+        tone={
+          negotiationGap == null
+            ? "default"
+            : negotiationGap >= 0
+              ? "good"
+              : "bad"
+        }
+        override={negotiationGapOverride}
       />
       <DealStat label="Rehab" value={fmt(rehabTotal)} override={rehabOverride} />
       <DealStat
