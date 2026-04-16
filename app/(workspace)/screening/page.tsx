@@ -64,59 +64,109 @@ export default async function ScreeningQueuePage({
 
   const supabase = await createClient();
 
-  // Need the current user's id to apply the "hide MY active analyses"
-  // filter at query time (previously computed in the view via auth.uid(),
-  // which blew past the statement timeout because Postgres couldn't push
-  // the predicate down past the lateral). Now the view just exposes
-  // active_analysis_owner_id and we filter here with a simple OR.
   const {
     data: { user },
   } = await supabase.auth.getUser();
   const currentUserId = user?.id ?? null;
 
-  // All queries run in one Promise.all — filter options + main queue
-  // execute in parallel (~3-4s total instead of ~6-7s sequential).
-  // count:exact is omitted (it forced Postgres to scan the
-  // ENTIRE view just to count rows, adding ~2-3s). The page shows
-  // "N results" based on the returned row count instead of a
-  // pre-computed total.
+  // --------------------------------------------------------------------
+  // Query decomposition — analysis_queue_v was doing DISTINCT ON over
+  // 8k+ screening_results AND firing 2 lateral joins per row, which pushed
+  // past the 8s statement timeout. We replace one heavy view hit with:
+  //   1. A slim view (screening_results_latest_v): DISTINCT ON only, no laterals.
+  //   2. Small pre-queries to convert mls_* and "hide my own" filters into
+  //      a property_id set we can pass via .in() / .not("in").
+  //   3. Batch follow-up queries against the visible 50 rows for mls_listings
+  //      info, active analyses, and owner names.
+  //
+  // Result: bounded cost per query, total load ~500-800ms instead of 8s+.
+  // --------------------------------------------------------------------
 
-  let query = supabase
-    .from("analysis_queue_v")
-    .select("*");
-
-  if (cityFilter !== "all") {
-    query = query.eq("subject_city", cityFilter);
-  }
-  if (typeFilter !== "all") {
-    query = query.eq("subject_property_type", typeFilter);
-  }
-  if (primeFilter === "true") {
-    query = query.eq("is_prime_candidate", true);
-  }
-  if (!showReviewed) {
-    // Hide properties that YOU already have an active analysis for (open your
-    // existing one instead). Properties where another analyst has an active
-    // analysis remain visible so you can see their work — attribution is
-    // surfaced on the row via a "Reviewed by [name]" badge.
-    query = query.is("review_action", null);
-    if (currentUserId) {
-      // owner_id IS NULL means nobody has an active analysis (show row).
-      // owner_id != currentUserId means another analyst owns it (show row).
-      // Only skip rows where owner_id == currentUserId (your own dupe).
-      query = query.or(
-        `active_analysis_owner_id.is.null,active_analysis_owner_id.neq.${currentUserId}`,
-      );
-    }
-  }
-  if (mlsStatusFilter !== "all") {
-    query = query.eq("mls_status", mlsStatusFilter);
-  }
-  if (listingDays && listingDays > 0) {
+  // Normalize listing-date cutoff (used by pre-query + potentially elsewhere)
+  const listingDaysCutoffIso = (() => {
+    if (!listingDays || listingDays <= 0) return null;
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - (listingDays - 1));
     cutoff.setHours(0, 0, 0, 0);
-    query = query.gte("listing_contract_date", cutoff.toISOString().slice(0, 10));
+    return cutoff.toISOString().slice(0, 10);
+  })();
+
+  // Pre-query A: property IDs matching mls_* filters. Only runs when at least
+  // one such filter is active; otherwise returns null meaning "no restriction."
+  async function loadMlsFilteredPropertyIds(): Promise<string[] | null> {
+    if (mlsStatusFilter === "all" && !listingDaysCutoffIso) return null;
+    let q = supabase.from("mls_listings").select("real_property_id");
+    if (mlsStatusFilter !== "all") q = q.eq("mls_status", mlsStatusFilter);
+    if (listingDaysCutoffIso) q = q.gte("listing_contract_date", listingDaysCutoffIso);
+    const { data, error } = await q.limit(10_000);
+    if (error) throw new Error(error.message);
+    return Array.from(
+      new Set(
+        (data ?? [])
+          .map((r) => (r as { real_property_id: string | null }).real_property_id)
+          .filter((v): v is string => v != null),
+      ),
+    );
+  }
+
+  // Pre-query B: the current analyst's active-analysis property IDs. We
+  // exclude these from the default queue (open your existing analysis
+  // instead). Properties where ANOTHER analyst has an active analysis
+  // remain visible — cross-analyst communication is the goal.
+  async function loadMyActiveAnalysisPropertyIds(): Promise<string[]> {
+    if (showReviewed || !currentUserId) return [];
+    const { data, error } = await supabase
+      .from("analyses")
+      .select("real_property_id, analysis_pipeline!inner(disposition, lifecycle_stage)")
+      .eq("created_by_user_id", currentUserId)
+      .eq("is_archived", false)
+      .in("analysis_pipeline.disposition", ["active", "closed"]);
+    if (error) throw new Error(error.message);
+    return Array.from(
+      new Set(
+        (data ?? [])
+          .map((r) => (r as { real_property_id: string }).real_property_id)
+          .filter((v): v is string => v != null),
+      ),
+    );
+  }
+
+  // Run filter options + both pre-queries in parallel
+  const [
+    { data: cityRows },
+    { data: typeRows },
+    { data: statusRows },
+    mlsFilteredPropertyIds,
+    myActiveAnalysisPropertyIds,
+  ] = await Promise.all([
+    supabase.from("property_city_options_v").select("city").order("city", { ascending: true }).range(0, 500),
+    supabase.from("property_type_options_v").select("property_type").order("property_type", { ascending: true }).range(0, 100),
+    supabase.from("mls_status_counts_v").select("mls_status").order("mls_status", { ascending: true }),
+    loadMlsFilteredPropertyIds(),
+    loadMyActiveAnalysisPropertyIds(),
+  ]);
+
+  const cities = (cityRows ?? []).map((r: { city: string }) => r.city).filter(Boolean);
+  const propertyTypes = (typeRows ?? []).map((r: { property_type: string }) => r.property_type).filter(Boolean);
+  const mlsStatuses = (statusRows ?? []).map((r: { mls_status: string }) => r.mls_status).filter(Boolean);
+
+  // Main query: slim view, all filters only touch screening_results columns.
+  let query = supabase.from("screening_results_latest_v").select("*");
+
+  if (cityFilter !== "all") query = query.eq("subject_city", cityFilter);
+  if (typeFilter !== "all") query = query.eq("subject_property_type", typeFilter);
+  if (primeFilter === "true") query = query.eq("is_prime_candidate", true);
+  if (!showReviewed) query = query.is("review_action", null);
+  if (mlsFilteredPropertyIds !== null) {
+    // No rows match mls filters → short-circuit to an empty query.
+    if (mlsFilteredPropertyIds.length === 0) {
+      query = query.in("real_property_id", ["00000000-0000-0000-0000-000000000000"]);
+    } else {
+      query = query.in("real_property_id", mlsFilteredPropertyIds);
+    }
+  }
+  if (myActiveAnalysisPropertyIds.length > 0) {
+    query = query.not("real_property_id", "in", `(${myActiveAnalysisPropertyIds.join(",")})`);
   }
   if (screenedDays && screenedDays > 0) {
     const cutoff = new Date();
@@ -124,98 +174,118 @@ export default async function ScreeningQueuePage({
     cutoff.setHours(0, 0, 0, 0);
     query = query.gte("screening_updated_at", cutoff.toISOString());
   }
-  if (priceLow && priceLow > 0) {
-    query = query.gte("subject_list_price", priceLow);
-  }
-  if (priceHigh && priceHigh > 0) {
-    query = query.lte("subject_list_price", priceHigh);
-  }
+  if (priceLow && priceLow > 0) query = query.gte("subject_list_price", priceLow);
+  if (priceHigh && priceHigh > 0) query = query.lte("subject_list_price", priceHigh);
 
-  // Sorting
   switch (sort) {
-    case "gap_desc":
-      query = query.order("est_gap_per_sqft", { ascending: false, nullsFirst: false });
-      break;
-    case "offer_pct_desc":
-      query = query.order("offer_pct", { ascending: false, nullsFirst: false });
-      break;
-    case "spread_desc":
-      query = query.order("spread", { ascending: false, nullsFirst: false });
-      break;
-    case "arv_desc":
-      query = query.order("arv_aggregate", { ascending: false, nullsFirst: false });
-      break;
-    case "offer_desc":
-      query = query.order("max_offer", { ascending: false, nullsFirst: false });
-      break;
-    case "rehab_asc":
-      query = query.order("rehab_total", { ascending: true, nullsFirst: false });
-      break;
-    case "price_asc":
-      query = query.order("subject_list_price", { ascending: true, nullsFirst: false });
-      break;
-    default:
-      query = query.order("est_gap_per_sqft", { ascending: false, nullsFirst: false });
+    case "gap_desc":         query = query.order("est_gap_per_sqft",   { ascending: false, nullsFirst: false }); break;
+    case "offer_pct_desc":   query = query.order("offer_pct",          { ascending: false, nullsFirst: false }); break;
+    case "spread_desc":      query = query.order("spread",             { ascending: false, nullsFirst: false }); break;
+    case "arv_desc":         query = query.order("arv_aggregate",      { ascending: false, nullsFirst: false }); break;
+    case "offer_desc":       query = query.order("max_offer",          { ascending: false, nullsFirst: false }); break;
+    case "rehab_asc":        query = query.order("rehab_total",        { ascending: true,  nullsFirst: false }); break;
+    case "price_asc":        query = query.order("subject_list_price", { ascending: true,  nullsFirst: false }); break;
+    default:                 query = query.order("est_gap_per_sqft",   { ascending: false, nullsFirst: false });
   }
 
   query = query.range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
 
-  // Execute ALL queries in parallel — filter options + main queue
-  const [
-    { data: cityRows },
-    { data: typeRows },
-    { data: statusRows },
-    { data: results, error },
-  ] = await Promise.all([
-    supabase
-      .from("property_city_options_v")
-      .select("city")
-      .order("city", { ascending: true })
-      .range(0, 500),
-    supabase
-      .from("property_type_options_v")
-      .select("property_type")
-      .order("property_type", { ascending: true })
-      .range(0, 100),
-    supabase
-      .from("mls_status_counts_v")
-      .select("mls_status")
-      .order("mls_status", { ascending: true }),
-    query,
-  ]);
-  const cities = (cityRows ?? [])
-    .map((r: { city: string }) => r.city)
-    .filter(Boolean);
-  const propertyTypes = (typeRows ?? [])
-    .map((r: { property_type: string }) => r.property_type)
-    .filter(Boolean);
-  const mlsStatuses = (statusRows ?? [])
-    .map((r: { mls_status: string }) => r.mls_status)
-    .filter(Boolean);
+  const { data: results, error } = await query;
 
   if (error) throw new Error(error.message);
 
-  // Resolve owner names for the visible rows via a single small follow-up
-  // query. The queue view no longer joins profiles (doing that per-row via
-  // lateral + RLS pushed the query past the 8s statement timeout). Here we
-  // look up just the distinct owner_ids on this page — typically <= 50.
-  const ownerIds = Array.from(
-    new Set(
-      (results ?? [])
-        .map((r) => (r as { active_analysis_owner_id: string | null }).active_analysis_owner_id)
-        .filter((v): v is string => v != null && v !== currentUserId),
-    ),
+  // ------------------------------------------------------------------
+  // Follow-up batch queries scoped to the visible rows
+  // ------------------------------------------------------------------
+
+  const visiblePropertyIds = Array.from(
+    new Set((results ?? []).map((r) => (r as { real_property_id: string }).real_property_id)),
   );
 
+  type MlsInfo = {
+    mls_status: string | null;
+    mls_major_change_type: string | null;
+    listing_contract_date: string | null;
+  };
+  type ActiveAnalysis = {
+    analysis_id: string;
+    owner_id: string;
+    lifecycle_stage: string | null;
+    interest_level: string | null;
+    analysis_created_at: string;
+  };
+
+  const mlsByPropertyId = new Map<string, MlsInfo>();
+  const activeAnalysisByPropertyId = new Map<string, ActiveAnalysis>();
   const ownerNameById = new Map<string, string>();
-  if (ownerIds.length > 0) {
-    const { data: profiles } = await supabase
-      .from("profiles")
-      .select("id, full_name, email")
-      .in("id", ownerIds);
-    for (const p of profiles ?? []) {
-      const row = p as { id: string; full_name: string | null; email: string };
-      ownerNameById.set(row.id, row.full_name || row.email);
+
+  if (visiblePropertyIds.length > 0) {
+    // Latest MLS listing per visible property — fetch a superset (all
+    // listings for these properties) and keep the latest per property in JS.
+    const [{ data: mlsRows }, { data: analysisRows }] = await Promise.all([
+      supabase
+        .from("mls_listings")
+        .select("real_property_id, mls_status, mls_major_change_type, listing_contract_date, created_at")
+        .in("real_property_id", visiblePropertyIds)
+        .order("listing_contract_date", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("analyses")
+        .select("id, real_property_id, created_by_user_id, created_at, analysis_pipeline!inner(disposition, lifecycle_stage, interest_level)")
+        .in("real_property_id", visiblePropertyIds)
+        .in("analysis_pipeline.disposition", ["active", "closed"])
+        .order("created_at", { ascending: false }),
+    ]);
+
+    // Dedupe to latest-per-property (rows already ordered desc)
+    for (const row of mlsRows ?? []) {
+      const r = row as { real_property_id: string } & MlsInfo;
+      if (!mlsByPropertyId.has(r.real_property_id)) {
+        mlsByPropertyId.set(r.real_property_id, {
+          mls_status: r.mls_status,
+          mls_major_change_type: r.mls_major_change_type,
+          listing_contract_date: r.listing_contract_date,
+        });
+      }
+    }
+
+    for (const row of analysisRows ?? []) {
+      const r = row as {
+        id: string;
+        real_property_id: string;
+        created_by_user_id: string;
+        created_at: string;
+        analysis_pipeline: { lifecycle_stage: string; interest_level: string | null } | { lifecycle_stage: string; interest_level: string | null }[];
+      };
+      if (!activeAnalysisByPropertyId.has(r.real_property_id)) {
+        const ap = Array.isArray(r.analysis_pipeline) ? r.analysis_pipeline[0] : r.analysis_pipeline;
+        activeAnalysisByPropertyId.set(r.real_property_id, {
+          analysis_id: r.id,
+          owner_id: r.created_by_user_id,
+          lifecycle_stage: ap?.lifecycle_stage ?? null,
+          interest_level: ap?.interest_level ?? null,
+          analysis_created_at: r.created_at,
+        });
+      }
+    }
+
+    // Owner name resolution — profiles lookup for distinct non-self owners
+    const ownerIds = Array.from(
+      new Set(
+        Array.from(activeAnalysisByPropertyId.values())
+          .map((a) => a.owner_id)
+          .filter((v) => v !== currentUserId),
+      ),
+    );
+    if (ownerIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, full_name, email")
+        .in("id", ownerIds);
+      for (const p of profiles ?? []) {
+        const row = p as { id: string; full_name: string | null; email: string };
+        ownerNameById.set(row.id, row.full_name || row.email);
+      }
     }
   }
 
@@ -241,19 +311,29 @@ export default async function ScreeningQueuePage({
     { value: "price_asc", label: "Price (low)" },
   ];
 
-  // Shape rows for client component
-  const tableRows = (results ?? []).map((r: Record<string, unknown>) => ({
+  // Shape rows for client component. mls_* fields and active-analysis
+  // fields come from the batched follow-up queries above (Maps keyed by
+  // real_property_id), not from the slim view itself.
+  const tableRows = (results ?? []).map((r: Record<string, unknown>) => {
+    const propertyId = r.real_property_id as string;
+    const mls = mlsByPropertyId.get(propertyId);
+    const active = activeAnalysisByPropertyId.get(propertyId);
+    const isMine =
+      currentUserId != null && active != null
+        ? active.owner_id === currentUserId
+        : null;
+    return {
     id: r.id as string,
-    real_property_id: r.real_property_id as string,
+    real_property_id: propertyId,
     screening_batch_id: r.screening_batch_id as string,
     is_prime_candidate: r.is_prime_candidate as boolean,
     subject_address: r.subject_address as string,
     subject_city: r.subject_city as string,
     subject_property_type: r.subject_property_type as string | null,
     subject_list_price: r.subject_list_price as number | null,
-    mls_status: r.mls_status as string | null,
-    mls_major_change_type: r.mls_major_change_type as string | null,
-    listing_contract_date: r.listing_contract_date as string | null,
+    mls_status: mls?.mls_status ?? null,
+    mls_major_change_type: mls?.mls_major_change_type ?? null,
+    listing_contract_date: mls?.listing_contract_date ?? null,
     arv_aggregate: r.arv_aggregate as number | null,
     trend_annual_rate: r.trend_annual_rate as number | null,
     trend_confidence: r.trend_confidence as string | null,
@@ -268,24 +348,21 @@ export default async function ScreeningQueuePage({
     promoted_analysis_id: r.promoted_analysis_id as string | null,
     comp_search_run_id: r.comp_search_run_id as string | null,
     review_action: r.review_action as string | null,
-    // Interim queue fix columns from the recreated analysis_queue_v.
-    // active_analysis_is_mine is derived client-side from owner_id; the
-    // view used to compute it via auth.uid() but that prevented predicate
-    // pushdown and caused statement timeouts on the queue page.
-    has_active_analysis: r.has_active_analysis as boolean | null,
-    active_analysis_id: r.active_analysis_id as string | null,
-    active_lifecycle_stage: r.active_lifecycle_stage as string | null,
-    active_interest_level: r.active_interest_level as string | null,
-    active_analysis_is_mine:
-      currentUserId != null && r.active_analysis_owner_id != null
-        ? r.active_analysis_owner_id === currentUserId
-        : null,
+    has_active_analysis: active != null,
+    active_analysis_id: active?.analysis_id ?? null,
+    active_lifecycle_stage: active?.lifecycle_stage ?? null,
+    active_interest_level: active?.interest_level ?? null,
+    active_analysis_is_mine: isMine,
     active_analysis_owner_name:
-      r.active_analysis_owner_id != null
-        ? ownerNameById.get(r.active_analysis_owner_id as string) ?? null
+      active != null
+        ? ownerNameById.get(active.owner_id) ?? null
         : null,
-    has_newer_screening_than_analysis: r.has_newer_screening_than_analysis as boolean | null,
-  }));
+    has_newer_screening_than_analysis:
+      active != null
+        ? new Date(r.created_at as string) > new Date(active.analysis_created_at)
+        : false,
+    };
+  });
 
   return (
     <section className="dw-section-stack-compact">
