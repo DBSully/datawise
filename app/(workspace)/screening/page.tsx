@@ -195,6 +195,30 @@ export default async function ScreeningQueuePage({
 
   if (error) throw new Error(error.message);
 
+  // Resolve owner names for the visible rows via a single small follow-up
+  // query. The queue view no longer joins profiles (doing that per-row via
+  // lateral + RLS pushed the query past the 8s statement timeout). Here we
+  // look up just the distinct owner_ids on this page — typically <= 50.
+  const ownerIds = Array.from(
+    new Set(
+      (results ?? [])
+        .map((r) => (r as { active_analysis_owner_id: string | null }).active_analysis_owner_id)
+        .filter((v): v is string => v != null && v !== currentUserId),
+    ),
+  );
+
+  const ownerNameById = new Map<string, string>();
+  if (ownerIds.length > 0) {
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, full_name, email")
+      .in("id", ownerIds);
+    for (const p of profiles ?? []) {
+      const row = p as { id: string; full_name: string | null; email: string };
+      ownerNameById.set(row.id, row.full_name || row.email);
+    }
+  }
+
   const totalCount = results?.length ?? 0;
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
@@ -256,7 +280,10 @@ export default async function ScreeningQueuePage({
       currentUserId != null && r.active_analysis_owner_id != null
         ? r.active_analysis_owner_id === currentUserId
         : null,
-    active_analysis_owner_name: r.active_analysis_owner_name as string | null,
+    active_analysis_owner_name:
+      r.active_analysis_owner_id != null
+        ? ownerNameById.get(r.active_analysis_owner_id as string) ?? null
+        : null,
     has_newer_screening_than_analysis: r.has_newer_screening_than_analysis as boolean | null,
   }));
 
