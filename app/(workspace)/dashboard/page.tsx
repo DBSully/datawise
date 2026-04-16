@@ -173,8 +173,40 @@ export default async function DashboardPage() {
   const { data: watchListRows } = await supabase
     .from("watch_list_v")
     .select(
-      "analysis_id, unparsed_address, city, interest_level, showing_status, watch_list_note, pipeline_updated_at, arv_aggregate, max_offer, est_gap_per_sqft, unread_event_count, latest_unread_event_type, latest_unread_event_before, latest_unread_event_after, latest_unread_event_at",
+      "analysis_id, real_property_id, unparsed_address, city, interest_level, showing_status, watch_list_note, pipeline_updated_at, arv_aggregate, max_offer, est_gap_per_sqft, events_last_seen_at, unread_event_count, latest_unread_event_type, latest_unread_event_before, latest_unread_event_after, latest_unread_event_at",
     );
+
+  // Persistent "Change history" feed — all events across watchlist
+  // properties from the last 30 days, regardless of read state. Kept
+  // separate from the unread panel above so analysts can review past
+  // activity even after clearing alerts.
+  const historyCutoff = new Date();
+  historyCutoff.setDate(historyCutoff.getDate() - 30);
+  const watchlistPropertyIds = Array.from(
+    new Set(
+      (watchListRows ?? [])
+        .map((r) => (r as { real_property_id: string }).real_property_id)
+        .filter(Boolean),
+    ),
+  );
+  let historyEventRows: Array<{
+    id: string;
+    real_property_id: string;
+    event_type: string;
+    before_value: unknown;
+    after_value: unknown;
+    detected_at: string;
+  }> = [];
+  if (watchlistPropertyIds.length > 0) {
+    const { data } = await supabase
+      .from("property_events")
+      .select("id, real_property_id, event_type, before_value, after_value, detected_at")
+      .in("real_property_id", watchlistPropertyIds)
+      .gte("detected_at", historyCutoff.toISOString())
+      .order("detected_at", { ascending: false })
+      .limit(50);
+    historyEventRows = (data ?? []) as typeof historyEventRows;
+  }
 
   type WatchAttentionRow = {
     analysis_id: string;
@@ -250,6 +282,62 @@ export default async function DashboardPage() {
     const bt = b.latest_unread_event_at ?? "";
     return bt.localeCompare(at);
   });
+
+  // Lookup from real_property_id to display info + analyst's read marker.
+  // Built from watchListRows so we don't need a second join in the events
+  // query.
+  type PropertyInfo = {
+    analysis_id: string;
+    unparsed_address: string;
+    city: string;
+    events_last_seen_at: string | null;
+  };
+  const propertyInfoById = new Map<string, PropertyInfo>();
+  for (const r of watchListRows ?? []) {
+    const row = r as Record<string, unknown>;
+    const propertyId = row.real_property_id as string | undefined;
+    if (!propertyId) continue;
+    propertyInfoById.set(propertyId, {
+      analysis_id: row.analysis_id as string,
+      unparsed_address: row.unparsed_address as string,
+      city: row.city as string,
+      events_last_seen_at: (row.events_last_seen_at as string | null) ?? null,
+    });
+  }
+
+  // Enrich history events with property info + read state (detected_at vs
+  // events_last_seen_at). Events whose property is no longer on the
+  // watchlist are dropped (rare — property could be archived).
+  type HistoryEvent = {
+    id: string;
+    analysis_id: string;
+    unparsed_address: string;
+    city: string;
+    event_type: string;
+    before_value: unknown;
+    after_value: unknown;
+    detected_at: string;
+    wasUnread: boolean;
+  };
+  const historyEvents: HistoryEvent[] = [];
+  for (const ev of historyEventRows) {
+    const info = propertyInfoById.get(ev.real_property_id);
+    if (!info) continue;
+    const lastSeen = info.events_last_seen_at;
+    historyEvents.push({
+      id: ev.id,
+      analysis_id: info.analysis_id,
+      unparsed_address: info.unparsed_address,
+      city: info.city,
+      event_type: ev.event_type,
+      before_value: ev.before_value,
+      after_value: ev.after_value,
+      detected_at: ev.detected_at,
+      wasUnread: lastSeen
+        ? new Date(ev.detected_at) > new Date(lastSeen)
+        : true,
+    });
+  }
 
   // --- Section 4: Pipeline — Action Required ---
 
@@ -465,6 +553,82 @@ export default async function DashboardPage() {
                     </td>
                     <td className="text-right text-[11px] text-slate-500">
                       <LocalTimestamp value={r.latest_unread_event_at} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Change history — last 30 days of activity on watchlist properties.
+       *  Persists regardless of read state so the analyst can review past
+       *  activity even after the unread panel above clears. */}
+      <div className="dw-card-tight space-y-2">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-slate-800">
+            Change history
+            <span className="ml-2 text-[10px] font-normal text-slate-400">
+              last 30 days
+            </span>
+          </h2>
+        </div>
+
+        {historyEvents.length === 0 ? (
+          <p className="py-4 text-center text-sm text-slate-400">
+            No activity on your watchlist in the last 30 days.
+          </p>
+        ) : (
+          <div className="dw-table-wrap">
+            <table className="dw-table-compact">
+              <thead>
+                <tr>
+                  <th style={{ width: 14 }}></th>
+                  <th>Address</th>
+                  <th>City</th>
+                  <th>Change</th>
+                  <th className="text-right">When</th>
+                </tr>
+              </thead>
+              <tbody>
+                {historyEvents.slice(0, 25).map((ev) => (
+                  <tr key={ev.id}>
+                    <td>
+                      {ev.wasUnread && (
+                        <span
+                          className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500"
+                          aria-label="unread"
+                          title="Unread"
+                        />
+                      )}
+                    </td>
+                    <td className="font-medium">
+                      <Link
+                        href={`/analysis/${ev.analysis_id}`}
+                        className="text-blue-700 hover:underline"
+                      >
+                        {ev.unparsed_address}
+                      </Link>
+                    </td>
+                    <td className="text-slate-500">{ev.city}</td>
+                    <td>
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                          ev.wasUnread
+                            ? "bg-amber-100 text-amber-800"
+                            : "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {summarizeDashboardEvent(
+                          ev.event_type,
+                          ev.before_value,
+                          ev.after_value,
+                        )}
+                      </span>
+                    </td>
+                    <td className="text-right text-[11px] text-slate-500">
+                      <LocalTimestamp value={ev.detected_at} />
                     </td>
                   </tr>
                 ))}
