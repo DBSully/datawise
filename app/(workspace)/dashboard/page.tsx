@@ -166,10 +166,13 @@ export default async function DashboardPage() {
   tomorrow.setDate(tomorrow.getDate() + 1);
   tomorrow.setUTCHours(23, 59, 59, 999);
 
+  // Note: days_on_watch_list was in this select previously but does not
+  // exist on watch_list_v — the whole query silently errored and this
+  // card + the Needs Attention card both rendered as empty. Kept removed.
   const { data: watchListRows } = await supabase
     .from("watch_list_v")
     .select(
-      "analysis_id, unparsed_address, city, interest_level, showing_status, watch_list_note, days_on_watch_list, pipeline_updated_at, arv_aggregate, max_offer, est_gap_per_sqft, unread_event_count, latest_unread_event_type, latest_unread_event_before, latest_unread_event_after, latest_unread_event_at",
+      "analysis_id, unparsed_address, city, interest_level, showing_status, watch_list_note, pipeline_updated_at, arv_aggregate, max_offer, est_gap_per_sqft, unread_event_count, latest_unread_event_type, latest_unread_event_before, latest_unread_event_after, latest_unread_event_at",
     );
 
   type WatchAttentionRow = {
