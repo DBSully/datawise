@@ -1,3 +1,13 @@
+## 2026-04-15 — Report Snapshot Backfill + Regenerate Button
+
+Existing `analysis_reports` rows were snapshotted before the Spread/Gap rework earlier today, so their `content_json.dealMath` block still carried the old inverted Spread and the pre-analysis Gap formula. Two fixes:
+
+1. **One-off backfill** (`20260415130000_backfill_report_snapshots.sql`) — `jsonb_set` patches every existing snapshot in place, recomputing Spread, Gap/sqft, and the new Negotiation Gap from sibling values already inside the JSON (`dealMath.arv`, `dealMath.maxOffer`, `dealMath.listPrice`, `physical.buildingSqft`). No analyst action needed — 2140 S. Corona Street and every other historical report now reflect the new math on next load.
+
+2. **Regenerate action on the report viewer** — new `regenerateReportAction` in `app/(workspace)/reports/actions.ts` loads fresh analysis data via `loadWorkstationData`, rebuilds the snapshot with `buildReportSnapshot`, and `UPDATE`s `content_json` on the existing report row (same ID, same shares preserved). Surfaced as a "Regenerate" button on the report viewer action bar, with a confirmation prompt and a pending/error state. Protects against future drift: when any deal-math formula changes, analysts can refresh individual reports without a migration.
+
+---
+
 ## 2026-04-15 — Spread / Gap Rework + Negotiation Gap
 
 Fixed a long-standing inversion in Spread and gave Gap a phased definition so it evolves with the analysis. Added Negotiation Gap as a distinct metric for the "can we offer at or above list?" question.

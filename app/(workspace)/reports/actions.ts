@@ -55,6 +55,54 @@ export async function generateReportAction(formData: FormData) {
   redirect(`/reports/${report.id}`);
 }
 
+export async function regenerateReportAction(formData: FormData) {
+  const reportId = formData.get("report_id") as string;
+  if (!reportId) throw new Error("Missing report_id");
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  // Fetch the existing report to get analysis_id and confirm ownership.
+  const { data: report, error: fetchError } = await supabase
+    .from("analysis_reports")
+    .select("id, analysis_id, created_by_user_id, analyses!inner(real_property_id)")
+    .eq("id", reportId)
+    .eq("created_by_user_id", user.id)
+    .maybeSingle();
+
+  if (fetchError) throw new Error(fetchError.message);
+  if (!report) throw new Error("Report not found or access denied");
+
+  // analyses!inner returns an object; guard against Supabase's array typing
+  const analyses = report.analyses as unknown as { real_property_id: string } | { real_property_id: string }[];
+  const realPropertyId = Array.isArray(analyses) ? analyses[0]?.real_property_id : analyses?.real_property_id;
+  if (!realPropertyId) throw new Error("Analysis property not found");
+
+  const workstationData = await loadWorkstationData(
+    supabase,
+    user.id,
+    realPropertyId,
+    report.analysis_id,
+  );
+  if (!workstationData) throw new Error("Analysis data could not be loaded");
+
+  const contentJson = buildReportSnapshot(workstationData);
+
+  const { error: updateError } = await supabase
+    .from("analysis_reports")
+    .update({ content_json: contentJson })
+    .eq("id", reportId)
+    .eq("created_by_user_id", user.id);
+
+  if (updateError) throw new Error(updateError.message);
+
+  revalidatePath(`/reports/${reportId}`);
+  revalidatePath("/reports");
+}
+
 export async function deleteReportAction(formData: FormData) {
   const reportId = formData.get("report_id") as string;
   if (!reportId) throw new Error("Missing report_id");

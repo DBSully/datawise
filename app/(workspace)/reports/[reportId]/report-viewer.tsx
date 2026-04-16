@@ -1,13 +1,16 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, useTransition } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { ReportContentJson } from "@/lib/reports/types";
 import type { MapPin } from "@/components/properties/comp-map";
 import { ReportDocument } from "@/components/reports/report-document";
-import { deleteReportAction } from "@/app/(workspace)/reports/actions";
+import {
+  deleteReportAction,
+  regenerateReportAction,
+} from "@/app/(workspace)/reports/actions";
 
 const CompMap = dynamic(
   () => import("@/components/properties/comp-map").then((m) => m.CompMap),
@@ -31,6 +34,8 @@ type Props = {
 export function ReportViewer({ reportId, title, content, createdAt }: Props) {
   const router = useRouter();
   const r = content;
+  const [regenPending, startRegen] = useTransition();
+  const [regenError, setRegenError] = useState<string | null>(null);
 
   function handlePrint() {
     window.print();
@@ -41,6 +46,26 @@ export function ReportViewer({ reportId, title, content, createdAt }: Props) {
     const fd = new FormData();
     fd.set("report_id", reportId);
     await deleteReportAction(fd);
+  }
+
+  function handleRegenerate() {
+    if (
+      !confirm(
+        "Regenerate this report from the current analysis? Snapshot numbers will be replaced with today's live values.",
+      )
+    )
+      return;
+    setRegenError(null);
+    startRegen(async () => {
+      try {
+        const fd = new FormData();
+        fd.set("report_id", reportId);
+        await regenerateReportAction(fd);
+        router.refresh();
+      } catch (err) {
+        setRegenError(err instanceof Error ? err.message : "Regenerate failed");
+      }
+    });
   }
 
   // Build map pins from snapshot data
@@ -128,6 +153,19 @@ export function ReportViewer({ reportId, title, content, createdAt }: Props) {
           <span className="text-sm font-semibold text-slate-800">{title}</span>
         </div>
         <div className="flex items-center gap-2">
+          {regenError && (
+            <span className="text-xs text-red-600" title={regenError}>
+              {regenError}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={handleRegenerate}
+            disabled={regenPending}
+            className="rounded-md border border-indigo-200 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+          >
+            {regenPending ? "Regenerating…" : "Regenerate"}
+          </button>
           <button
             type="button"
             onClick={handlePrint}
