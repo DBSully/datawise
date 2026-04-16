@@ -65,6 +65,10 @@ function summarizeDashboardEvent(
 export default async function DashboardPage() {
   noStore();
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const currentUserId = user?.id ?? null;
 
   // --- Section 1 + 2: Today at a Glance + Unreviewed Prime Candidates ---
   //
@@ -378,28 +382,115 @@ export default async function DashboardPage() {
     }
   }
 
-  // --- Section 5: Daily Activity Log ---
+  // --- Section 5: Your recent activity ---
+  //
+  // Replaces the old daily_activity_v feed (which mixed system-generated
+  // screening batch rows with analyst actions — the batch rows were noise
+  // because they all shared the batch's timestamp and don't represent
+  // anything the analyst actually did). The new feed is strictly the
+  // current analyst's own actions over the last 24 hours:
+  //   - Promoted a screening result to an analysis
+  //   - Passed on a screening result
+  //   - Edited an analysis (manual_analysis.updated_at > created_at)
 
-  const { data: activityRows } = await supabase
-    .from("daily_activity_v")
-    .select("activity_type, real_property_id, analysis_id, address, city, is_prime_candidate, strategy_type, screening_decision, activity_at")
-    .gte("activity_at", todayIso)
-    .order("activity_at", { ascending: false })
-    .limit(30);
+  const recentCutoff = new Date();
+  recentCutoff.setDate(recentCutoff.getDate() - 1);
+  const recentCutoffIso = recentCutoff.toISOString();
 
-  type ActivityRow = {
-    activity_type: string;
-    real_property_id: string;
+  type MyActivity = {
+    kind: "promoted" | "passed" | "edited";
+    timestamp: string;
     analysis_id: string | null;
+    real_property_id: string;
     address: string;
     city: string | null;
-    is_prime_candidate: boolean | null;
-    strategy_type: string | null;
-    screening_decision: string | null;
-    activity_at: string;
+    extra?: string | null;
   };
 
-  const activityList = (activityRows ?? []) as ActivityRow[];
+  const myActivity: MyActivity[] = [];
+
+  if (currentUserId) {
+    const [{ data: reviewed }, { data: edited }] = await Promise.all([
+      // Promoted / passed — attributed directly via reviewed_by_user_id
+      supabase
+        .from("screening_results")
+        .select(
+          "real_property_id, promoted_analysis_id, review_action, reviewed_at, pass_reason, subject_address, subject_city",
+        )
+        .eq("reviewed_by_user_id", currentUserId)
+        .gte("reviewed_at", recentCutoffIso)
+        .order("reviewed_at", { ascending: false })
+        .limit(40),
+
+      // Workspace edits — manual_analysis is per-analysis; join back to
+      // analyses via !inner so we can scope to the current analyst's
+      // analyses and pull address/city.
+      supabase
+        .from("manual_analysis")
+        .select(
+          "analysis_id, updated_at, created_at, analyses!inner(id, real_property_id, created_by_user_id, real_properties!inner(unparsed_address, city))",
+        )
+        .eq("analyses.created_by_user_id", currentUserId)
+        .gte("updated_at", recentCutoffIso)
+        .order("updated_at", { ascending: false })
+        .limit(40),
+    ]);
+
+    for (const row of reviewed ?? []) {
+      const r = row as {
+        real_property_id: string;
+        promoted_analysis_id: string | null;
+        review_action: string | null;
+        reviewed_at: string;
+        pass_reason: string | null;
+        subject_address: string;
+        subject_city: string | null;
+      };
+      if (r.review_action !== "promoted" && r.review_action !== "passed") continue;
+      myActivity.push({
+        kind: r.review_action as "promoted" | "passed",
+        timestamp: r.reviewed_at,
+        analysis_id: r.promoted_analysis_id,
+        real_property_id: r.real_property_id,
+        address: r.subject_address,
+        city: r.subject_city,
+        extra: r.review_action === "passed" ? r.pass_reason : null,
+      });
+    }
+
+    for (const row of edited ?? []) {
+      const r = row as {
+        analysis_id: string;
+        updated_at: string;
+        created_at: string;
+        analyses: {
+          id: string;
+          real_property_id: string;
+          real_properties: { unparsed_address: string; city: string | null }
+            | { unparsed_address: string; city: string | null }[];
+        } | { id: string; real_property_id: string; real_properties: unknown }[];
+      };
+      // Skip no-op rows (manual_analysis created alongside the analysis
+      // but never edited by the analyst)
+      if (r.updated_at <= r.created_at) continue;
+      const analyses = Array.isArray(r.analyses) ? r.analyses[0] : r.analyses;
+      if (!analyses) continue;
+      const rp = Array.isArray(analyses.real_properties)
+        ? analyses.real_properties[0]
+        : analyses.real_properties;
+      if (!rp) continue;
+      myActivity.push({
+        kind: "edited",
+        timestamp: r.updated_at,
+        analysis_id: r.analysis_id,
+        real_property_id: analyses.real_property_id,
+        address: (rp as { unparsed_address: string }).unparsed_address,
+        city: (rp as { city: string | null }).city,
+      });
+    }
+
+    myActivity.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  }
 
   return (
     <section className="dw-section-stack-compact">
@@ -766,51 +857,62 @@ export default async function DashboardPage() {
         )}
       </div>
 
-      {/* Section 5: Daily Activity Log */}
+      {/* Section 5: Your recent activity (last 24 hours of YOUR actions) */}
       <div className="dw-card-tight space-y-2">
         <h2 className="text-sm font-semibold text-slate-800">
-          Today&apos;s Activity
+          Your recent activity
+          <span className="ml-2 text-[10px] font-normal text-slate-400">
+            last 24 hours
+          </span>
         </h2>
 
-        {activityList.length === 0 ? (
+        {myActivity.length === 0 ? (
           <p className="py-4 text-center text-sm text-slate-400">
-            No activity recorded today.
+            No activity in the last 24 hours.
           </p>
         ) : (
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-slate-200 text-[10px] uppercase tracking-wider text-slate-500">
                 <th className="px-2 py-1 text-left">Time</th>
-                <th className="px-2 py-1 text-left">Type</th>
+                <th className="px-2 py-1 text-left">Action</th>
                 <th className="px-2 py-1 text-left">Address</th>
                 <th className="px-2 py-1 text-left">City</th>
                 <th className="px-2 py-1 text-left">Details</th>
               </tr>
             </thead>
             <tbody>
-              {activityList.map((a, i) => (
-                <tr key={`${a.activity_type}-${a.real_property_id}-${i}`} className="border-t border-slate-100 hover:bg-slate-50">
+              {myActivity.slice(0, 30).map((a, i) => (
+                <tr
+                  key={`${a.kind}-${a.real_property_id}-${i}`}
+                  className="border-t border-slate-100 hover:bg-slate-50"
+                >
                   <td className="whitespace-nowrap px-2 py-1 text-slate-500">
-                    <LocalTimestamp value={a.activity_at} format="time" />
+                    <LocalTimestamp value={a.timestamp} format="time" />
                   </td>
                   <td className="px-2 py-1">
-                    <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
-                      a.activity_type === "screening"
-                        ? a.screening_decision === "promoted" ? "bg-emerald-100 text-emerald-700"
-                          : a.screening_decision === "passed" ? "bg-red-100 text-red-700"
-                          : "bg-violet-100 text-violet-700"
-                        : "bg-blue-100 text-blue-700"
-                    }`}>
-                      {a.activity_type === "screening"
-                        ? a.screening_decision === "promoted" ? "Promoted"
-                          : a.screening_decision === "passed" ? "Passed"
-                          : "Screened"
-                        : "Analysis"}
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${
+                        a.kind === "promoted"
+                          ? "bg-emerald-100 text-emerald-700"
+                          : a.kind === "passed"
+                            ? "bg-red-100 text-red-700"
+                            : "bg-blue-100 text-blue-700"
+                      }`}
+                    >
+                      {a.kind === "promoted"
+                        ? "Promoted"
+                        : a.kind === "passed"
+                          ? "Passed"
+                          : "Edited"}
                     </span>
                   </td>
                   <td className="px-2 py-1 font-medium text-slate-800">
                     {a.analysis_id ? (
-                      <Link href={`/analysis/${a.analysis_id}`} className="hover:underline">
+                      <Link
+                        href={`/analysis/${a.analysis_id}`}
+                        className="hover:underline"
+                      >
                         {a.address}
                       </Link>
                     ) : (
@@ -818,13 +920,8 @@ export default async function DashboardPage() {
                     )}
                   </td>
                   <td className="px-2 py-1 text-slate-600">{a.city ?? "—"}</td>
-                  <td className="px-2 py-1 text-slate-500">
-                    {a.activity_type === "screening" && a.is_prime_candidate && (
-                      <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">Prime</span>
-                    )}
-                    {a.activity_type === "analysis_complete" && a.strategy_type && (
-                      <span className="text-slate-600">{a.strategy_type}</span>
-                    )}
+                  <td className="max-w-[220px] truncate px-2 py-1 text-slate-500">
+                    {a.extra ?? ""}
                   </td>
                 </tr>
               ))}
