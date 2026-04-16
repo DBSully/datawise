@@ -64,6 +64,16 @@ export default async function ScreeningQueuePage({
 
   const supabase = await createClient();
 
+  // Need the current user's id to apply the "hide MY active analyses"
+  // filter at query time (previously computed in the view via auth.uid(),
+  // which blew past the statement timeout because Postgres couldn't push
+  // the predicate down past the lateral). Now the view just exposes
+  // active_analysis_owner_id and we filter here with a simple OR.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const currentUserId = user?.id ?? null;
+
   // All queries run in one Promise.all — filter options + main queue
   // execute in parallel (~3-4s total instead of ~6-7s sequential).
   // count:exact is omitted (it forced Postgres to scan the
@@ -89,9 +99,15 @@ export default async function ScreeningQueuePage({
     // existing one instead). Properties where another analyst has an active
     // analysis remain visible so you can see their work — attribution is
     // surfaced on the row via a "Reviewed by [name]" badge.
-    query = query
-      .is("review_action", null)
-      .is("active_analysis_is_mine", false);
+    query = query.is("review_action", null);
+    if (currentUserId) {
+      // owner_id IS NULL means nobody has an active analysis (show row).
+      // owner_id != currentUserId means another analyst owns it (show row).
+      // Only skip rows where owner_id == currentUserId (your own dupe).
+      query = query.or(
+        `active_analysis_owner_id.is.null,active_analysis_owner_id.neq.${currentUserId}`,
+      );
+    }
   }
   if (mlsStatusFilter !== "all") {
     query = query.eq("mls_status", mlsStatusFilter);
@@ -228,12 +244,18 @@ export default async function ScreeningQueuePage({
     promoted_analysis_id: r.promoted_analysis_id as string | null,
     comp_search_run_id: r.comp_search_run_id as string | null,
     review_action: r.review_action as string | null,
-    // Interim queue fix columns from the recreated analysis_queue_v
+    // Interim queue fix columns from the recreated analysis_queue_v.
+    // active_analysis_is_mine is derived client-side from owner_id; the
+    // view used to compute it via auth.uid() but that prevented predicate
+    // pushdown and caused statement timeouts on the queue page.
     has_active_analysis: r.has_active_analysis as boolean | null,
     active_analysis_id: r.active_analysis_id as string | null,
     active_lifecycle_stage: r.active_lifecycle_stage as string | null,
     active_interest_level: r.active_interest_level as string | null,
-    active_analysis_is_mine: r.active_analysis_is_mine as boolean | null,
+    active_analysis_is_mine:
+      currentUserId != null && r.active_analysis_owner_id != null
+        ? r.active_analysis_owner_id === currentUserId
+        : null,
     active_analysis_owner_name: r.active_analysis_owner_name as string | null,
     has_newer_screening_than_analysis: r.has_newer_screening_than_analysis as boolean | null,
   }));
