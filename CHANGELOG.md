@@ -1,3 +1,25 @@
+## 2026-04-16 — Split Trend Transparency: Analyst vs. Partner Surfaces
+
+Follow-up to the Trend Cap work earlier today. Transparency principle refined: analysts see the full audit trail (applied rate + raw market signal + cap mechanism + per-tier OLS breakdown); partners see only the final adjustment number. ARV methodology is a competitive moat and should not leak to partner-facing surfaces.
+
+### What changed
+
+- **Report document** (`components/reports/report-document.tsx`) — removed the "Market Trend (applied, capped)" and "Market Rate (pre-cap)" rows from the Deal Math waterfall. The report is fundamentally a partner deliverable; the rate lives on the analyst workstation instead.
+- **Partner analysis view** (`app/portal/deals/[shareToken]/partner-analysis-view.tsx`) — stopped passing `trendRawRate` / `trendCapApplied` to the deal stat strip. The Trend pill still shows the applied rate (e.g. `+2.0%/yr`) but without the "capped from +15.3%" annotation.
+- **Price Trend modal** (`app/(workspace)/analysis/[analysisId]/price-trend-card-modal.tsx`) — added a `hideMethodology` prop. When set, the modal hides: the "Capped at +2.0%/yr" badge, the indigo cap-transparency banner, the "Market Rate (pre-cap)" row, the local/metro tier columns (OLS-derived), and the summary text (which references comp counts/radii). Partner view passes `hideMethodology`; analyst view defaults to `false` (full detail).
+
+### What did NOT change
+
+- All analyst surfaces (workstation deal stat strip, screening modal, screening detail page, workstation price-trend modal) continue to show the full audit trail — cap annotations, raw market rate, per-tier breakdown.
+- `ReportContentJson.trend` remains in the snapshot (data preserved for future analyst-facing report views, just not rendered in the current partner-facing render).
+- Trend data in the database schema is unchanged.
+
+### Principle (now persisted in memory)
+
+Transparency is **internal**. When any engine transforms a number (cap, clamp, blend, round, adjust), preserve and surface the pre-transform value to analysts on every internal surface; to partners, show only the applied adjustment number. Obvious arithmetic (holding costs, transaction costs, simple percentages) is fine to expose; anything that reveals our scoring/weighting/cap/OLS logic stays internal — especially ARV methodology.
+
+---
+
 ## 2026-04-16 — Price Trend Positive-Rate Cap + ARV Backfill
 
 The data-driven market-trend engine occasionally produced +15–20%/year rates from thin-volume OLS regression. Those rates flowed straight into ARV (`arvBlended × (1 + rate × years)`), inflating every downstream number by the same amount and making Gap, Max Offer, and Spread undefensible in print. Defensibility trumps mathematical purity here: an analyst who quotes a +15%/year comp adjustment to a seller is going to lose the conversation.

@@ -17,11 +17,17 @@ import type { TrendData } from "@/lib/reports/types";
 type PriceTrendCardModalProps = {
   trend: TrendData | null;
   onClose: () => void;
+  /** When true, suppresses internal methodology: positive-rate cap info,
+   *  local/metro tier breakdown, and the summary text (which references
+   *  comp counts and radii). Partners see the applied rate + direction
+   *  + confidence only. */
+  hideMethodology?: boolean;
 };
 
 export function PriceTrendCardModal({
   trend,
   onClose,
+  hideMethodology = false,
 }: PriceTrendCardModalProps) {
   if (!trend) {
     return (
@@ -55,7 +61,7 @@ export function PriceTrendCardModal({
           Confidence: {trend.confidence === "high" ? "High" : trend.confidence === "low" ? "Low" : "Fallback"}
         </span>
         <TrendDirectionBadge direction={trend.direction} variant="prominent" />
-        {trend.positiveRateCapApplied && (
+        {trend.positiveRateCapApplied && !hideMethodology && (
           <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
             Capped at +{capPctDisplay}
           </span>
@@ -70,8 +76,8 @@ export function PriceTrendCardModal({
         </div>
       )}
 
-      {/* Cap transparency note */}
-      {trend.positiveRateCapApplied && (
+      {/* Cap transparency note — analyst-only */}
+      {trend.positiveRateCapApplied && !hideMethodology && (
         <div className="mt-2 rounded border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-800">
           Market-derived signal was <strong>{rawDisplay}</strong>, but positive rates
           are capped at <strong>+{capPctDisplay}</strong> for defensibility. ARV
@@ -93,8 +99,8 @@ export function PriceTrendCardModal({
         </span>
       </div>
 
-      {/* Raw (pre-cap) rate — shown only when different from applied */}
-      {trend.positiveRateCapApplied && (
+      {/* Raw (pre-cap) rate — analyst-only, shown when different from applied */}
+      {trend.positiveRateCapApplied && !hideMethodology && (
         <div className="mt-1 flex items-baseline justify-between rounded-md border border-slate-100 bg-white px-3 py-2">
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
             Market Rate (pre-cap)
@@ -105,24 +111,29 @@ export function PriceTrendCardModal({
         </div>
       )}
 
-      {/* Local / Metro tier columns */}
-      <div className="mt-4 grid grid-cols-2 gap-4">
-        <TrendTierColumn
-          label="Local"
-          radius={trend.localRadius}
-          rate={trend.rawLocalRate}
-          stats={trend.detailJson?.localStats ?? null}
-        />
-        <TrendTierColumn
-          label="Metro"
-          radius={trend.metroRadius}
-          rate={trend.rawMetroRate}
-          stats={trend.detailJson?.metroStats ?? null}
-        />
-      </div>
+      {/* Local / Metro tier columns — analyst-only. Partner view hides
+       *  these because they expose the OLS tier breakdown and per-tier
+       *  comp counts / price ranges, i.e. how we derived the rate. */}
+      {!hideMethodology && (
+        <div className="mt-4 grid grid-cols-2 gap-4">
+          <TrendTierColumn
+            label="Local"
+            radius={trend.localRadius}
+            rate={trend.rawLocalRate}
+            stats={trend.detailJson?.localStats ?? null}
+          />
+          <TrendTierColumn
+            label="Metro"
+            radius={trend.metroRadius}
+            rate={trend.rawMetroRate}
+            stats={trend.detailJson?.metroStats ?? null}
+          />
+        </div>
+      )}
 
-      {/* Summary text */}
-      {trend.summary && (
+      {/* Summary text — analyst-only. The text references comp counts,
+       *  radii, and the cap mechanism, all of which are internal. */}
+      {trend.summary && !hideMethodology && (
         <p className="mt-3 text-xs leading-relaxed text-slate-500">
           {trend.summary}
         </p>

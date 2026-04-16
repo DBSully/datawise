@@ -386,7 +386,11 @@ export function PartnerAnalysisView({
         )}
       </div>
 
-      {/* ── Deal Stat Strip (recalculates from partner overrides) ── */}
+      {/* ── Deal Stat Strip (recalculates from partner overrides) ──
+       *  Partner view intentionally does NOT pass trendRawRate / trendCapApplied —
+       *  the applied rate is the adjustment number partners should see, but the
+       *  cap mechanism is internal methodology and stays out of partner-facing
+       *  surfaces (per the transparency-vs-methodology split). */}
       {partnerLiveDeal ? (
         <DealStatStrip
           arv={partnerLiveDeal.arv}
@@ -397,8 +401,6 @@ export function PartnerAnalysisView({
           rehabTotal={partnerLiveDeal.rehabTotal}
           targetProfit={partnerLiveDeal.targetProfit}
           trendAnnualRate={data.trend?.blendedAnnualRate ?? null}
-          trendRawRate={data.trend?.rawBlendedRate ?? null}
-          trendCapApplied={data.trend?.positiveRateCapApplied ?? false}
         />
       ) : dealMath ? (
         <DealStatStrip
@@ -410,8 +412,6 @@ export function PartnerAnalysisView({
           rehabTotal={dealMath.rehabTotal}
           targetProfit={dealMath.targetProfit}
           trendAnnualRate={data.trend?.blendedAnnualRate ?? null}
-          trendRawRate={data.trend?.rawBlendedRate ?? null}
-          trendCapApplied={data.trend?.positiveRateCapApplied ?? false}
         />
       ) : null}
 
@@ -561,6 +561,7 @@ export function PartnerAnalysisView({
         <PriceTrendCardModal
           trend={data.trend}
           onClose={() => setOpenModal(null)}
+          hideMethodology
         />
       )}
       {openModal === "rehab" && (
