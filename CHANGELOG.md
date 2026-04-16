@@ -1,3 +1,48 @@
+## 2026-04-16 — Property Change Events + Per-Analyst Alerts
+
+Analysts were seeing re-screened properties as if they were new — no signal that work had already been done on them, no indication of what changed (price drops, status transitions). Result: duplicate analyses, lost context, repeated from-scratch reviews. This ships the alerting layer.
+
+### Guiding decisions (from the design discussion)
+
+1. **Any price change emits an event.** No threshold — small changes carry seller-situation signal.
+2. **Per-analyst acknowledgment.** Each analyst has their own unread state. They work independently.
+3. **Per-analyst analyses.** Promote dedup only blocks the *current* analyst from duplicating their own analysis. Other analysts working on the same property are SHOWN as "Reviewed by [Name]" — independence with communication. Future flag can hide results and share timeline events only.
+4. **One big migration + code change, not phased.**
+
+### Schema (migrations `20260416180000`, `20260416180001`)
+
+- **`property_events` table** — append-only log of meaningful MLS deltas. `{real_property_id, mls_listing_id, event_type, before_value, after_value, source_import_batch_id, detected_at}`. Six event types: `price_change`, `close_price`, `status_change`, `change_type`, `uc_date`, `close_date`.
+- **`analysis_pipeline.events_last_seen_at`** — per-analyst read marker. 1:1 with the user's analysis. Existing rows backfilled to `now()` so day-of-deploy doesn't flood UIs with old events.
+- **`watch_list_v`** extended with `unread_event_count`, `latest_unread_event_{type,before,after,at}` scoped to the analyst's read marker.
+- **`analysis_queue_v`** extended with `active_analysis_owner_id`, `active_analysis_owner_name`, and a per-session `active_analysis_is_mine` (`auth.uid()` match) so the queue can differentiate "your active analysis" from "another analyst's active analysis" without needing a follow-up request.
+
+### Import pipeline (`lib/imports/process-batch.ts`)
+
+Before each `mls_listings` upsert, the existing row is selected (already was for the `listingExisted` check — expanded the column list). The new `buildListingChangeEvents()` helper diffs the six watched fields and emits a `property_events` row per meaningful change. Events are observability — an insert failure logs a warning but doesn't fail the row.
+
+### Promote dedup (`promoteToAnalysisAction`)
+
+Before inserting a new analysis, the action checks `(real_property_id, created_by_user_id)` for an existing active analysis. When found, returns `{ kind: "existing", analysisId }` instead of creating. The screening modal handles this by showing a confirmation dialog: **Open Existing** / **New Scenario** / **Cancel**. `New Scenario` resubmits with `force_new=true` (preserving CLAUDE.md's "one property can have many analyses" principle for intentional scenario branching). No silent duplicates.
+
+### UI surfaces
+
+- **Workstation** (`/analysis/[analysisId]`) — `RecentActivityStrip` component renders the 10 most recent events for this property. Events that were unread on page load get amber styling; already-seen events are slate. `events_last_seen_at` is auto-updated to `now()` on page load so subsequent visits only mark truly-new events as unread.
+- **Watchlist** (`/analysis`) — each property's address cell now carries an amber `UnreadEventPill` when `unread_event_count > 0`. Shows latest event summary (e.g., `Price -$25,000 · 2h`) with tooltip + "+N" when multiple pending.
+- **Dashboard** (`/home`) — new "Changes on your watchlist (N new)" card above the "Needs Attention" section. Up to 10 most-recent unread events across the analyst's watchlist, newest first.
+- **Screening queue** (`/screening`) — badge logic now distinguishes three cases:
+  - Current user's active analysis → blue "Watch List" link (unchanged).
+  - Another analyst's active analysis → amber "Reviewed by [first name]" badge, row remains visible (new).
+  - Otherwise → "Passed" or "Ready" (unchanged).
+- The default filter switched from `.is("has_active_analysis", false)` to `.is("active_analysis_is_mine", false)` — you no longer see your own dupes, but you DO see properties another analyst has claimed, with attribution.
+
+### What didn't change
+
+- Screening still emits screening_results as-is. Alerts are layered on top; the underlying pipeline is untouched.
+- `mls_listings` is still upserted in place — no history table. Change events carry the before/after delta at the moment of the change, which is what the alert UX actually needs.
+- Existing rows backfilled so the day-of-deploy doesn't spam analysts with pre-existing noise.
+
+---
+
 ## 2026-04-16 — Watch List Query Denormalization
 
 `/analysis` (Watch List) was loading in ~1.9s. EXPLAIN ANALYZE confirmed 52% of the query time (588ms of 1132ms) was a LATERAL `COUNT(*)` over `comparable_search_candidates` running 294 times — once per watchlist row — and pulling 1,757 disk pages per render just to read `selected_yn`.

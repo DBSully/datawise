@@ -201,6 +201,8 @@ export default async function BatchResultsPage({
         active_analysis_id: null,
         active_lifecycle_stage: null,
         active_interest_level: null,
+        active_analysis_is_mine: null,
+        active_analysis_owner_name: null,
         has_newer_screening_than_analysis: null,
       };
     })

@@ -53,5 +53,45 @@ export default async function AnalysisWorkstationPage({ params }: AnalysisWorkst
 
   if (!workstationData) notFound();
 
-  return <AnalysisWorkstation data={workstationData} />;
+  // Load recent property events + current last-seen marker BEFORE marking
+  // the analyst as having seen them. The timeline annotates events that
+  // were unread on arrival so the analyst can see "what changed" in amber.
+  const { data: pipeline } = await supabase
+    .from("analysis_pipeline")
+    .select("events_last_seen_at")
+    .eq("analysis_id", analysisId)
+    .maybeSingle();
+
+  const lastSeenAt = pipeline?.events_last_seen_at ?? null;
+
+  const { data: events } = await supabase
+    .from("property_events")
+    .select("id, event_type, before_value, after_value, detected_at")
+    .eq("real_property_id", propertyId)
+    .order("detected_at", { ascending: false })
+    .limit(20);
+
+  const recentEvents = (events ?? []).map((e) => ({
+    id: e.id as string,
+    eventType: e.event_type as string,
+    beforeValue: e.before_value as unknown,
+    afterValue: e.after_value as unknown,
+    detectedAt: e.detected_at as string,
+    wasUnread: lastSeenAt
+      ? new Date(e.detected_at as string) > new Date(lastSeenAt)
+      : true,
+  }));
+
+  // Mark events as seen for this analyst. Fire-and-forget; if it fails,
+  // the next visit just re-shows the same events as unread — cheap.
+  if (user?.id) {
+    await supabase
+      .from("analysis_pipeline")
+      .update({ events_last_seen_at: new Date().toISOString() })
+      .eq("analysis_id", analysisId);
+  }
+
+  return (
+    <AnalysisWorkstation data={workstationData} recentEvents={recentEvents} />
+  );
 }

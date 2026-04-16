@@ -85,9 +85,13 @@ export default async function ScreeningQueuePage({
     query = query.eq("is_prime_candidate", true);
   }
   if (!showReviewed) {
+    // Hide properties that YOU already have an active analysis for (open your
+    // existing one instead). Properties where another analyst has an active
+    // analysis remain visible so you can see their work — attribution is
+    // surfaced on the row via a "Reviewed by [name]" badge.
     query = query
       .is("review_action", null)
-      .is("has_active_analysis", false);
+      .is("active_analysis_is_mine", false);
   }
   if (mlsStatusFilter !== "all") {
     query = query.eq("mls_status", mlsStatusFilter);
@@ -229,6 +233,8 @@ export default async function ScreeningQueuePage({
     active_analysis_id: r.active_analysis_id as string | null,
     active_lifecycle_stage: r.active_lifecycle_stage as string | null,
     active_interest_level: r.active_interest_level as string | null,
+    active_analysis_is_mine: r.active_analysis_is_mine as boolean | null,
+    active_analysis_owner_name: r.active_analysis_owner_name as string | null,
     has_newer_screening_than_analysis: r.has_newer_screening_than_analysis as boolean | null,
   }));
 

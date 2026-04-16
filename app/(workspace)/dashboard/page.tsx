@@ -22,6 +22,45 @@ const INTEREST_ICONS: Record<string, string> = {
   new: "⚪",
 };
 
+// Compact event-type summarizer for the Dashboard's "Changes on your
+// watchlist" card. Mirrors the watchlist table's UnreadEventPill logic.
+function summarizeDashboardEvent(
+  eventType: string | null,
+  before: unknown,
+  after: unknown,
+): string {
+  const money = (v: unknown) => {
+    if (v === null || v === undefined) return "null";
+    const n = typeof v === "number" ? v : Number(v);
+    if (!Number.isFinite(n)) return "—";
+    return "$" + Math.round(n).toLocaleString();
+  };
+  if (!eventType) return "New activity";
+  switch (eventType) {
+    case "price_change": {
+      const b = Number(before);
+      const a = Number(after);
+      if (Number.isFinite(b) && Number.isFinite(a)) {
+        const d = Math.round(a - b);
+        return `Price ${d >= 0 ? "+" : ""}${money(d)}`;
+      }
+      return `Price → ${money(after)}`;
+    }
+    case "close_price":
+      return `Closed ${money(after)}`;
+    case "status_change":
+      return `Status → ${String(after ?? "—")}`;
+    case "change_type":
+      return String(after ?? "—");
+    case "uc_date":
+      return "UC date";
+    case "close_date":
+      return "Close date";
+    default:
+      return eventType;
+  }
+}
+
 export default async function DashboardPage() {
   noStore();
   const supabase = await createClient();
@@ -130,7 +169,7 @@ export default async function DashboardPage() {
   const { data: watchListRows } = await supabase
     .from("watch_list_v")
     .select(
-      "analysis_id, unparsed_address, city, interest_level, showing_status, watch_list_note, days_on_watch_list, pipeline_updated_at, arv_aggregate, max_offer, est_gap_per_sqft",
+      "analysis_id, unparsed_address, city, interest_level, showing_status, watch_list_note, days_on_watch_list, pipeline_updated_at, arv_aggregate, max_offer, est_gap_per_sqft, unread_event_count, latest_unread_event_type, latest_unread_event_before, latest_unread_event_after, latest_unread_event_at",
     );
 
   type WatchAttentionRow = {
@@ -145,6 +184,19 @@ export default async function DashboardPage() {
   };
 
   const watchAttention: WatchAttentionRow[] = [];
+  type WatchChangesRow = {
+    analysis_id: string;
+    unparsed_address: string;
+    city: string;
+    interest_level: string | null;
+    unread_event_count: number;
+    latest_unread_event_type: string | null;
+    latest_unread_event_before: unknown;
+    latest_unread_event_after: unknown;
+    latest_unread_event_at: string | null;
+  };
+  const watchChanges: WatchChangesRow[] = [];
+
   for (const r of watchListRows ?? []) {
     const row = r as Record<string, unknown>;
     const base = {
@@ -167,7 +219,33 @@ export default async function DashboardPage() {
     } else if (row.showing_status === "showing_scheduled") {
       watchAttention.push({ ...base, reason: "Showing scheduled" });
     }
+
+    // Collect unread-event rows for the new "Changes on your watchlist"
+    // card. Per-analyst scoping is baked into the view via
+    // coalesce(events_last_seen_at, promoted_at) — see migration
+    // 20260416180000.
+    const unreadCount = (row.unread_event_count as number | null) ?? 0;
+    if (unreadCount > 0) {
+      watchChanges.push({
+        analysis_id: row.analysis_id as string,
+        unparsed_address: row.unparsed_address as string,
+        city: row.city as string,
+        interest_level: row.interest_level as string | null,
+        unread_event_count: unreadCount,
+        latest_unread_event_type: row.latest_unread_event_type as string | null,
+        latest_unread_event_before: row.latest_unread_event_before,
+        latest_unread_event_after: row.latest_unread_event_after,
+        latest_unread_event_at: row.latest_unread_event_at as string | null,
+      });
+    }
   }
+
+  // Sort changes newest first by latest_unread_event_at
+  watchChanges.sort((a, b) => {
+    const at = a.latest_unread_event_at ?? "";
+    const bt = b.latest_unread_event_at ?? "";
+    return bt.localeCompare(at);
+  });
 
   // --- Section 4: Pipeline — Action Required ---
 
@@ -325,6 +403,65 @@ export default async function DashboardPage() {
         rows={primeRows}
         totalCount={unreviewedPrimeTotal}
       />
+
+      {/* Changes on your watchlist — unread property_events */}
+      {watchChanges.length > 0 && (
+        <div className="dw-card-tight space-y-2">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-800">
+              Changes on your watchlist
+              <span className="ml-2 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                {watchChanges.length} new
+              </span>
+            </h2>
+            <Link href="/analysis" className="text-xs text-blue-600 hover:underline">
+              View Watch List →
+            </Link>
+          </div>
+          <div className="dw-table-wrap">
+            <table className="dw-table-compact">
+              <thead>
+                <tr>
+                  <th>Address</th>
+                  <th>City</th>
+                  <th>Change</th>
+                  <th className="text-right">When</th>
+                </tr>
+              </thead>
+              <tbody>
+                {watchChanges.slice(0, 10).map((r) => (
+                  <tr key={r.analysis_id}>
+                    <td className="font-medium">
+                      <Link
+                        href={`/analysis/${r.analysis_id}`}
+                        className="text-blue-700 hover:underline"
+                      >
+                        {r.unparsed_address}
+                      </Link>
+                    </td>
+                    <td className="text-slate-500">{r.city}</td>
+                    <td>
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                        {summarizeDashboardEvent(
+                          r.latest_unread_event_type,
+                          r.latest_unread_event_before,
+                          r.latest_unread_event_after,
+                        )}
+                        {r.unread_event_count > 1 && ` +${r.unread_event_count - 1}`}
+                      </span>
+                    </td>
+                    <td className="text-right text-[11px] text-slate-500">
+                      {r.latest_unread_event_at
+                        ? new Date(r.latest_unread_event_at).toLocaleString()
+                        : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Section 3: Watch List — Needs Attention */}
       <div className="dw-card-tight space-y-2">

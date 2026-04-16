@@ -47,6 +47,11 @@ type WatchListRow = {
   gap_per_sqft: number | null;
   target_profit: number | null;
   is_prime_candidate: boolean | null;
+  unread_event_count: number | null;
+  latest_unread_event_type: string | null;
+  latest_unread_event_before: unknown;
+  latest_unread_event_after: unknown;
+  latest_unread_event_at: string | null;
 };
 
 type SortKey =
@@ -95,6 +100,86 @@ function fmtDate(v: string | null | undefined) {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v);
   if (!m) return "—";
   return `${m[2]}/${m[3]}/${m[1].slice(2)}`;
+}
+
+// Compact pill for the watchlist address cell — surfaces unread
+// property_events. Click through (the adjacent address link) marks them
+// seen via the workstation page's events_last_seen_at update.
+function UnreadEventPill({
+  count,
+  eventType,
+  before,
+  after,
+  at,
+}: {
+  count: number;
+  eventType: string | null;
+  before: unknown;
+  after: unknown;
+  at: string | null;
+}) {
+  const summary = summarizeEvent(eventType, before, after);
+  const relTime = at ? fmtRelative(at) : "";
+  const tooltip = at
+    ? `${summary} · ${new Date(at).toLocaleString()}${count > 1 ? ` (+${count - 1} more)` : ""}`
+    : summary;
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold text-amber-800"
+      title={tooltip}
+    >
+      <span>{summary}</span>
+      {relTime && <span className="opacity-60">· {relTime}</span>}
+      {count > 1 && <span className="opacity-80">+{count - 1}</span>}
+    </span>
+  );
+}
+
+function summarizeEvent(eventType: string | null, before: unknown, after: unknown): string {
+  if (!eventType) return "New activity";
+  const fmtMoney = (v: unknown) => {
+    if (v === null || v === undefined) return "null";
+    const n = typeof v === "number" ? v : Number(v);
+    if (!Number.isFinite(n)) return "—";
+    return "$" + Math.round(n).toLocaleString();
+  };
+  switch (eventType) {
+    case "price_change": {
+      const b = Number(before);
+      const a = Number(after);
+      if (Number.isFinite(b) && Number.isFinite(a)) {
+        const d = Math.round(a - b);
+        const sign = d >= 0 ? "+" : "";
+        return `Price ${sign}${fmtMoney(d)}`;
+      }
+      return `Price → ${fmtMoney(after)}`;
+    }
+    case "close_price":
+      return `Closed ${fmtMoney(after)}`;
+    case "status_change":
+      return `Status → ${String(after ?? "—")}`;
+    case "change_type":
+      return `${String(after ?? "—")}`;
+    case "uc_date":
+      return `UC date`;
+    case "close_date":
+      return `Close date`;
+    default:
+      return eventType;
+  }
+}
+
+function fmtRelative(iso: string): string {
+  const then = new Date(iso).getTime();
+  const now = Date.now();
+  const diffMin = Math.round((now - then) / 60000);
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffHr = Math.round(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h`;
+  const diffDay = Math.round(diffHr / 24);
+  if (diffDay < 30) return `${diffDay}d`;
+  return `${Math.round(diffDay / 30)}mo`;
 }
 
 const INTEREST_CONFIG: Record<string, { icon: string; label: string; sortOrder: number }> = {
@@ -561,18 +646,32 @@ export function WatchListTable({ rows }: { rows: WatchListRow[] }) {
                     />
                   </td>
 
-                  {/* Address (frozen) */}
+                  {/* Address (frozen) — with unread event badge when
+                   *  property_events has new changes since this analyst's
+                   *  events_last_seen_at. Click the address to open the
+                   *  workstation which auto-marks events as seen. */}
                   <td
                     className={`${frozenBody} border-r border-slate-200 px-1 py-0.5 font-medium`}
                     style={{ left: LEFT_ADDRESS, width: W_ADDRESS, minWidth: W_ADDRESS }}
                   >
-                    <Link
-                      href={`/analysis/${r.analysis_id}`}
-                      className="block truncate text-blue-700 hover:underline"
-                      title={r.unparsed_address}
-                    >
-                      {r.unparsed_address}
-                    </Link>
+                    <div className="flex items-center gap-1.5">
+                      <Link
+                        href={`/analysis/${r.analysis_id}`}
+                        className="block truncate text-blue-700 hover:underline"
+                        title={r.unparsed_address}
+                      >
+                        {r.unparsed_address}
+                      </Link>
+                      {(r.unread_event_count ?? 0) > 0 && (
+                        <UnreadEventPill
+                          count={r.unread_event_count ?? 0}
+                          eventType={r.latest_unread_event_type}
+                          before={r.latest_unread_event_before}
+                          after={r.latest_unread_event_after}
+                          at={r.latest_unread_event_at}
+                        />
+                      )}
+                    </div>
                   </td>
 
                   <td className="px-1 py-0.5 text-slate-700">{r.city}</td>

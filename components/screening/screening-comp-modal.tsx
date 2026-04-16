@@ -341,20 +341,35 @@ export function ScreeningCompModal({
     return { arv, maxOffer, offerPct, gapPerSqft, negotiationGap, rehabTotal, targetProfit };
   }, [data, manualArvInput, manualTargetProfitInput, manualRehabInput]);
 
-  // Promote handler
+  // Dedup confirmation state — when the user already has an active
+  // analysis for this property, we show a confirmation rather than
+  // silently redirecting or silently creating a duplicate.
+  const [existingAnalysisId, setExistingAnalysisId] = useState<string | null>(null);
+  const [pendingOpenWorkstation, setPendingOpenWorkstation] = useState(false);
+
+  // Promote handler. Calls with force_new=false first; if an existing
+  // analysis is found, shows the confirmation dialog. The user can then
+  // [Open Existing] or [Create New Scenario] (resubmit with force_new=true).
   const handlePromote = useCallback(
-    async (openWorkstation: boolean) => {
+    async (openWorkstation: boolean, forceNew = false) => {
       setSubmitting(true);
       const fd = new FormData();
       fd.set("result_id", resultId!);
       fd.set("interest_level", interestLevel);
       if (watchListNote) fd.set("watch_list_note", watchListNote);
       fd.set("open_workstation", openWorkstation ? "true" : "false");
+      if (forceNew) fd.set("force_new", "true");
 
       try {
-        await promoteToAnalysisAction(fd);
-        // If openWorkstation=true, the action calls redirect() and this won't execute.
-        // If openWorkstation=false, we reach here — close modal and refresh.
+        const res = await promoteToAnalysisAction(fd);
+        // openWorkstation=true: action redirects, we don't reach here.
+        // openWorkstation=false + kind="created": close modal, refresh.
+        // kind="existing": show confirmation dialog.
+        if (res && res.kind === "existing") {
+          setExistingAnalysisId(res.analysisId);
+          setPendingOpenWorkstation(openWorkstation);
+          return;
+        }
         router.refresh();
         onClose();
       } finally {
@@ -363,6 +378,16 @@ export function ScreeningCompModal({
     },
     [resultId, interestLevel, watchListNote, router, onClose],
   );
+
+  const handleOpenExisting = useCallback(() => {
+    if (!existingAnalysisId) return;
+    router.push(`/analysis/${existingAnalysisId}`);
+  }, [existingAnalysisId, router]);
+
+  const handleCreateNewScenario = useCallback(async () => {
+    setExistingAnalysisId(null);
+    await handlePromote(pendingOpenWorkstation, true);
+  }, [handlePromote, pendingOpenWorkstation]);
 
   // Pass handler
   const handlePass = useCallback(async () => {
@@ -753,6 +778,57 @@ export function ScreeningCompModal({
           </div>
         )}
       </div>
+
+      {/* Dedup confirmation — renders on top of the modal when the user
+       *  already has an active analysis for this property. Per the
+       *  independence principle, other analysts' analyses don't trigger
+       *  this; it's scoped to the current user only. */}
+      {existingAnalysisId && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setExistingAnalysisId(null);
+          }}
+        >
+          <div className="w-[440px] max-w-[92vw] rounded-xl border border-slate-200 bg-white p-5 shadow-2xl">
+            <h3 className="text-base font-semibold text-slate-900">
+              You already have an analysis for this property
+            </h3>
+            <p className="mt-2 text-sm leading-relaxed text-slate-600">
+              Open your existing analysis to see your prior work — notes,
+              comp selections, adjustments, and pipeline state. Or create a
+              new scenario if you want to model a different strategy (e.g.
+              flip vs rental).
+            </p>
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setExistingAnalysisId(null)}
+                disabled={submitting}
+                className="rounded border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateNewScenario}
+                disabled={submitting}
+                className="rounded border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                New Scenario
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenExisting}
+                disabled={submitting}
+                className="rounded bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-800 disabled:opacity-50"
+              >
+                Open Existing →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

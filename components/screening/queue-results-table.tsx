@@ -42,6 +42,10 @@ export type QueueResultRow = {
   active_analysis_id: string | null;
   active_lifecycle_stage: string | null;
   active_interest_level: string | null;
+  /** Per-session: true when the active analysis is owned by the current user. */
+  active_analysis_is_mine: boolean | null;
+  /** Display name or email of the analyst who owns the active analysis. */
+  active_analysis_owner_name: string | null;
   has_newer_screening_than_analysis: boolean | null;
 };
 
@@ -185,22 +189,19 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
                     ) : null}
                   </td>
                   <td>
-                    {/* Status badge logic — interim queue fix:
-                        Prefer active_analysis_id (always reflects the most
-                        current active analysis for this property) over
-                        promoted_analysis_id (which is per-row and NULL on
-                        re-screened rows). When the latest screening data
-                        is newer than the analysis was created, append a
-                        red dot indicator so the analyst can spot which
-                        watch list items have fresh information. */}
-                    {r.active_analysis_id ?? r.promoted_analysis_id ? (
+                    {/* Status badge — three distinct cases:
+                        (1) MY active analysis: blue "Watch List" link → /analysis/[id]
+                        (2) ANOTHER analyst's active analysis: amber "Reviewed by [name]"
+                            (still visible per independence + communication decision)
+                        (3) Otherwise: "Passed" or "Ready". */}
+                    {r.active_analysis_is_mine && (r.active_analysis_id ?? r.promoted_analysis_id) ? (
                       <Link
                         href={`/analysis/${r.active_analysis_id ?? r.promoted_analysis_id}`}
                         className="inline-flex items-center gap-1 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800 hover:bg-blue-200"
                         title={
                           r.has_newer_screening_than_analysis
-                            ? `Watch List (${r.active_lifecycle_stage ?? "active"}) — newer screening data available`
-                            : `Watch List (${r.active_lifecycle_stage ?? "active"})`
+                            ? `Your active analysis (${r.active_lifecycle_stage ?? "active"}) — newer screening data available`
+                            : `Your active analysis (${r.active_lifecycle_stage ?? "active"})`
                         }
                       >
                         Watch List
@@ -210,6 +211,21 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
                             aria-label="newer screening data available"
                           />
                         )}
+                      </Link>
+                    ) : r.active_analysis_id && !r.active_analysis_is_mine ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800"
+                        title={`Another analyst (${r.active_analysis_owner_name ?? "unknown"}) is working on this property`}
+                      >
+                        Reviewed by {r.active_analysis_owner_name?.split(" ")[0] ?? "another analyst"}
+                      </span>
+                    ) : r.promoted_analysis_id ? (
+                      <Link
+                        href={`/analysis/${r.promoted_analysis_id}`}
+                        className="inline-flex items-center gap-1 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800 hover:bg-blue-200"
+                        title="Watch List"
+                      >
+                        Watch List
                       </Link>
                     ) : r.review_action === "passed" ? (
                       <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">

@@ -637,6 +637,8 @@ export async function toggleScreeningCompSelectionAction(
 // ---------------------------------------------------------------------------
 
 export type PromoteResult = {
+  /** "created" = new analysis inserted; "existing" = dedup hit, no insert. */
+  kind: "created" | "existing";
   analysisId: string;
   openWorkstation: boolean;
 };
@@ -657,6 +659,7 @@ export async function promoteToAnalysisAction(
   const interestLevel = textValue(formData, "interest_level") || "warm";
   const watchListNote = textValue(formData, "watch_list_note") || null;
   const openWorkstation = textValue(formData, "open_workstation") === "true";
+  const forceNew = textValue(formData, "force_new") === "true";
 
   if (!resultId) {
     throw new Error("Missing result_id");
@@ -671,6 +674,44 @@ export async function promoteToAnalysisAction(
 
   if (resultError || !result) {
     throw new Error(resultError?.message ?? "Screening result not found");
+  }
+
+  // Dedup guard: does this analyst already have an active analysis for
+  // this property? Per-analyst independence — we don't block based on
+  // OTHER analysts' analyses (they may have legitimate scenarios going).
+  // Analysts explicitly opt in to a new scenario via force_new=true.
+  if (!forceNew) {
+    const { data: existing } = await supabase
+      .from("analyses")
+      .select("id, analysis_pipeline!inner(disposition, lifecycle_stage)")
+      .eq("real_property_id", result.real_property_id)
+      .eq("created_by_user_id", user.id)
+      .eq("is_archived", false)
+      .limit(1);
+
+    const active = (existing ?? []).find((row) => {
+      const ap = row.analysis_pipeline as unknown as
+        | { disposition: string; lifecycle_stage: string }
+        | { disposition: string; lifecycle_stage: string }[];
+      const pipeline = Array.isArray(ap) ? ap[0] : ap;
+      return (
+        pipeline &&
+        pipeline.disposition === "active" &&
+        (pipeline.lifecycle_stage === "analysis" ||
+          pipeline.lifecycle_stage === "screening")
+      );
+    });
+
+    if (active) {
+      if (openWorkstation) {
+        redirect(`/analysis/${active.id}`);
+      }
+      return {
+        kind: "existing",
+        analysisId: active.id,
+        openWorkstation: false,
+      };
+    }
   }
 
   // Create an analysis record
@@ -733,7 +774,7 @@ export async function promoteToAnalysisAction(
   }
 
   // Return result for modal to handle (close modal, stay on queue)
-  return { analysisId: analysis.id, openWorkstation: false };
+  return { kind: "created", analysisId: analysis.id, openWorkstation: false };
 }
 
 // ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@ import {
 import type { MapPin } from "@/components/properties/comp-map";
 import { CompWorkspace } from "@/components/workstation/comp-workspace";
 import { DealStatStrip } from "@/components/workstation/deal-stat-strip";
+import { RecentActivityStrip } from "@/components/workstation/recent-activity-strip";
 import { DetailCard } from "@/components/workstation/detail-card";
 import { DetailModal } from "@/components/workstation/detail-modal";
 import { ArvCardModal } from "./arv-card-modal";
@@ -67,11 +68,24 @@ function fmtIsoDate(v: string | null | undefined): string {
   return `${m[2]}/${m[3]}/${m[1].slice(2)}`;
 }
 
-type AnalysisWorkstationProps = {
-  data: WorkstationData;
+export type RecentPropertyEvent = {
+  id: string;
+  eventType: string;
+  beforeValue: unknown;
+  afterValue: unknown;
+  detectedAt: string;
+  /** True if the event's detected_at was newer than the analyst's
+   *  events_last_seen_at when the page loaded. Drives the amber "new"
+   *  styling on the timeline strip. */
+  wasUnread: boolean;
 };
 
-export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
+type AnalysisWorkstationProps = {
+  data: WorkstationData;
+  recentEvents?: RecentPropertyEvent[];
+};
+
+export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorkstationProps) {
   // ── Quick Analysis initial values from manualAnalysis row ───────────
   // The auto-persisting <QuickAnalysisTile> below initializes its 4
   // input states from these values and writes them back via 3D's
@@ -532,6 +546,16 @@ export function AnalysisWorkstation({ data }: AnalysisWorkstationProps) {
           initialNextStep={initialNextStep}
         />
       </div>
+
+      {/* RECENT ACTIVITY STRIP — property_events timeline.
+       *  Shows the 10 most recent changes on this property (price,
+       *  status, UC/close date). Events that were unread when the analyst
+       *  arrived get amber styling; already-seen events are slate.
+       *  Events are automatically marked as "seen" on page load (handled
+       *  server-side in page.tsx). */}
+      {recentEvents.length > 0 && (
+        <RecentActivityStrip events={recentEvents} />
+      )}
 
       {/* DEAL STAT STRIP — 3E.4 (live values from liveDeal memo +
        *  per-spec override indicators driven by Quick Analysis flags). */}

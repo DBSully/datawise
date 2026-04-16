@@ -52,6 +52,12 @@ type WatchListRow = {
   gap_per_sqft: number | null;
   target_profit: number | null;
   is_prime_candidate: boolean | null;
+  // Unread change-event info from property_events (via watch_list_v).
+  unread_event_count: number | null;
+  latest_unread_event_type: string | null;
+  latest_unread_event_before: unknown;
+  latest_unread_event_after: unknown;
+  latest_unread_event_at: string | null;
 };
 
 export default async function WatchListPage() {
@@ -98,6 +104,11 @@ export default async function WatchListPage() {
     gap_per_sqft: r.gap_per_sqft as number | null,
     target_profit: r.target_profit as number | null,
     is_prime_candidate: r.is_prime_candidate as boolean | null,
+    unread_event_count: r.unread_event_count as number | null,
+    latest_unread_event_type: r.latest_unread_event_type as string | null,
+    latest_unread_event_before: r.latest_unread_event_before,
+    latest_unread_event_after: r.latest_unread_event_after,
+    latest_unread_event_at: r.latest_unread_event_at as string | null,
   }));
 
   return (
