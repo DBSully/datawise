@@ -71,9 +71,19 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
     shiftUtcDays(new Date(), -59),
   ).toISOString();
 
+  // All data-fetches run in parallel. Previously this page did 2 queries
+  // in Promise.all, then 5 sequentially — adding ~1s of unnecessary latency
+  // on top of the biggest offender: a screening_results "count" that
+  // fetched every row (8k+) just to read .length. See CHANGELOG 2026-04-16.
   const [
     { data: importBatches, error },
     { data: recentBatches, error: recentBatchesError },
+    { data: screeningBatchesLinked },
+    { data: screeningBatches },
+    { data: statusCounts },
+    { data: unscreenedCount },
+    { count: totalScreenedCount },
+    { count: totalPrimeCount },
   ] = await Promise.all([
     supabase
       .from("import_batches")
@@ -118,16 +128,46 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
       )
       .order("created_at", { ascending: false })
       .limit(25),
+
+    // Screening batches linked to imports — bounded so the query is
+    // predictable even as the table grows. 100 is well above the 25-row
+    // import progress list this map annotates.
+    supabase
+      .from("screening_batches")
+      .select("id, source_import_batch_id, status, prime_candidate_count, screened_count")
+      .not("source_import_batch_id", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(100),
+
+    // All screening batches for the batch management section
+    supabase
+      .from("screening_batches")
+      .select(
+        "id, name, status, trigger_type, source_import_batch_id, total_subjects, screened_count, prime_candidate_count, created_at, completed_at",
+      )
+      .order("created_at", { ascending: false })
+      .limit(25),
+
+    // Dataset metrics for screening section
+    supabase.from("mls_status_counts_v").select("mls_status, property_count"),
+
+    supabase.rpc("count_unscreened_properties", {
+      statuses: ["Active", "Coming Soon"],
+    }),
+
+    // Head-only count queries — no row transfer, just the header count.
+    supabase
+      .from("screening_results")
+      .select("id", { count: "exact", head: true }),
+
+    supabase
+      .from("screening_results")
+      .select("id", { count: "exact", head: true })
+      .eq("is_prime_candidate", true),
   ]);
 
   if (error) throw new Error(error.message);
   if (recentBatchesError) throw new Error(recentBatchesError.message);
-
-  // Load screening batches linked to imports for the Screening column
-  const { data: screeningBatchesLinked } = await supabase
-    .from("screening_batches")
-    .select("id, source_import_batch_id, status, prime_candidate_count, screened_count")
-    .not("source_import_batch_id", "is", null);
 
   const screeningByImport = new Map<
     string,
@@ -141,25 +181,6 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
       screenedCount: sb.screened_count ?? 0,
     });
   }
-
-  // Load all screening batches for the batch management section
-  const { data: screeningBatches } = await supabase
-    .from("screening_batches")
-    .select(
-      "id, name, status, trigger_type, source_import_batch_id, total_subjects, screened_count, prime_candidate_count, created_at, completed_at",
-    )
-    .order("created_at", { ascending: false })
-    .limit(25);
-
-  // Dataset metrics for screening section
-  const { data: statusCounts } = await supabase
-    .from("mls_status_counts_v")
-    .select("mls_status, property_count");
-
-  const { data: unscreenedCount } = await supabase.rpc(
-    "count_unscreened_properties",
-    { statuses: ["Active", "Coming Soon"] },
-  );
 
   const unscreenedTotal: number =
     typeof unscreenedCount === "number" ? unscreenedCount : 0;
@@ -176,15 +197,8 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
     },
   );
 
-  // Screening summary stats
-  const { data: statsRows } = await supabase
-    .from("screening_results")
-    .select("is_prime_candidate", { count: "exact" });
-
-  const totalScreened = statsRows?.length ?? 0;
-  const totalPrime =
-    statsRows?.filter((r: { is_prime_candidate: boolean }) => r.is_prime_candidate)
-      .length ?? 0;
+  const totalScreened = totalScreenedCount ?? 0;
+  const totalPrime = totalPrimeCount ?? 0;
 
   const batches = importBatches ?? [];
   const progressRows = recentBatches ?? [];
