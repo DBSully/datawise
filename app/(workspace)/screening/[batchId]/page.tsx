@@ -175,6 +175,7 @@ export default async function BatchResultsPage({
         listing_contract_date: mls?.listing_contract_date ?? null,
         arv_aggregate: r.arv_aggregate as number | null,
         trend_annual_rate: r.trend_annual_rate as number | null,
+        trend_raw_rate: r.trend_raw_rate as number | null,
         trend_confidence: r.trend_confidence as string | null,
         trend_detail_json: r.trend_detail_json as Record<string, unknown> | null,
         spread: r.spread as number | null,

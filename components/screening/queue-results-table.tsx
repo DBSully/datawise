@@ -22,6 +22,7 @@ export type QueueResultRow = {
   listing_contract_date: string | null;
   arv_aggregate: number | null;
   trend_annual_rate: number | null;
+  trend_raw_rate: number | null;
   trend_confidence: string | null;
   trend_detail_json: Record<string, unknown> | null;
   spread: number | null;
@@ -257,16 +258,21 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
                   <td className="text-right">{formatCurrency(r.subject_list_price)}</td>
                   <td className="text-right font-medium">{formatCurrency(r.arv_aggregate)}</td>
                   <td className="text-right">
-                    {r.trend_annual_rate != null ? (
-                      <span
-                        className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${trendColor(r.trend_annual_rate, r.trend_detail_json)}`}
-                      >
-                        {r.trend_annual_rate >= 0 ? "+" : ""}
-                        {(r.trend_annual_rate * 100).toFixed(1)}%
-                      </span>
-                    ) : (
-                      <span className="text-slate-300">—</span>
-                    )}
+                    {(() => {
+                      // Show the raw (uncapped) market rate so the analyst
+                      // sees the actual calculated trend, even when the ARV
+                      // engine capped it for defensibility.
+                      const displayRate = r.trend_raw_rate ?? r.trend_annual_rate;
+                      if (displayRate == null) return <span className="text-slate-300">—</span>;
+                      return (
+                        <span
+                          className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${trendColor(displayRate, r.trend_detail_json)}`}
+                        >
+                          {displayRate >= 0 ? "+" : ""}
+                          {(displayRate * 100).toFixed(1)}%
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td
                     className={`text-right font-medium ${
