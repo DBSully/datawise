@@ -100,8 +100,12 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
       .gte("created_at", sixtyDayStart)
       .order("created_at", { ascending: false }),
 
+    // Progress metrics come from import_batches.summary JSON (written by
+    // process-batch.ts at end of each run) instead of the old
+    // import_batch_progress_v view which joined import_batch_rows and
+    // counted all rows — 100k+ rows made it exceed the 8s statement timeout.
     supabase
-      .from("import_batch_progress_v")
+      .from("import_batches")
       .select(
         `
           id,
@@ -115,11 +119,7 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
           unique_listing_count,
           unique_property_count,
           import_notes,
-          processed_rows,
-          remaining_validated_rows,
-          processing_error_rows,
-          validation_error_rows,
-          processed_pct
+          summary
         `,
       )
       .order("created_at", { ascending: false })
@@ -165,6 +165,53 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
   if (error) throw new Error(error.message);
   if (recentBatchesError) throw new Error(recentBatchesError.message);
 
+  // Derive progress fields from the summary JSON that process-batch.ts
+  // writes at end of each run. This replaces import_batch_progress_v which
+  // re-counted every import_batch_rows row live (hundreds of thousands).
+  type ProgressRow = {
+    id: string;
+    created_at: string;
+    completed_at: string | null;
+    status: string;
+    source_system: string;
+    import_profile: string;
+    file_count: number | null;
+    total_row_count: number | null;
+    unique_listing_count: number | null;
+    unique_property_count: number | null;
+    import_notes: string | null;
+    processed_rows: number;
+    remaining_validated_rows: number;
+    processing_error_rows: number;
+    validation_error_rows: number;
+    processed_pct: number;
+  };
+  const progressRows: ProgressRow[] = (recentBatches ?? []).map(
+    (b: Record<string, unknown>) => {
+      const s = (b.summary ?? {}) as Record<string, unknown>;
+      const totalRows = (b.total_row_count as number) ?? 0;
+      const processedRows = (s.rowsProcessedTotal as number) ?? 0;
+      return {
+        id: b.id as string,
+        created_at: b.created_at as string,
+        completed_at: (b.completed_at as string | null) ?? null,
+        status: b.status as string,
+        source_system: b.source_system as string,
+        import_profile: b.import_profile as string,
+        file_count: b.file_count as number | null,
+        total_row_count: totalRows,
+        unique_listing_count: b.unique_listing_count as number | null,
+        unique_property_count: b.unique_property_count as number | null,
+        import_notes: (b.import_notes as string | null) ?? null,
+        processed_rows: processedRows,
+        remaining_validated_rows: (s.remainingValidatedRows as number) ?? 0,
+        processing_error_rows: (s.processingErrorRows as number) ?? 0,
+        validation_error_rows: (s.validationErrorRows as number) ?? 0,
+        processed_pct: totalRows > 0 ? Math.round((processedRows / totalRows) * 1000) / 10 : 0,
+      };
+    },
+  );
+
   const screeningByImport = new Map<
     string,
     { id: string; status: string; primeCount: number; screenedCount: number }
@@ -197,7 +244,7 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
   const totalPrime = totalPrimeCount ?? 0;
 
   const batches = importBatches ?? [];
-  const progressRows = recentBatches ?? [];
+  // progressRows is now computed above from import_batches.summary JSON
 
   const totalsByDay = new Map<string, number>();
   for (const batch of batches) {
