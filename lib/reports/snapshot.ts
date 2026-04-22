@@ -12,6 +12,7 @@ export function buildReportSnapshot(data: WorkstationData): ReportContentJson {
     .map((c) => {
       const m = (c.metrics_json ?? {}) as Record<string, unknown>;
       return {
+        mlsNumber: m.listing_id ? String(m.listing_id) : null,
         address: String(m.address ?? "\u2014"),
         netSalePrice: (m.net_price as number) ?? (m.close_price as number) ?? null,
         ppsf: (m.ppsf as number) ?? null,
@@ -57,6 +58,7 @@ export function buildReportSnapshot(data: WorkstationData): ReportContentJson {
           listingId: data.listing.listingId,
           mlsStatus: data.listing.mlsStatus,
           listPrice: data.listing.listPrice,
+          listingContractDate: data.listing.listingContractDate,
         }
       : null,
 

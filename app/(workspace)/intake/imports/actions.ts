@@ -15,7 +15,10 @@ import {
   type ImportPreviewState,
 } from "@/lib/imports/import-preview-state";
 import { processImportBatch } from "@/lib/imports/process-batch";
-import { runScreeningBatch } from "@/lib/screening/bulk-runner";
+import {
+  startScreeningBatch,
+  runScreeningChunk,
+} from "@/lib/screening/bulk-runner";
 import { DENVER_FLIP_V1 } from "@/lib/screening/strategy-profiles";
 
 function chunkArray<T>(items: T[], chunkSize: number) {
@@ -330,15 +333,18 @@ export async function previewImportAction(
     0,
   );
 
-  // --- Auto-process: stage → canonical tables → screen ---
+  // --- Auto-process: stage → canonical tables → start screening batch ---
+  // Screening runs in chunks driven by the client-side progress tracker on
+  // /screening/[batchId] so batches of thousands of subjects don't time out
+  // in a single server action invocation.
   let processMessage = "Upload staged.";
   let screenMessage = "";
+  let screeningBatchId: string | null = null;
 
   try {
     await processImportBatch(batch.id);
     processMessage = "Processed into core tables.";
 
-    // Auto-screen imported properties
     try {
       const propertyIds = await fetchImportBatchPropertyIds(supabase, batch.id);
 
@@ -361,17 +367,31 @@ export async function previewImportAction(
           .single();
 
         if (!sbErr && screeningBatch) {
-          await runScreeningBatch({
+          await startScreeningBatch({
             supabase,
             batchId: screeningBatch.id,
             subjectPropertyIds: propertyIds,
-            profile,
+            extraFilter: { importBatchId: batch.id },
           });
-          screenMessage = " Auto-screened.";
+          screeningBatchId = screeningBatch.id;
+          screenMessage = ` Screening started for ${propertyIds.length} properties.`;
+
+          // Run the first chunk inline. For small imports this finishes
+          // the whole batch server-side; for larger ones the user arrives
+          // at the batch page with progress already on screen. Errors are
+          // swallowed — the batch offset is crash-safe and the on-page
+          // tracker takes over.
+          try {
+            await runScreeningChunk({
+              supabase,
+              batchId: screeningBatch.id,
+              profile,
+            });
+          } catch {}
         }
       }
     } catch {
-      screenMessage = " Auto-screening encountered an error.";
+      screenMessage = " Screening setup encountered an error — you can screen manually below.";
     }
   } catch (processError) {
     return {
@@ -399,6 +419,7 @@ export async function previewImportAction(
     status: "ready",
     message: `Import complete. ${processMessage}${screenMessage}`,
     batchId: batch.id,
+    screeningBatchId,
     sourceSystem: recoloradoBasic50Profile.sourceSystem,
     importProfile: recoloradoBasic50Profile.id,
     totalFiles: uploadedFiles.length,
@@ -432,20 +453,20 @@ export async function processImportBatchAction(formData: FormData) {
     redirect("/intake/imports?process_error=Missing%20batch%20id");
   }
 
+  // Default: processed but no screening kicked off (e.g. nothing to screen).
   let redirectUrl = `/intake/imports?processed=1&batch=${encodeURIComponent(batchId)}`;
 
   try {
-    // Step 1: Process import batch into canonical tables
     await processImportBatch(batchId);
     revalidatePath("/intake/imports");
     revalidatePath("/admin/properties");
 
-    // Step 2: Auto-screen the imported properties
+    // Register the screening batch and record its subject list. Actual
+    // scoring happens chunked by the progress tracker on the batch page.
     try {
       const propertyIds = await fetchImportBatchPropertyIds(supabase, batchId);
 
       if (propertyIds.length > 0) {
-
         const profile = DENVER_FLIP_V1;
 
         const { data: screeningBatch, error: batchError } = await supabase
@@ -464,18 +485,27 @@ export async function processImportBatchAction(formData: FormData) {
           .single();
 
         if (!batchError && screeningBatch) {
-          await runScreeningBatch({
+          await startScreeningBatch({
             supabase,
             batchId: screeningBatch.id,
             subjectPropertyIds: propertyIds,
-            profile,
+            extraFilter: { importBatchId: batchId },
           });
 
-          redirectUrl = `/intake/imports?processed=1&screened=1&batch=${encodeURIComponent(batchId)}`;
+          // Same rationale as previewImportAction — finish small batches
+          // server-side, land larger ones on a page with progress visible.
+          try {
+            await runScreeningChunk({
+              supabase,
+              batchId: screeningBatch.id,
+              profile,
+            });
+          } catch {}
+
+          redirectUrl = `/screening/${screeningBatch.id}`;
         }
       }
     } catch {
-      // Screening failure is non-fatal — import still succeeded
       redirectUrl = `/intake/imports?processed=1&screen_error=1&batch=${encodeURIComponent(batchId)}`;
     }
 

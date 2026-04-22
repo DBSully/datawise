@@ -234,17 +234,16 @@ export function CompMap({
         }
         // Distance
         if (t.distance != null) rows += `<tr><td style="color:#94a3b8;padding-right:8px">Dist</td><td>${t.distance.toFixed(2)} mi</td></tr>`;
-        // Gap/sqft
         if (t.gapPerSqft != null) {
           const gapColor = t.gapPerSqft >= 60 ? "#16a34a" : t.gapPerSqft >= 30 ? "#ca8a04" : "#94a3b8";
-          rows += `<tr><td style="color:#94a3b8;padding-right:8px">Gap/sf</td><td style="color:${gapColor};font-weight:600">$${t.gapPerSqft.toFixed(0)}</td></tr>`;
+          rows += `<tr><td style="color:#94a3b8;padding-right:8px">Comp Gap/sf</td><td style="color:${gapColor};font-weight:600">$${t.gapPerSqft.toFixed(0)}</td></tr>`;
         }
       } else if (t && isSubject) {
         if (t.listPrice != null) rows += `<tr><td style="color:#94a3b8;padding-right:8px">List</td><td style="font-weight:600">${$f(t.listPrice)}</td></tr>`;
         if (t.sqft != null) rows += `<tr><td style="color:#94a3b8;padding-right:8px">Sqft</td><td>${t.sqft.toLocaleString()}</td></tr>`;
         if (t.gapPerSqft != null) {
           const gapColor = t.gapPerSqft >= 60 ? "#16a34a" : t.gapPerSqft >= 30 ? "#ca8a04" : "#94a3b8";
-          rows += `<tr><td style="color:#94a3b8;padding-right:8px">Gap/sf</td><td style="color:${gapColor};font-weight:600">$${t.gapPerSqft.toFixed(0)}</td></tr>`;
+          rows += `<tr><td style="color:#94a3b8;padding-right:8px">Gap (List)/sf</td><td style="color:${gapColor};font-weight:600">$${t.gapPerSqft.toFixed(0)}</td></tr>`;
         }
       }
 

@@ -45,6 +45,7 @@ type ComparableCandidateTableProps = {
   analysisId: string;
   candidateViewRows: ComparableCandidateViewRow[];
   subjectSummary: ComparableSubjectSummary | null;
+  arvByCompListingId?: Record<string, { arv: number }> | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -144,6 +145,7 @@ export function ComparableCandidateTable({
   analysisId,
   candidateViewRows,
   subjectSummary,
+  arvByCompListingId,
 }: ComparableCandidateTableProps) {
   const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
   const [sortCol, setSortCol] = useState<SortCol>("gap");
@@ -168,9 +170,13 @@ export function ComparableCandidateTable({
     const rows = filtered.map((c) => {
       const m = c.metrics_json ?? {};
       const netPrice = toNum(mv(m, "net_price")) ?? toNum(mv(m, "close_price")) ?? null;
+      const impliedArv = c.comp_listing_row_id && arvByCompListingId
+        ? arvByCompListingId[c.comp_listing_row_id]?.arv ?? null
+        : null;
+      const gapBasis = impliedArv ?? netPrice;
       const gapPerSqft =
-        netPrice != null && subjectSqft > 0 && subjectListPrice > 0
-          ? Math.round((netPrice - subjectListPrice) / subjectSqft)
+        gapBasis != null && subjectSqft > 0 && subjectListPrice > 0
+          ? Math.round((gapBasis - subjectListPrice) / subjectSqft)
           : null;
       const bldgSf = toNum(mv(m, "building_area_total_sqft"));
 
@@ -223,7 +229,7 @@ export function ComparableCandidateTable({
               <th className="px-1 py-0.5 text-left" style={{ maxWidth: 110 }}>Subdiv</th>
               <th className="px-1 py-0.5 text-right">Net Price</th>
               <th className="cursor-pointer select-none px-1 py-0.5 text-right hover:text-slate-800" onClick={() => toggleSort("impArv")}>Imp ARV{sortArrow("impArv")}</th>
-              <th className="cursor-pointer select-none px-1 py-0.5 text-right hover:text-slate-800" onClick={() => toggleSort("gap")}>Gap{sortArrow("gap")}</th>
+              <th className="cursor-pointer select-none px-1 py-0.5 text-right hover:text-slate-800" onClick={() => toggleSort("gap")}>Comp Gap{sortArrow("gap")}</th>
               <th className="cursor-pointer select-none px-1 py-0.5 text-right hover:text-slate-800" onClick={() => toggleSort("days")}>Days{sortArrow("days")}</th>
               <th className="px-1 py-0.5 text-left" style={{ maxWidth: 56 }}>Lvl</th>
               <th className="px-1 py-0.5 text-right">Year</th>

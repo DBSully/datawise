@@ -47,6 +47,7 @@ export type SubjectTileRowMlsInfo = {
   origListPrice: string;
   ucDate: string;
   listPrice: string;
+  netClosePrice: string;
   closeDate: string;
 };
 
@@ -181,6 +182,12 @@ export function SubjectTileRow({
           <span />
           <span className="font-bold text-slate-500">Close Date</span>
           <span className="text-slate-900">{mlsInfo.closeDate}</span>
+
+          <span className="font-bold text-slate-500">Net Close</span>
+          <span className="text-slate-900">{mlsInfo.netClosePrice}</span>
+          <span />
+          <span />
+          <span />
         </div>
       </div>
 

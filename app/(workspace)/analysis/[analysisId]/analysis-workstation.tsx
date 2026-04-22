@@ -42,6 +42,7 @@ import { PartnerSharingCardModal } from "./partner-sharing-card-modal";
 import { PipelineCardModal } from "./pipeline-card-modal";
 import { PriceTrendCardModal } from "./price-trend-card-modal";
 import { RehabCardModal } from "./rehab-card-modal";
+import { SendBasicEmailModal } from "@/components/workstation/send-basic-email-modal";
 import {
   loadAnalysisSharesAction,
   type AnalysisShareRow,
@@ -201,12 +202,11 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
     const offerPct =
       listPrice > 0 ? Math.round((maxOffer / listPrice) * 10000) / 10000 : null;
 
-    // Analysis-phase Spread and Gap evolve off adjusted ARV and max offer
-    // (not list price). Gap is always computable once we have an ARV and sqft;
-    // Negotiation Gap measures max-offer-vs-list and is null off-market.
     const sqft = data.physical?.buildingSqft ?? 0;
     const spread = sqft > 0 && arv > 0 ? Math.round(arv - maxOffer) : null;
-    const gapPerSqft =
+    const gapListPerSqft =
+      listPrice > 0 && sqft > 0 ? Math.round((arv - listPrice) / sqft) : null;
+    const gapOfferPerSqft =
       sqft > 0 && arv > 0 ? Math.round((arv - maxOffer) / sqft) : null;
     const negotiationGap =
       listPrice > 0 ? Math.round(maxOffer - listPrice) : null;
@@ -216,7 +216,8 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
       maxOffer,
       offerPct,
       spread,
-      gapPerSqft,
+      gapListPerSqft,
+      gapOfferPerSqft,
       negotiationGap,
       rehabTotal,
       targetProfit,
@@ -347,13 +348,14 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
           ? (subjectSqft - compSqft) / subjectSqft
           : null;
       const compNetPrice = Number(m.net_price) || Number(m.close_price) || 0;
-      const perCompGapPerSqft =
-        subjectSqft > 0 && compNetPrice > 0 && subjectListPrice > 0
-          ? Math.round((compNetPrice - subjectListPrice) / subjectSqft)
-          : null;
       const compArvDetail = c.comp_listing_row_id
         ? compData.arvByCompListingId[c.comp_listing_row_id] ?? null
         : null;
+      const compImpliedArv = compArvDetail?.arv ?? null;
+      const perCompGapPerSqft =
+        compImpliedArv != null && subjectSqft > 0 && subjectListPrice > 0
+          ? Math.round((compImpliedArv - subjectListPrice) / subjectSqft)
+          : null;
 
       pins.push({
         id: c.id,
@@ -441,6 +443,7 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
     | "pipeline"
     | "notes"
     | "partnerSharing"
+    | "sendBasicEmail"
     | null;
   const [openModal, setOpenModal] = useState<CardModalId>(null);
 
@@ -451,6 +454,7 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
       <WorkstationHeader
         data={data}
         onShare={() => setOpenModal("partnerSharing")}
+        onSendBasicEmail={() => setOpenModal("sendBasicEmail")}
       />
 
       {/* TOP TILE ROW — 4 tiles. SubjectTileRow handles MLS Info +
@@ -468,6 +472,9 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
             origListPrice: fmt(data.listing?.originalListPrice),
             ucDate: fmtIsoDate(data.listing?.purchaseContractDate),
             listPrice: fmt(data.listing?.listPrice),
+            netClosePrice: data.listing?.closePrice != null
+              ? fmt((data.listing.closePrice) - (data.listing.concessionsAmount ?? 0))
+              : "\u2014",
             closeDate: fmtIsoDate(data.listing?.closeDate),
           }}
           physical={{
@@ -563,7 +570,8 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
         arv={liveDeal.arv}
         maxOffer={liveDeal.maxOffer}
         offerPct={liveDeal.offerPct}
-        gapPerSqft={liveDeal.gapPerSqft}
+        gapListPerSqft={liveDeal.gapListPerSqft}
+        gapOfferPerSqft={liveDeal.gapOfferPerSqft}
         negotiationGap={liveDeal.negotiationGap}
         rehabTotal={liveDeal.rehabTotal}
         targetProfit={liveDeal.targetProfit}
@@ -586,7 +594,7 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
             mapPins={compMapPins}
             liveDeal={{
               arv: liveDeal.arv,
-              gapPerSqft: liveDeal.gapPerSqft,
+              gapListPerSqft: liveDeal.gapListPerSqft,
             }}
             compStats={compStats}
             onToggleSelection={handleCompToggle}
@@ -807,6 +815,13 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
           }}
         />
       )}
+      {openModal === "sendBasicEmail" && (
+        <SendBasicEmailModal
+          analysisId={data.analysisId}
+          propertyId={data.propertyId}
+          onClose={() => setOpenModal(null)}
+        />
+      )}
     </section>
   );
 }
@@ -831,9 +846,11 @@ function formatCompletedTimestamp(iso: string | null): string | null {
 function WorkstationHeader({
   data,
   onShare,
+  onSendBasicEmail,
 }: {
   data: WorkstationData;
   onShare?: () => void;
+  onSendBasicEmail?: () => void;
 }) {
   // Local state for Mark Complete — server returns the new completedAt
   // and we mirror it locally so the button label flips immediately
@@ -975,6 +992,17 @@ function WorkstationHeader({
             className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
           >
             Share
+          </button>
+
+          {/* Send Basic Email — lightweight self-contained deal summary
+           *  email with table-based deal math + selected comps. Separate
+           *  from "Share" (which creates a tracked portal link). */}
+          <button
+            type="button"
+            onClick={onSendBasicEmail}
+            className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+          >
+            Send Basic Email
           </button>
 
           {/* Generate Report */}

@@ -1,9 +1,19 @@
 import Link from "next/link";
 import { ImportUploadPanel } from "@/components/imports/import-upload-panel";
 import { createClient } from "@/lib/supabase/server";
-import { runImportScreeningAction, runScreeningAction } from "@/app/(workspace)/screening/actions";
+import {
+  runImportScreeningAction,
+  runScreeningAction,
+  cancelScreeningBatchAction,
+} from "@/app/(workspace)/screening/actions";
 import { processImportBatchAction } from "./actions";
 import { LocalTimestamp } from "@/components/common/local-timestamp";
+
+// Server actions invoked from this page do batch-scale DB work:
+// processImportBatch can be thousands of inserts, and resolving subject IDs
+// for startScreeningBatch involves paginated RPC calls. Use the Vercel Pro
+// max so those initial steps don't need their own chunking.
+export const maxDuration = 300;
 
 const ROLLING_LIMIT_30_DAY = 75_000;
 const DAILY_AVERAGE_LIMIT = ROLLING_LIMIT_30_DAY / 30;
@@ -801,12 +811,35 @@ export default async function ImportsPage({ searchParams }: ImportsPageProps) {
                         <LocalTimestamp value={sb.completed_at} />
                       </td>
                       <td>
-                        <Link
-                          href={`/screening/${sb.id}`}
-                          className="text-xs text-blue-600 hover:underline"
-                        >
-                          View
-                        </Link>
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/screening/${sb.id}`}
+                            className="text-xs text-blue-600 hover:underline"
+                          >
+                            View
+                          </Link>
+                          {sb.status !== "complete" && (
+                            <form action={cancelScreeningBatchAction}>
+                              <input
+                                type="hidden"
+                                name="batch_id"
+                                value={sb.id}
+                              />
+                              <input
+                                type="hidden"
+                                name="redirect_to"
+                                value="/intake/imports"
+                              />
+                              <button
+                                type="submit"
+                                className="text-[10px] font-medium text-red-600 hover:underline"
+                                title="Delete this batch and its results"
+                              >
+                                Cancel
+                              </button>
+                            </form>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ),

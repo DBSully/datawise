@@ -4,8 +4,17 @@ import { unstable_noStore as noStore } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { QueueResultsTable } from "@/components/screening/queue-results-table";
 import { LocalTimestamp } from "@/components/common/local-timestamp";
+import { BatchProgressTracker } from "@/components/screening/batch-progress-tracker";
+import { cancelScreeningBatchAction } from "@/app/(workspace)/screening/actions";
 
 export const dynamic = "force-dynamic";
+
+// Each screening chunk (runScreeningTickAction) is CPU-bound: loads the comp
+// pool (~30–60k rows across 3 tables), scores N subjects, and writes results
+// + comp candidates. The pool load alone can burn 10–20s, so a generous
+// budget lets us use larger chunks and avoid retry churn from kills.
+// 300s is the Vercel Pro max.
+export const maxDuration = 300;
 
 type BatchResultsPageProps = {
   params: Promise<{ batchId: string }>;
@@ -232,6 +241,10 @@ export default async function BatchResultsPage({
     { value: "price_asc", label: "Price (low)" },
   ];
 
+  const batchStatus = String(batch.status ?? "");
+  const isActiveBatch = batchStatus === "running" || batchStatus === "pending";
+  const canCancel = batchStatus !== "complete";
+
   return (
     <section className="dw-section-stack-compact">
       {/* Header */}
@@ -255,6 +268,37 @@ export default async function BatchResultsPage({
           )}
         </p>
       </div>
+
+      {/* Progress tracker (drives chunked screening) */}
+      {isActiveBatch && (
+        <BatchProgressTracker
+          batchId={batchId}
+          initialTotalSubjects={batch.total_subjects ?? 0}
+          initialScreenedCount={batch.screened_count ?? 0}
+          initialPrimeCount={batch.prime_candidate_count ?? 0}
+          initialStatus={batchStatus}
+        />
+      )}
+
+      {batchStatus === "error" && !isActiveBatch && (
+        <div className="dw-card-tight border-red-200 bg-red-50 text-sm text-red-800">
+          This batch errored during screening. You can cancel it below and
+          start a new screen, or retry from the tracker above.
+        </div>
+      )}
+
+      {canCancel && (
+        <form action={cancelScreeningBatchAction} className="flex justify-end">
+          <input type="hidden" name="batch_id" value={batchId} />
+          <input type="hidden" name="redirect_to" value="/intake/imports" />
+          <button
+            type="submit"
+            className="text-xs text-red-600 hover:underline"
+          >
+            Cancel and delete this batch
+          </button>
+        </form>
+      )}
 
       {/* Import context */}
       {batch.source_import_batch_id && (

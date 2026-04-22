@@ -1,14 +1,16 @@
 // ---------------------------------------------------------------------------
 // Deal Math — max offer, spread, gap, and negotiation gap calculations
 //
-// Metric definitions (screening phase):
-//   spread          = ARV - listPrice                     (opportunity signal)
-//   estGapPerSqft   = spread / buildingSqft               (normalized opportunity)
-//   negotiationGap  = maxOffer - listPrice                (negotiation room;
-//                                                          positive = max offer >= list)
+// Gap metrics:
+//   gapListPerSqft  = (ARV - listPrice) / buildingSqft   "How much room at list?"
+//   gapOfferPerSqft = (ARV - maxOffer) / buildingSqft    "How much margin at offer?"
 //
-// All three metrics are null when list price is null (off-market). maxOffer is
-// still computed from ARV minus costs regardless of list price.
+// gapListPerSqft is null when no list price (off-market).
+// gapOfferPerSqft is always computable when ARV > 0 and sqft > 0.
+//
+// Other metrics:
+//   spread          = ARV - listPrice                     (opportunity signal)
+//   negotiationGap  = maxOffer - listPrice                (negotiation room)
 // ---------------------------------------------------------------------------
 
 import type { DealMathResult } from "./types";
@@ -43,9 +45,13 @@ export function calculateDealMath(input: CalculateDealMathInput): DealMathResult
   const hasListPrice = listPrice !== null && listPrice > 0;
   const spread = hasListPrice ? Math.round(arv - listPrice) : null;
   const offerPct = hasListPrice ? roundTo(maxOffer / listPrice, 4) : null;
-  const estGapPerSqft =
+  const gapListPerSqft =
     hasListPrice && buildingSqft > 0
       ? Math.round((arv - listPrice) / buildingSqft)
+      : null;
+  const gapOfferPerSqft =
+    buildingSqft > 0
+      ? Math.round((arv - maxOffer) / buildingSqft)
       : null;
   const negotiationGap = hasListPrice ? Math.round(maxOffer - listPrice) : null;
 
@@ -61,7 +67,9 @@ export function calculateDealMath(input: CalculateDealMathInput): DealMathResult
     maxOffer,
     offerPct,
     spread,
-    estGapPerSqft,
+    gapListPerSqft,
+    gapOfferPerSqft,
+    estGapPerSqft: gapListPerSqft,
     negotiationGap,
   };
 }

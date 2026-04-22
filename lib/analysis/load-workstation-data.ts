@@ -631,9 +631,6 @@ export async function loadWorkstationData(
   const dealMath = screeningDealMath ? {
     ...screeningDealMath,
     spread: Math.round(screeningDealMath.arv - screeningDealMath.maxOffer),
-    estGapPerSqft: buildingSqft > 0
-      ? Math.round((screeningDealMath.arv - screeningDealMath.maxOffer) / buildingSqft)
-      : null,
   } : null;
 
   // Cash out of pocket
@@ -789,6 +786,8 @@ export async function loadWorkstationData(
       mlsMajorChangeType: listing.mls_major_change_type as string | null,
       purchaseContractDate: listing.purchase_contract_date as string | null,
       closeDate: listing.close_date as string | null,
+      closePrice: toNum(listing.close_price) || null,
+      concessionsAmount: toNum(listing.concessions_amount) || null,
     } : null,
     financials: financials ? {
       annualTax: toNum(financials.annual_property_tax),

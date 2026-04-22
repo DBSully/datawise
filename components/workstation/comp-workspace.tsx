@@ -93,7 +93,7 @@ type SortDir = "asc" | "desc";
 
 export type CompWorkspaceLiveDeal = {
   arv: number | null;
-  gapPerSqft: number | null;
+  gapListPerSqft: number | null;
 };
 
 export type CompWorkspaceCompStats = {
@@ -225,7 +225,7 @@ export function CompWorkspace({
             />
             <span className="text-slate-500">&lt;$30</span>
           </span>
-          <span className="ml-auto text-slate-300">gap/sqft</span>
+          <span className="ml-auto text-slate-300">comp gap/sqft</span>
         </div>
         {/* Add comp by MLS # */}
         {data.compSearchRunId && (
@@ -313,7 +313,7 @@ export function CompWorkspace({
                   className="cursor-pointer select-none px-1 py-0.5 text-right hover:text-slate-800"
                   onClick={() => toggleSort("gap")}
                 >
-                  Gap
+                  Comp Gap
                   {sortCol === "gap"
                     ? sortDir === "desc"
                       ? " ▼"
@@ -410,8 +410,8 @@ export function CompWorkspace({
                   {liveDeal?.arv != null ? $f(liveDeal.arv) : "—"}
                 </td>
                 <td className="px-1 py-0.5 text-right">
-                  {liveDeal?.gapPerSqft != null
-                    ? `$${fmtNum(liveDeal.gapPerSqft)}`
+                  {liveDeal?.gapListPerSqft != null
+                    ? `$${fmtNum(liveDeal.gapListPerSqft)}`
                     : "—"}
                 </td>
                 <td className="px-1 py-0.5 text-right">—</td>
@@ -468,8 +468,8 @@ export function CompWorkspace({
                     : null;
                   const impliedArv = arvDetail?.arv ?? null;
                   const gapPerSqft =
-                    netPrice != null && subjectSqftVal > 0 && subjectListVal > 0
-                      ? Math.round((netPrice - subjectListVal) / subjectSqftVal)
+                    impliedArv != null && subjectSqftVal > 0 && subjectListVal > 0
+                      ? Math.round((impliedArv - subjectListVal) / subjectSqftVal)
                       : null;
                   return { c, m, netPrice, arvDetail, impliedArv, gapPerSqft };
                 });

@@ -84,7 +84,10 @@ type DealStatStripProps = {
   maxOffer: number | null;
   /** Decimal — 0.85 means 85% */
   offerPct: number | null;
-  gapPerSqft: number | null;
+  /** (ARV - listPrice) / sqft. Null when off-market. */
+  gapListPerSqft: number | null;
+  /** (ARV - maxOffer) / sqft. Always computable when ARV > 0. */
+  gapOfferPerSqft: number | null;
   /** maxOffer - listPrice. Positive = OK to offer above list. Null when off-market. */
   negotiationGap: number | null;
   rehabTotal: number | null;
@@ -112,7 +115,8 @@ export function DealStatStrip({
   arv,
   maxOffer,
   offerPct,
-  gapPerSqft,
+  gapListPerSqft,
+  gapOfferPerSqft,
   negotiationGap,
   rehabTotal,
   targetProfit,
@@ -147,8 +151,7 @@ export function DealStatStrip({
   // Offer% derives from Max Offer (which derives from ARV/Rehab/Target)
   // — same cascade as Max Offer.
   const offerPctOverride = anyArvAffectingOverride ? "cascading" : "none";
-  // Gap/sqft = (ARV - maxOffer) / sqft during analysis — evolves with
-  // every cost input, so cascades from any ARV-affecting override.
+  // Both gap metrics cascade from any ARV-affecting override.
   const gapOverride = anyArvAffectingOverride ? "cascading" : "none";
   // Negotiation Gap = maxOffer - listPrice. Same cascade as Max Offer.
   const negotiationGapOverride = anyArvAffectingOverride ? "cascading" : "none";
@@ -174,9 +177,15 @@ export function DealStatStrip({
         override={offerPctOverride}
       />
       <DealStat
-        label="Gap/sqft"
-        value={gapPerSqft != null ? `$${fmtNum(gapPerSqft)}` : "\u2014"}
-        tone={gapPerSqftTone(gapPerSqft)}
+        label="Gap (List)"
+        value={gapListPerSqft != null ? `$${fmtNum(gapListPerSqft)}` : "\u2014"}
+        tone={gapPerSqftTone(gapListPerSqft)}
+        override={gapOverride}
+      />
+      <DealStat
+        label="Gap (Offer)"
+        value={gapOfferPerSqft != null ? `$${fmtNum(gapOfferPerSqft)}` : "\u2014"}
+        tone={gapPerSqftTone(gapOfferPerSqft)}
         override={gapOverride}
       />
       <DealStat

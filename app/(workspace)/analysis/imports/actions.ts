@@ -302,6 +302,7 @@ export async function previewImportAction(
     message:
       "Upload staged successfully. The batch is stored and ready for processing.",
     batchId: batch.id,
+    screeningBatchId: null,
     sourceSystem: recoloradoBasic50Profile.sourceSystem,
     importProfile: recoloradoBasic50Profile.id,
     totalFiles: uploadedFiles.length,

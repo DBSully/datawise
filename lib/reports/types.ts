@@ -255,6 +255,8 @@ export type WorkstationData = {
     mlsMajorChangeType: string | null;
     purchaseContractDate: string | null;
     closeDate: string | null;
+    closePrice: number | null;
+    concessionsAmount: number | null;
   } | null;
   financials: { annualTax: number; annualHoa: number } | null;
   arv: {
@@ -300,6 +302,8 @@ export type WorkstationData = {
     offerPct: number | null;
     spread: number | null;
     estGapPerSqft: number | null;
+    gapListPerSqft: number | null;
+    gapOfferPerSqft: number | null;
     negotiationGap: number | null;
   } | null;
   compSummary: {
@@ -388,6 +392,7 @@ export type WorkstationData = {
 // ---------------------------------------------------------------------------
 
 export type ReportSelectedComp = {
+  mlsNumber: string | null;
   address: string;
   netSalePrice: number | null;
   ppsf: number | null;
@@ -429,6 +434,7 @@ export type ReportContentJson = {
     listingId: string;
     mlsStatus: string | null;
     listPrice: number;
+    listingContractDate: string | null;
   } | null;
 
   analysis: {
@@ -472,6 +478,8 @@ export type ReportContentJson = {
     offerPct: number | null;
     spread: number | null;
     estGapPerSqft: number | null;
+    gapListPerSqft: number | null;
+    gapOfferPerSqft: number | null;
     negotiationGap: number | null;
   } | null;
 

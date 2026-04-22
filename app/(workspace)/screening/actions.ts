@@ -3,12 +3,24 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { runScreeningBatch, expandComparableSearch, type ExpandSearchOverrides } from "@/lib/screening/bulk-runner";
+import {
+  startScreeningBatch,
+  runScreeningChunk,
+  cancelScreeningBatch,
+  expandComparableSearch,
+  type ExpandSearchOverrides,
+  type RunScreeningChunkResult,
+} from "@/lib/screening/bulk-runner";
 import { DENVER_FLIP_V1 } from "@/lib/screening/strategy-profiles";
 import { calculateArv } from "@/lib/screening/arv-engine";
 import { resolvePropertyTypeFamily } from "@/lib/comparables/scoring";
 import type { CompArvInput, PropertyTypeKey } from "@/lib/screening/types";
 import type { ArvCompBreakdown } from "@/lib/reports/types";
+
+// Note: server-action runtime limits (maxDuration) are set on the route
+// segments that invoke these actions — see /screening/[batchId]/page.tsx
+// and /intake/imports/page.tsx. "use server" files must export only async
+// functions.
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -187,13 +199,22 @@ export async function runScreeningAction(formData: FormData): Promise<void> {
     throw new Error(batchError?.message ?? "Failed to create screening batch");
   }
 
-  // Run the pipeline
-  await runScreeningBatch({
+  // Record the subject list + mark running. Actual scoring happens in chunks
+  // driven by the progress tracker on the batch detail page.
+  await startScreeningBatch({
     supabase,
     batchId: batch.id,
     subjectPropertyIds: propertyIds,
-    profile,
+    extraFilter: { statuses, filterMode },
   });
+
+  // Run the first chunk inline so small batches (<= chunk size) finish
+  // before the redirect and larger batches arrive on the batch page with
+  // visible progress. Errors/timeouts are intentionally swallowed — the
+  // chunk offset is crash-safe and the on-page tracker resumes from here.
+  try {
+    await runScreeningChunk({ supabase, batchId: batch.id, profile });
+  } catch {}
 
   revalidatePath("/intake/imports");
   redirect(`/screening/${batch.id}`);
@@ -275,16 +296,91 @@ export async function runImportScreeningAction(
     throw new Error(batchError?.message ?? "Failed to create screening batch");
   }
 
-  // Run the pipeline
-  await runScreeningBatch({
+  await startScreeningBatch({
     supabase,
     batchId: batch.id,
     subjectPropertyIds: propertyIds,
-    profile,
+    extraFilter: { importBatchId },
   });
+
+  // See runScreeningAction for rationale — run first chunk inline; errors
+  // are swallowed because the tracker on /screening/[batchId] resumes.
+  try {
+    await runScreeningChunk({ supabase, batchId: batch.id, profile });
+  } catch {}
 
   revalidatePath("/intake/imports");
   redirect(`/screening/${batch.id}`);
+}
+
+// ---------------------------------------------------------------------------
+// Run one screening chunk (polled from the progress tracker)
+// ---------------------------------------------------------------------------
+
+export async function runScreeningTickAction(
+  batchId: string,
+): Promise<RunScreeningChunkResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("Not authenticated");
+  }
+
+  if (!batchId) {
+    throw new Error("Missing batchId");
+  }
+
+  const profile = DENVER_FLIP_V1;
+
+  const result = await runScreeningChunk({
+    supabase,
+    batchId,
+    profile,
+  });
+
+  if (result.done) {
+    revalidatePath(`/screening/${batchId}`);
+    revalidatePath("/screening");
+    revalidatePath("/intake/imports");
+    revalidatePath("/dashboard");
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Cancel / delete a screening batch (stuck or aborted)
+// ---------------------------------------------------------------------------
+
+export async function cancelScreeningBatchAction(
+  formData: FormData,
+): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/auth/sign-in");
+  }
+
+  const batchId = textValue(formData, "batch_id");
+  if (!batchId) {
+    throw new Error("Missing batch_id");
+  }
+
+  const redirectTo = textValue(formData, "redirect_to") || "/intake/imports";
+
+  await cancelScreeningBatch(supabase, batchId);
+
+  revalidatePath("/intake/imports");
+  revalidatePath("/screening");
+  revalidatePath("/dashboard");
+
+  redirect(redirectTo);
 }
 
 // ---------------------------------------------------------------------------
@@ -336,6 +432,7 @@ export type ScreeningCompData = {
   subjectLat: number | null;
   subjectLng: number | null;
   estGapPerSqft: number | null;
+  gapOfferPerSqft: number | null;
   // Deal math fields for modal summary
   arvAggregate: number | null;
   maxOffer: number | null;
@@ -381,6 +478,7 @@ export type ScreeningCompData = {
   closeDate: string | null;
   originalListPrice: number | null;
   closePrice: number | null;
+  concessionsAmount: number | null;
   // Per-comp implied ARV keyed by comp_listing_row_id (arvTimeAdjusted + decayWeight)
   arvByCompListingId: Record<string, ArvCompBreakdown>;
   candidates: Array<{
@@ -435,7 +533,7 @@ export async function loadScreeningCompDataAction(
     ? supabase
         .from("mls_listings")
         .select(
-          "listing_id, mls_status, mls_major_change_type, listing_contract_date, purchase_contract_date, close_date, original_list_price, close_price, subdivision_name, ownership_raw, occupant_type",
+          "listing_id, mls_status, mls_major_change_type, listing_contract_date, purchase_contract_date, close_date, original_list_price, close_price, concessions_amount, subdivision_name, ownership_raw, occupant_type",
         )
         .eq("id", result.listing_row_id)
         .single()
@@ -500,6 +598,7 @@ export async function loadScreeningCompDataAction(
     closeDate: mls?.close_date ?? null,
     originalListPrice: mls?.original_list_price ?? null,
     closePrice: mls?.close_price ?? null,
+    concessionsAmount: mls?.concessions_amount ?? null,
   };
 
   const base = {
@@ -512,6 +611,10 @@ export async function loadScreeningCompDataAction(
     subjectLat: prop?.latitude ?? null,
     subjectLng: prop?.longitude ?? null,
     estGapPerSqft: result.est_gap_per_sqft,
+    gapOfferPerSqft:
+      result.arv_aggregate > 0 && result.max_offer != null && result.subject_building_sqft > 0
+        ? Math.round((result.arv_aggregate - result.max_offer) / result.subject_building_sqft)
+        : null,
     ...dealFields,
     ...headerFields,
     arvByCompListingId: {} as Record<string, ArvCompBreakdown>,
@@ -929,7 +1032,7 @@ export async function loadCompDataByRunAction(
   const { data: mls } = await supabase
     .from("mls_listings")
     .select(
-      "listing_id, mls_status, mls_major_change_type, listing_contract_date, purchase_contract_date, close_date, original_list_price, list_price, close_price, subdivision_name, ownership_raw, occupant_type",
+      "listing_id, mls_status, mls_major_change_type, listing_contract_date, purchase_contract_date, close_date, original_list_price, list_price, close_price, concessions_amount, subdivision_name, ownership_raw, occupant_type",
     )
     .eq("real_property_id", realPropertyId)
     .order("listing_contract_date", { ascending: false, nullsFirst: true })
@@ -964,6 +1067,10 @@ export async function loadCompDataByRunAction(
     subjectLat: prop.latitude ?? null,
     subjectLng: prop.longitude ?? null,
     estGapPerSqft: sr?.est_gap_per_sqft ?? null,
+    gapOfferPerSqft:
+      sr?.arv_aggregate && sr?.max_offer != null && buildingSqft
+        ? Math.round((sr.arv_aggregate - sr.max_offer) / buildingSqft)
+        : null,
     arvAggregate: sr?.arv_aggregate ?? null,
     maxOffer: sr?.max_offer ?? null,
     offerPct: sr?.offer_pct ?? null,
@@ -1005,6 +1112,7 @@ export async function loadCompDataByRunAction(
     closeDate: mls?.close_date ?? null,
     originalListPrice: mls?.original_list_price ?? null,
     closePrice: mls?.close_price ?? null,
+    concessionsAmount: mls?.concessions_amount ?? null,
     arvByCompListingId: {} as Record<string, ArvCompBreakdown>,
   };
 

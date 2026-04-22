@@ -1,16 +1,28 @@
 "use client";
 
-import { useActionState } from "react";
+import Link from "next/link";
+import { useActionState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { previewImportAction } from "@/app/(workspace)/intake/imports/actions";
 import { initialImportPreviewState } from "@/lib/imports/import-preview-state";
 
 export function ImportUploadPanel() {
+  const router = useRouter();
   const [state, formAction, isPending] = useActionState(
     previewImportAction,
     initialImportPreviewState,
   );
 
   const safeState = state ?? initialImportPreviewState;
+
+  // Screening chunks are driven by the tracker on /screening/[batchId], so
+  // a newly created batch just sits idle until someone navigates there.
+  // Auto-jump as soon as the action reports a screening batch is ready.
+  useEffect(() => {
+    if (safeState.status === "ready" && safeState.screeningBatchId) {
+      router.push(`/screening/${safeState.screeningBatchId}`);
+    }
+  }, [safeState.status, safeState.screeningBatchId, router]);
 
   return (
     <div className="dw-section-stack">
@@ -55,11 +67,11 @@ export function ImportUploadPanel() {
             className="dw-button-primary"
             disabled={isPending}
           >
-            {isPending ? "Importing, processing, and screening..." : "Import"}
+            {isPending ? "Importing and processing..." : "Import"}
           </button>
           <span className="text-xs text-slate-500">
-            Uploads, validates, processes into core tables, and auto-screens
-            in one step.
+            Uploads, validates, and processes into core tables. Screening
+            starts automatically — track progress on the screening page.
           </span>
         </div>
       </form>
@@ -70,9 +82,17 @@ export function ImportUploadPanel() {
             state.status === "error"
               ? "border-red-200 bg-red-50 text-red-800"
               : "border-emerald-200 bg-emerald-50 text-emerald-800"
-          }`}
+          } flex items-center justify-between gap-3`}
         >
-          {safeState.message}
+          <span>{safeState.message}</span>
+          {safeState.status === "ready" && safeState.screeningBatchId ? (
+            <Link
+              href={`/screening/${safeState.screeningBatchId}`}
+              className="dw-button-primary whitespace-nowrap"
+            >
+              View screening progress →
+            </Link>
+          ) : null}
         </div>
       ) : null}
 

@@ -216,11 +216,12 @@ export function ScreeningCompModal({
           : null;
 
       const compNetPrice = Number(m.net_price) || Number(m.close_price) || 0;
-      const perCompGapPerSqft =
-        subjectSqft > 0 && compNetPrice > 0 && subjectListPrice > 0
-          ? Math.round((compNetPrice - subjectListPrice) / subjectSqft)
-          : null;
       const compArvDetail = c.comp_listing_row_id ? data.arvByCompListingId[c.comp_listing_row_id] ?? null : null;
+      const compImpliedArv = compArvDetail?.arv ?? null;
+      const perCompGapPerSqft =
+        compImpliedArv != null && subjectSqft > 0 && subjectListPrice > 0
+          ? Math.round((compImpliedArv - subjectListPrice) / subjectSqft)
+          : null;
 
       pins.push({
         id: c.id,
@@ -331,14 +332,16 @@ export function ScreeningCompModal({
     const listPrice = data.subjectListPrice ?? 0;
     const offerPct = listPrice > 0 ? Math.round((maxOffer / listPrice) * 10000) / 10000 : null;
     const sqft = data.subjectBuildingSqft ?? 0;
-    // Screening-phase Gap: opportunity vs list price.
-    const gapPerSqft = listPrice > 0 && sqft > 0
+    const gapListPerSqft = listPrice > 0 && sqft > 0
       ? Math.round((arv - listPrice) / sqft)
+      : null;
+    const gapOfferPerSqft = sqft > 0
+      ? Math.round((arv - maxOffer) / sqft)
       : null;
     const negotiationGap = listPrice > 0
       ? Math.round(maxOffer - listPrice)
       : null;
-    return { arv, maxOffer, offerPct, gapPerSqft, negotiationGap, rehabTotal, targetProfit };
+    return { arv, maxOffer, offerPct, gapListPerSqft, gapOfferPerSqft, negotiationGap, rehabTotal, targetProfit };
   }, [data, manualArvInput, manualTargetProfitInput, manualRehabInput]);
 
   // Dedup confirmation state — when the user already has an active
@@ -470,6 +473,9 @@ export function ScreeningCompModal({
                 origListPrice: $f(data.originalListPrice),
                 ucDate: data.ucDate ?? "—",
                 listPrice: $f(data.subjectListPrice),
+                netClosePrice: data.closePrice != null
+                  ? $f((data.closePrice) - (data.concessionsAmount ?? 0))
+                  : "\u2014",
                 closeDate: data.closeDate ?? "—",
               }}
               physical={{
@@ -521,7 +527,8 @@ export function ScreeningCompModal({
             arv={liveDeal.arv}
             maxOffer={liveDeal.maxOffer}
             offerPct={liveDeal.offerPct}
-            gapPerSqft={liveDeal.gapPerSqft}
+            gapListPerSqft={liveDeal.gapListPerSqft}
+            gapOfferPerSqft={liveDeal.gapOfferPerSqft}
             negotiationGap={liveDeal.negotiationGap}
             rehabTotal={liveDeal.rehabTotal}
             targetProfit={liveDeal.targetProfit}
@@ -551,7 +558,7 @@ export function ScreeningCompModal({
           mapPins={mapPins}
           liveDeal={
             liveDeal
-              ? { arv: liveDeal.arv, gapPerSqft: liveDeal.gapPerSqft }
+              ? { arv: liveDeal.arv, gapListPerSqft: liveDeal.gapListPerSqft }
               : null
           }
           compStats={compStats}

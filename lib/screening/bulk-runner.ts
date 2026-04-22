@@ -992,108 +992,409 @@ export type RunScreeningBatchResult = {
   primeCandidates: number;
 };
 
+// ---------------------------------------------------------------------------
+// Chunked screening API
+//
+// The batch runs across multiple server-action invocations so it can survive
+// Vercel's per-request timeout on large batches (5k subjects can take many
+// minutes of CPU-bound scoring).
+//
+// Flow:
+//   1. startScreeningBatch  — stores the full subject-ID list on the batch
+//      row and marks it running. Fast; safe to run in any action.
+//   2. runScreeningChunk    — processes the next N subjects. The offset is
+//      derived from count(screening_results WHERE batch_id = X), so chunk
+//      boundaries are crash-safe: a killed invocation just resumes where it
+//      stopped on the next tick.
+//   3. Repeat chunks until `done: true`. The last chunk marks the batch
+//      complete and records a summary.
+// ---------------------------------------------------------------------------
+
+// Each chunk pays ~10–20s of comp-pool load overhead (30–60k rows across
+// three tables) before it can score anything. Bigger chunks amortize that
+// cost; too big and we risk a single kill wiping significant progress.
+// 250 leaves headroom under a 300s maxDuration while keeping chunks cheap.
+const DEFAULT_CHUNK_SIZE = 250;
+
+type PendingBatchState = {
+  pendingSubjectIds: string[];
+  subjectFilter: Record<string, unknown>;
+};
+
+async function readPendingBatchState(
+  supabase: any,
+  batchId: string,
+): Promise<PendingBatchState> {
+  const { data: batch, error } = await supabase
+    .from("screening_batches")
+    .select("subject_filter_json")
+    .eq("id", batchId)
+    .single();
+
+  if (error || !batch) {
+    throw new Error(
+      `Screening batch ${batchId} not found: ${error?.message ?? "unknown"}`,
+    );
+  }
+
+  const filter = (batch.subject_filter_json ?? {}) as Record<string, unknown>;
+  const pending = Array.isArray(filter.pendingSubjectIds)
+    ? (filter.pendingSubjectIds as string[])
+    : [];
+
+  return { pendingSubjectIds: pending, subjectFilter: filter };
+}
+
+export type StartScreeningBatchInput = {
+  supabase: any;
+  batchId: string;
+  subjectPropertyIds: string[];
+  extraFilter?: Record<string, unknown>;
+};
+
+/** Records the subject list and marks the batch running. Fast; no scoring. */
+export async function startScreeningBatch(
+  input: StartScreeningBatchInput,
+): Promise<void> {
+  const { supabase, batchId, subjectPropertyIds, extraFilter } = input;
+
+  const { error } = await supabase
+    .from("screening_batches")
+    .update({
+      status: "running",
+      started_at: new Date().toISOString(),
+      total_subjects: subjectPropertyIds.length,
+      screened_count: 0,
+      qualified_count: 0,
+      prime_candidate_count: 0,
+      subject_filter_json: {
+        ...(extraFilter ?? {}),
+        pendingSubjectIds: subjectPropertyIds,
+      },
+    })
+    .eq("id", batchId);
+
+  if (error) {
+    throw new Error(`Failed to start screening batch: ${error.message}`);
+  }
+}
+
+export type RunScreeningChunkInput = {
+  supabase: any;
+  batchId: string;
+  profile: FlipStrategyProfile;
+  chunkSize?: number;
+};
+
+export type RunScreeningChunkResult = {
+  batchId: string;
+  status: "running" | "complete" | "error";
+  totalSubjects: number;
+  screenedSoFar: number;
+  primeSoFar: number;
+  chunkProcessed: number;
+  done: boolean;
+  errorMessage?: string;
+};
+
+/** Processes the next chunk of subjects. Idempotent against killed ticks. */
+export async function runScreeningChunk(
+  input: RunScreeningChunkInput,
+): Promise<RunScreeningChunkResult> {
+  const { supabase, batchId, profile } = input;
+  const chunkSize = input.chunkSize ?? DEFAULT_CHUNK_SIZE;
+
+  const state = await readPendingBatchState(supabase, batchId);
+  const totalSubjects = state.pendingSubjectIds.length;
+
+  // Offset = rows already written for this batch. Crash-safe.
+  const { count: alreadyWritten, error: countError } = await supabase
+    .from("screening_results")
+    .select("id", { count: "exact", head: true })
+    .eq("screening_batch_id", batchId);
+
+  if (countError) {
+    throw new Error(`Failed to read batch progress: ${countError.message}`);
+  }
+
+  const offset = alreadyWritten ?? 0;
+
+  if (offset >= totalSubjects) {
+    await finalizeBatch(supabase, batchId, totalSubjects);
+    const primeSoFar = await countPrimeForBatch(supabase, batchId);
+    return {
+      batchId,
+      status: "complete",
+      totalSubjects,
+      screenedSoFar: offset,
+      primeSoFar,
+      chunkProcessed: 0,
+      done: true,
+    };
+  }
+
+  const chunkIds = state.pendingSubjectIds.slice(offset, offset + chunkSize);
+
+  try {
+    await processChunk({
+      supabase,
+      batchId,
+      subjectPropertyIds: chunkIds,
+      profile,
+    });
+
+    const screenedSoFar = offset + chunkIds.length;
+    const primeSoFar = await countPrimeForBatch(supabase, batchId);
+    const done = screenedSoFar >= totalSubjects;
+
+    const patch: Record<string, unknown> = {
+      screened_count: screenedSoFar,
+      qualified_count: screenedSoFar,
+      prime_candidate_count: primeSoFar,
+    };
+    if (done) {
+      patch.status = "complete";
+      patch.completed_at = new Date().toISOString();
+      patch.summary_json = {
+        screened: screenedSoFar,
+        primeCandidates: primeSoFar,
+        totalSubjects,
+      };
+    }
+
+    await supabase.from("screening_batches").update(patch).eq("id", batchId);
+
+    return {
+      batchId,
+      status: done ? "complete" : "running",
+      totalSubjects,
+      screenedSoFar,
+      primeSoFar,
+      chunkProcessed: chunkIds.length,
+      done,
+    };
+  } catch (err) {
+    const errorMessage =
+      err instanceof Error ? err.message : "Unknown chunk error";
+    await supabase
+      .from("screening_batches")
+      .update({
+        status: "error",
+        summary_json: { error: errorMessage, offset, chunkSize: chunkIds.length },
+      })
+      .eq("id", batchId);
+    throw err;
+  }
+}
+
+async function countPrimeForBatch(
+  supabase: any,
+  batchId: string,
+): Promise<number> {
+  const { count } = await supabase
+    .from("screening_results")
+    .select("id", { count: "exact", head: true })
+    .eq("screening_batch_id", batchId)
+    .eq("is_prime_candidate", true);
+  return count ?? 0;
+}
+
+async function finalizeBatch(
+  supabase: any,
+  batchId: string,
+  totalSubjects: number,
+): Promise<void> {
+  const { data: batch } = await supabase
+    .from("screening_batches")
+    .select("status")
+    .eq("id", batchId)
+    .single();
+
+  if (batch?.status === "complete") return;
+
+  const primeSoFar = await countPrimeForBatch(supabase, batchId);
+
+  await supabase
+    .from("screening_batches")
+    .update({
+      status: "complete",
+      completed_at: new Date().toISOString(),
+      screened_count: totalSubjects,
+      qualified_count: totalSubjects,
+      prime_candidate_count: primeSoFar,
+      summary_json: {
+        screened: totalSubjects,
+        primeCandidates: primeSoFar,
+        totalSubjects,
+      },
+    })
+    .eq("id", batchId);
+}
+
+/** Core per-chunk work: load pool, score, write. Returns prime count for the chunk. */
+async function processChunk(args: {
+  supabase: any;
+  batchId: string;
+  subjectPropertyIds: string[];
+  profile: FlipStrategyProfile;
+}): Promise<{ chunkPrime: number }> {
+  const { supabase, batchId, subjectPropertyIds, profile } = args;
+
+  const pool = await loadCompPool(supabase, 365);
+  const subjects = await loadSubjects(supabase, subjectPropertyIds, pool);
+
+  const compProfileSlug = profile.compProfileSlugByType.detached;
+  const { data: compProfile } = await supabase
+    .from("comparable_profiles")
+    .select("id")
+    .eq("slug", compProfileSlug)
+    .maybeSingle();
+  const compProfileId = compProfile?.id ?? null;
+
+  const today = new Date();
+  const trendSalesPool = buildTrendSalesPool(pool);
+
+  const results: ScreeningResultRow[] = [];
+  const compRunData: Array<{
+    subjectPropertyId: string;
+    subjectListingId: string | null;
+    candidateRows: Record<string, unknown>[];
+    propertyTypeKey: PropertyTypeKey;
+  }> = [];
+
+  for (const propertyId of subjectPropertyIds) {
+    const subject = subjects.get(propertyId);
+    if (!subject) continue;
+
+    const referenceDate = resolveSubjectReferenceDate(subject.listing, today);
+
+    try {
+      const { result, candidateRows } = screenSubject(
+        subject,
+        pool,
+        profile,
+        referenceDate,
+        trendSalesPool,
+      );
+      results.push(result);
+      if (candidateRows.length > 0) {
+        const ptKey = resolvePropertyTypeKey(subject.physical.property_type);
+        compRunData.push({
+          subjectPropertyId: propertyId,
+          subjectListingId: subject.listing?.id ?? null,
+          candidateRows,
+          propertyTypeKey: ptKey,
+        });
+      }
+    } catch (err) {
+      results.push({
+        realPropertyId: propertyId,
+        listingRowId: null,
+        subjectAddress: subject.property.unparsed_address,
+        subjectCity: subject.property.city,
+        subjectPropertyType: subject.physical.property_type,
+        subjectListPrice: toNum(subject.listing?.list_price) || null,
+        subjectBuildingSqft: pickBuildingSqft(subject.physical),
+        subjectAboveGradeSqft: pickAboveGradeSqft(subject.physical),
+        subjectYearBuilt: subject.physical.year_built,
+        trend: null, arv: null, rehab: null, holding: null, transaction: null, financing: null, dealMath: null,
+        qualification: {
+          isPrimeCandidate: false,
+          qualifyingCompCount: 0,
+          reasons: [],
+          disqualifiers: ["Processing error"],
+        },
+        screeningStatus: "error",
+        errorMessage: err instanceof Error ? err.message : "Unknown processing error",
+      });
+    }
+  }
+
+  const compRunIds = await writeCompRuns(supabase, compRunData, compProfileId);
+  await writeScreeningResults(supabase, batchId, results, compRunIds, profile);
+
+  const chunkPrime = results.filter((r) => r.qualification.isPrimeCandidate).length;
+  return { chunkPrime };
+}
+
+// ---------------------------------------------------------------------------
+// Cancel / cleanup: delete a stuck or aborted batch and its dependent data.
+// screening_results cascades via FK, but comparable_search_runs only
+// set_nulls, so they need explicit cleanup.
+// ---------------------------------------------------------------------------
+
+export async function cancelScreeningBatch(
+  supabase: any,
+  batchId: string,
+): Promise<void> {
+  const { data: results } = await supabase
+    .from("screening_results")
+    .select("comp_search_run_id")
+    .eq("screening_batch_id", batchId);
+
+  const runIds = Array.from(
+    new Set(
+      (results ?? [])
+        .map((r: { comp_search_run_id: string | null }) => r.comp_search_run_id)
+        .filter((id: string | null): id is string => id !== null),
+    ),
+  ) as string[];
+
+  if (runIds.length > 0) {
+    const CHUNK = 200;
+    for (let i = 0; i < runIds.length; i += CHUNK) {
+      const slice = runIds.slice(i, i + CHUNK);
+      await supabase
+        .from("comparable_search_candidates")
+        .delete()
+        .in("comparable_search_run_id", slice);
+      await supabase
+        .from("comparable_search_runs")
+        .delete()
+        .in("id", slice);
+    }
+  }
+
+  // screening_results cascades on batch delete
+  const { error } = await supabase
+    .from("screening_batches")
+    .delete()
+    .eq("id", batchId);
+
+  if (error) {
+    throw new Error(`Failed to cancel screening batch: ${error.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Legacy all-in-one runner — kept for any caller that doesn't need chunking.
+// Will time out on large batches; prefer startScreeningBatch + runScreeningChunk
+// for anything over ~200 subjects.
+// ---------------------------------------------------------------------------
+
 export async function runScreeningBatch(
   input: RunScreeningBatchInput,
 ): Promise<RunScreeningBatchResult> {
   const { supabase, batchId, subjectPropertyIds, profile } = input;
 
-  await supabase
-    .from("screening_batches")
-    .update({ status: "running", started_at: new Date().toISOString(), total_subjects: subjectPropertyIds.length })
-    .eq("id", batchId);
+  await startScreeningBatch({ supabase, batchId, subjectPropertyIds });
 
-  try {
-    const pool = await loadCompPool(supabase, 365);
-    const subjects = await loadSubjects(supabase, subjectPropertyIds, pool);
+  let screenedSoFar = 0;
+  let primeSoFar = 0;
 
-    // Look up a comparable profile ID for the comp run records
-    const compProfileSlug = profile.compProfileSlugByType.detached;
-    const { data: compProfile } = await supabase
-      .from("comparable_profiles")
-      .select("id")
-      .eq("slug", compProfileSlug)
-      .maybeSingle();
-    const compProfileId = compProfile?.id ?? null;
-
-    const today = new Date();
-    const trendSalesPool = buildTrendSalesPool(pool);
-
-    const results: ScreeningResultRow[] = [];
-    const compRunData: Array<{
-      subjectPropertyId: string;
-      subjectListingId: string | null;
-      candidateRows: Record<string, unknown>[];
-      propertyTypeKey: PropertyTypeKey;
-    }> = [];
-
-    for (const propertyId of subjectPropertyIds) {
-      const subject = subjects.get(propertyId);
-      if (!subject) continue;
-
-      // For closed/pending subjects, use the contract date as the reference
-      // point so comps that closed after the subject are excluded.
-      // Priority: purchase_contract_date > listing_contract_date > close_date > today
-      const referenceDate = resolveSubjectReferenceDate(subject.listing, today);
-
-      try {
-        const { result, candidateRows } = screenSubject(subject, pool, profile, referenceDate, trendSalesPool);
-        results.push(result);
-        if (candidateRows.length > 0) {
-          const ptKey = resolvePropertyTypeKey(subject.physical.property_type);
-          compRunData.push({
-            subjectPropertyId: propertyId,
-            subjectListingId: subject.listing?.id ?? null,
-            candidateRows,
-            propertyTypeKey: ptKey,
-          });
-        }
-      } catch (err) {
-        results.push({
-          realPropertyId: propertyId,
-          listingRowId: null,
-          subjectAddress: subject.property.unparsed_address,
-          subjectCity: subject.property.city,
-          subjectPropertyType: subject.physical.property_type,
-          subjectListPrice: toNum(subject.listing?.list_price) || null,
-          subjectBuildingSqft: pickBuildingSqft(subject.physical),
-          subjectAboveGradeSqft: pickAboveGradeSqft(subject.physical),
-          subjectYearBuilt: subject.physical.year_built,
-          trend: null, arv: null, rehab: null, holding: null, transaction: null, financing: null, dealMath: null,
-          qualification: { isPrimeCandidate: false, qualifyingCompCount: 0, reasons: [], disqualifiers: ["Processing error"] },
-          screeningStatus: "error",
-          errorMessage: err instanceof Error ? err.message : "Unknown processing error",
-        });
-      }
-    }
-
-    // Write comp runs + candidates to relational tables
-    const compRunIds = await writeCompRuns(supabase, compRunData, compProfileId);
-
-    // Write screening results (with comp_search_run_id linkage)
-    await writeScreeningResults(supabase, batchId, results, compRunIds, profile);
-
-    const screened = results.filter((r) => r.screeningStatus === "screened").length;
-    const skipped = results.filter((r) => r.screeningStatus === "skipped").length;
-    const errors = results.filter((r) => r.screeningStatus === "error").length;
-    const primeCandidates = results.filter((r) => r.qualification.isPrimeCandidate).length;
-
-    await supabase
-      .from("screening_batches")
-      .update({
-        status: "complete", screened_count: screened, qualified_count: screened,
-        prime_candidate_count: primeCandidates, completed_at: new Date().toISOString(),
-        summary_json: { screened, skipped, errors, primeCandidates, totalSubjects: subjectPropertyIds.length },
-      })
-      .eq("id", batchId);
-
-    return { screened, skipped, errors, primeCandidates };
-  } catch (err) {
-    await supabase
-      .from("screening_batches")
-      .update({ status: "error", summary_json: { error: err instanceof Error ? err.message : "Unknown error" } })
-      .eq("id", batchId);
-    throw err;
+  while (true) {
+    const tick = await runScreeningChunk({ supabase, batchId, profile });
+    screenedSoFar = tick.screenedSoFar;
+    primeSoFar = tick.primeSoFar;
+    if (tick.done) break;
   }
+
+  return {
+    screened: screenedSoFar,
+    skipped: 0,
+    errors: 0,
+    primeCandidates: primeSoFar,
+  };
 }
 
 // ---------------------------------------------------------------------------

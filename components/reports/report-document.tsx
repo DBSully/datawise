@@ -111,11 +111,12 @@ export function ReportDocument({ report, title, mapSlot }: Props) {
           <SectionTitle>Deal Math</SectionTitle>
 
           {/* Summary cards */}
-          <div className="mb-3 grid grid-cols-4 gap-2">
+          <div className="mb-3 grid grid-cols-5 gap-2">
             {[
               { label: "ARV", value: fmt(dm.arv) },
               { label: "Max Offer", value: fmt(dm.maxOffer) },
-              { label: "Gap/SqFt", value: `$${fmtNum(dm.estGapPerSqft)}` },
+              { label: "Gap (List)", value: `$${fmtNum(dm.gapListPerSqft ?? dm.estGapPerSqft)}` },
+              { label: "Gap (Offer)", value: `$${fmtNum(dm.gapOfferPerSqft)}` },
               { label: "Neg Gap", value: dm.negotiationGap != null ? fmt(dm.negotiationGap) : "—" },
             ].map((card) => (
               <div key={card.label} className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-center">
@@ -245,6 +246,7 @@ export function ReportDocument({ report, title, mapSlot }: Props) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-left text-[10px] uppercase tracking-wider text-slate-500">
+                  <th className="px-2 py-1.5">MLS #</th>
                   <th className="w-6 px-1.5 py-1.5 text-center">#</th>
                   <th className="px-2 py-1.5">Address</th>
                   <th className="px-2 py-1.5 text-right">Close Price</th>
@@ -257,6 +259,7 @@ export function ReportDocument({ report, title, mapSlot }: Props) {
               <tbody>
                 {r.selectedComps.map((comp, i) => (
                   <tr key={i} className="border-b border-slate-100 last:border-0">
+                    <td className="px-2 py-1.5 font-mono text-slate-700">{comp.mlsNumber ?? "—"}</td>
                     <td className="px-1.5 py-1.5 text-center">
                       <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-600 text-[8px] font-bold text-white">
                         {i + 1}

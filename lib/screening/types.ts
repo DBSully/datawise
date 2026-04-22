@@ -277,7 +277,11 @@ export type DealMathResult = {
   offerPct: number | null;
   /** Opportunity signal: ARV - listPrice. Null when no list price. */
   spread: number | null;
-  /** Opportunity signal per sqft: spread / buildingSqft. Null when no list price. */
+  /** Gap (List): (ARV - listPrice) / buildingSqft. Null when no list price. */
+  gapListPerSqft: number | null;
+  /** Gap (Offer): (ARV - maxOffer) / buildingSqft. Always computable when ARV > 0. */
+  gapOfferPerSqft: number | null;
+  /** @deprecated Use gapListPerSqft. Kept for DB backward compat during migration. */
   estGapPerSqft: number | null;
   /** Negotiation room: maxOffer - listPrice. Positive = max offer above list. Null when no list price. */
   negotiationGap: number | null;

@@ -1,3 +1,164 @@
+## 2026-04-21 — Send Basic Email: deal summaries from the Analysis Workstation
+
+Partners occasionally want a quick, self-contained deal summary they can read in their inbox — no portal login, no clickthrough. This ships a new "Send Basic Email" action on the Analysis Workstation alongside the existing "Share" button. Intentionally temporary: it complements the partner-share portal flow rather than replacing it, and is expected to stay in place as a casual non-login channel until the partner portal is further refined.
+
+### What the analyst sees
+
+A new button in the workstation header opens a modal with:
+- **To** — free-form email input (contacts list will land in a later pass)
+- **CC me** — checkbox prefilled with the current analyst's email, editable
+- **Subject** — prefilled `Deal Analysis - {address}`, editable
+- **Comment** — free-text block that renders at the top of the email in an amber block
+- **Live preview** — sandboxed iframe that re-renders on every keystroke via the same pure renderer the server uses to send
+- **Recent sends** — last 20 emails for this analysis (recipient, cc, subject, sender, timestamp, and the analyst comment as a quoted block when present)
+
+### Email body
+
+`lib/analysis/render-deal-email.ts` — a pure string renderer. Table-based layout with every style inlined because Gmail strips `<style>` blocks and Outlook needs explicit `<table>` structure. Sections mirror the PDF report's order:
+
+1. Subject Property — address, MLS #, status, list price, list date, physical specs
+2. Deal Math — accounting waterfall (ARV → costs → Maximum Offer). Negatives use a minus-sign prefix (Unicode U+2212), not parens, for cleaner right-edge alignment in monospace. Spacer row after Maximum Offer separates the waterfall conclusion from the derived metrics (Offer %, Spread, Negotiation Gap).
+3. Holding & Transaction Costs — two side-by-side tables. Labels reference "Dispo Commission — Buyer/Seller" (not bare "Commission") to match how the analyst reads it.
+4. Comparable Sales — MLS # is the leftmost column. Added to `ReportSelectedComp` and propagated into the PDF report's comp table as well.
+5. Analysis Notes — public-visibility notes only (same filter as PDF).
+
+Rehab category breakdown is intentionally omitted — just the Rehab Budget total inside the Deal Math line. The design intent is "lightweight summary," not "condensed PDF." The List Price row is also deliberately kept out of the Deal Math waterfall (it lives in Subject Property) because mixing current market price into the ARV→offer calculation chain reads confusingly.
+
+### Server actions — `lib/analysis/email-actions.ts`
+
+- `loadDealEmailPreviewAction(analysisId, propertyId)` — loads live workstation data via the existing `loadWorkstationData` + `buildReportSnapshot`, returns the `ReportContentJson` plus the default subject and cc-email. The client re-renders preview locally from this payload on every keystroke.
+- `sendDealEmailAction(input)` — **re-loads fresh workstation data on the server** and re-renders the body so the client can't tamper with what actually gets sent. Validates `to` / `cc` format, sends via Resend from `DataWise <analysis@datawisere.com>` with `reply-to = analyst's email`, then logs metadata to `analysis_email_sends`.
+- `loadRecentEmailSendsAction(analysisId)` — pulls the last 20 sends, joins `profiles` to show sender names.
+
+### Schema — `20260421120000_create_analysis_email_sends.sql`
+
+Metadata-only log: `analysis_id`, `sent_by_user_id`, `recipient_email`, `cc_email`, `subject`, `analyst_comment`, `resend_message_id`, `sent_at`. The body HTML is **not** stored — rebuildable from the live analysis if a forensic re-render is ever needed, and 10–40KB of HTML per row would bloat the table with no durable value.
+
+### Type extension — `ReportSelectedComp` + `listing`
+
+`lib/reports/types.ts`:
+- `ReportSelectedComp.mlsNumber: string | null` — first field; leftmost column in both the email comps table and the PDF report.
+- `ReportContentJson.listing.listingContractDate: string | null` — surfaced as "List Date" in the Subject Property section.
+
+Both populated in `buildReportSnapshot` — `mlsNumber` reads `metrics_json.listing_id`, list date from `data.listing.listingContractDate`.
+
+### Deferred decisions
+
+- **Map embed at the bottom of the email** — possible but requires a static-map service (Mapbox / Google / etc.). Infra not yet wired. Deferred per user direction; documented in memory.
+
+### Files
+
+- New: `lib/analysis/email-actions.ts`, `lib/analysis/render-deal-email.ts`, `components/workstation/send-basic-email-modal.tsx`, `supabase/migrations/20260421120000_create_analysis_email_sends.sql`.
+- Modified: `lib/reports/types.ts`, `lib/reports/snapshot.ts`, `components/reports/report-document.tsx` (MLS column leftmost), `app/(workspace)/analysis/[analysisId]/analysis-workstation.tsx` (button + modal mount).
+
+---
+
+## 2026-04-21 — Screening intake hang fix: auto-navigate + inline first chunk
+
+Small-to-medium screening batches appeared to "hang" after uploads. Observed wall-clock times across five recent batches: 313/313 in 4m2s, 1/1 in 6m30s, 1/1 in 1m20s, 200/200 in 53m12s, 424/424 in 90m15s. The pattern: the batch `started_at → completed_at` delta scaled linearly with how long the analyst waited before manually opening the batch page — not with the number of subjects.
+
+### Root cause
+
+The screening pipeline is browser-polled. `runScreeningChunk` only runs when the `BatchProgressTracker` client component is mounted on `/screening/[batchId]`, and `startScreeningBatch` alone just records the subject list and flips status to `running` — it doesn't score anything.
+
+The Re-screen and Screen-All buttons already redirect to the batch page, so they tick immediately. But the upload flow goes through `previewImportAction`, invoked via `useActionState` — those actions return state, they can't `redirect()`. So after an upload the analyst landed back on `/intake/imports` with a "View screening progress →" link, and the batch sat idle in `running` status until someone clicked it.
+
+### Fix A — auto-navigate after upload
+
+`components/imports/import-upload-panel.tsx` — a `useEffect` watches for `state.screeningBatchId` and calls `router.push(\`/screening/${id}\`)` as soon as the preview action completes. The tracker mounts and starts ticking without a manual click.
+
+### Fix B — run the first chunk server-side
+
+Every action that calls `startScreeningBatch` now also calls `runScreeningChunk` before returning / redirecting, wrapped in a try/catch that swallows errors. The chunk offset is derived from `count(screening_results WHERE batch_id = X)` — already crash-safe — so a killed Lambda just resumes on the next tracker poll. Four action sites:
+
+- `runScreeningAction` (manual Screen All Active / All Coming Soon / etc.)
+- `runImportScreeningAction` (Re-screen button on imports table)
+- `processImportBatchAction` (Process button on a staged import)
+- `previewImportAction` (post-upload auto-screen)
+
+Batches of ≤250 subjects (one chunk) now finish entirely inside the originating action. Larger batches arrive at `/screening/[batchId]` with the first 250 already done and visible; the tracker takes over for the remaining chunks.
+
+### Observed after fix
+
+- 124 subjects: finished under a minute with no user interaction.
+- 1520 subjects: batch row reported ~9 min (`started_at → completed_at`). User's perceived time was 20–30 min because `started_at` is stamped by `startScreeningBatch`, which runs *after* `processImportBatch`. For a 1520-subject import `processImportBatch` alone is several minutes; the difference is legitimate accounting, not a regression.
+
+### Known remaining cost (unchanged)
+
+Every chunk still cold-reloads the comp pool (~30–60k rows across three tables). For multi-chunk batches that's 10–20s redundant per tick. Documented as the next perf lever in the 2026-04-20 entry; unchanged by this pass.
+
+### Files
+
+`components/imports/import-upload-panel.tsx`, `app/(workspace)/screening/actions.ts`, `app/(workspace)/intake/imports/actions.ts`.
+
+---
+
+## 2026-04-20 — Chunked Screening Runner for Large Batches
+
+A 774-row import froze the `/intake/imports` page mid-run and left the screening batch stuck with `status: 'running'` and only partial results. Root cause: the auto-screen step was invoking `runScreeningBatch` inline inside `previewImportAction` / `processImportBatchAction`, synchronously scoring every subject and writing ~774 `screening_results` + up to ~19,000 `comparable_search_candidates` + 774 `comparable_search_runs` inside a single server-action invocation. That exceeded Vercel's per-request timeout; the function was killed mid-flight and the batch was abandoned.
+
+Target scale — 5K-record batches running 1–2× per month — makes a synchronous runner a permanent bottleneck, not a one-off bug.
+
+### Architecture: split the runner
+
+`lib/screening/bulk-runner.ts` now exposes three operations instead of one:
+
+- **`startScreeningBatch({ supabase, batchId, subjectPropertyIds })`** — fast. Stores the subject list in `screening_batches.subject_filter_json.pendingSubjectIds`, sets `status='running'`, resets counters. No scoring.
+- **`runScreeningChunk({ supabase, batchId, profile, chunkSize })`** — processes the next N subjects. Offset is derived from `count(screening_results WHERE screening_batch_id = X)`, so a killed tick resumes cleanly from whatever was persisted. Default chunk size: **250**.
+- **`cancelScreeningBatch(supabase, batchId)`** — deletes the batch (cascading `screening_results`) and cleans up the linked `comparable_search_runs` + `comparable_search_candidates` that only have `on delete set null`.
+
+The legacy `runScreeningBatch` is kept as a thin wrapper that loops through chunks — callable from places that don't need browser-driven polling, but no longer used on the hot path.
+
+### Browser-polled progress
+
+`components/screening/batch-progress-tracker.tsx` — client component that sits at the top of `/screening/[batchId]` whenever the batch status is `running` or `pending`. It calls `runScreeningTickAction(batchId)` back-to-back with a 500ms yield between ticks, updates a progress bar and prime-candidate counter, and `router.refresh()`es the page when done so the results table populates.
+
+The 500ms delay exists specifically to prevent a tight-spin in React strict-mode dev: if a remount kicks off a second loop while a tick is still in flight, the `tickingRef` guard makes the duplicate call return immediately — without a yield, that pegged the event loop and triggered "page not responding" in the browser.
+
+### Server-action surface
+
+In `app/(workspace)/screening/actions.ts`:
+- `runScreeningAction` and `runImportScreeningAction` no longer run the screening inline. They resolve subject IDs, insert the `screening_batches` row, call `startScreeningBatch`, and redirect to `/screening/[batchId]` — where the tracker takes over.
+- New `runScreeningTickAction(batchId)` returns a `RunScreeningChunkResult` JSON payload for the tracker to consume.
+- New `cancelScreeningBatchAction(formData)` — form-submitted Cancel button available on any non-complete batch in the Deal Screening table and on the batch detail page.
+
+In `app/(workspace)/intake/imports/actions.ts`:
+- `previewImportAction` processes the import and then calls `startScreeningBatch` (no more inline scoring). Returns a new `screeningBatchId` in `ImportPreviewState` so the success banner can link directly to the progress page.
+- `processImportBatchAction` redirects to `/screening/[screeningBatch.id]` instead of back to imports.
+
+### Runtime budget
+
+`maxDuration = 300` set on both `/screening/[batchId]/page.tsx` and `/intake/imports/page.tsx` — Vercel Pro's max. Server-action files can't export `maxDuration` (they must export only async functions), so it lives on the route segments that invoke them.
+
+### Observed vs expected performance
+
+- **Old inline runner (463 records):** ~2 min. Single comp-pool load, no retry churn.
+- **First chunked attempt (774 records, chunk=100, maxDuration=60):** 24 min. Each chunk ran ~60s, got killed, the client tracker retried from the persisted offset. Net: chunks completed ~30–50 subjects per kill cycle, padding a ~5 min workload to ~24 min of retry churn. Browser also hit "page not responding" dialogs because of the strict-mode tight-spin issue above.
+- **Current config (chunk=250, maxDuration=300):** expected ~5–7 min for 774 records, ~25–30 min for 5K.
+
+### Known remaining cost
+
+Every chunk reloads the full comp pool — `real_properties` + `property_physical` + last-365d closed `mls_listings`, paginated ~30–60k rows across three tables — because serverless invocations don't share memory. For a 5K run that's ~20 redundant loads of the same data.
+
+**Next optimization lever if this becomes painful:** persist the comp pool (or at least the filtered trend-sales pool) on the `screening_batches` row or in a short-lived temp table at `startScreeningBatch` time, and skip the reload in subsequent chunks. Estimated 30–40% speedup. Not worth doing preemptively; revisit when a 5K batch consistently exceeds 30 min wall clock.
+
+### Files
+
+- `lib/screening/bulk-runner.ts` — new `startScreeningBatch`, `runScreeningChunk`, `cancelScreeningBatch`, internal `processChunk` / `countPrimeForBatch` / `finalizeBatch` helpers. Legacy `runScreeningBatch` now wraps the chunk loop.
+- `app/(workspace)/screening/actions.ts` — added `runScreeningTickAction`, `cancelScreeningBatchAction`. Rewired `runScreeningAction` + `runImportScreeningAction`.
+- `app/(workspace)/intake/imports/actions.ts` — replaced inline `runScreeningBatch` calls with `startScreeningBatch`. Preview action returns `screeningBatchId`.
+- `components/screening/batch-progress-tracker.tsx` — new.
+- `components/imports/import-upload-panel.tsx` — success banner links to `/screening/[screeningBatchId]`.
+- `app/(workspace)/screening/[batchId]/page.tsx` — renders tracker when batch is running/pending; Cancel link for any non-complete batch; `maxDuration = 300`.
+- `app/(workspace)/intake/imports/page.tsx` — Cancel button on every non-complete screening batch in the Deal Screening table; `maxDuration = 300`.
+- `lib/imports/import-preview-state.ts` — added `screeningBatchId` field.
+
+### Cleanup note
+
+Two screening batches were left stuck from pre-fix runs. They couldn't be canceled from the old UI because the Cancel button didn't exist yet. With this change, any non-complete batch on `/intake/imports` → Deal Screening table has a Cancel button that deletes the batch row (cascading results) and its linked comp runs/candidates — no migration or SQL-console cleanup needed.
+
+---
+
 ## 2026-04-16 — Property Change Events + Per-Analyst Alerts
 
 Analysts were seeing re-screened properties as if they were new — no signal that work had already been done on them, no indication of what changed (price drops, status transitions). Result: duplicate analyses, lost context, repeated from-scratch reviews. This ships the alerting layer.

@@ -13,6 +13,7 @@ export type ImportPreviewState = {
   status: "idle" | "error" | "ready";
   message: string | null;
   batchId: string | null;
+  screeningBatchId: string | null;
   sourceSystem: string | null;
   importProfile: string | null;
   totalFiles: number;
@@ -31,6 +32,7 @@ export const initialImportPreviewState: ImportPreviewState = {
   status: "idle",
   message: null,
   batchId: null,
+  screeningBatchId: null,
   sourceSystem: null,
   importProfile: null,
   totalFiles: 0,

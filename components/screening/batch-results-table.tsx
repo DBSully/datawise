@@ -115,7 +115,7 @@ export function BatchResultsTable({ batchId, results }: BatchResultsTableProps) 
               <th className="text-right">ARV</th>
               <th className="text-right">Trend</th>
               <th className="text-right">Spread</th>
-              <th className="text-right">Gap/sqft</th>
+              <th className="text-right">Gap (List)</th>
               <th className="text-right">Comps</th>
               <th className="text-right">Rehab</th>
               <th className="text-right">Hold</th>

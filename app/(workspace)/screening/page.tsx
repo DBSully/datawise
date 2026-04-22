@@ -255,7 +255,7 @@ export default async function ScreeningQueuePage({
   };
 
   const sortOptions = [
-    { value: "gap_desc", label: "Gap $/sqft" },
+    { value: "gap_desc", label: "Gap (List) $/sqft" },
     { value: "offer_pct_desc", label: "Offer %" },
     { value: "spread_desc", label: "Spread" },
     { value: "arv_desc", label: "ARV" },

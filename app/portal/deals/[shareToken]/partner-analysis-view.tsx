@@ -156,11 +156,11 @@ export function PartnerAnalysisView({
     const listPrice = data.listing?.listPrice ?? 0;
     const offerPct = listPrice > 0 ? Math.round((maxOffer / listPrice) * 10000) / 10000 : null;
     const sqft = data.physical?.buildingSqft ?? 0;
-    // Analysis-phase Gap: opportunity at our max offer.
-    const gapPerSqft = sqft > 0 && arv > 0 ? Math.round((arv - maxOffer) / sqft) : null;
+    const gapListPerSqft = listPrice > 0 && sqft > 0 ? Math.round((arv - listPrice) / sqft) : null;
+    const gapOfferPerSqft = sqft > 0 && arv > 0 ? Math.round((arv - maxOffer) / sqft) : null;
     const negotiationGap = listPrice > 0 ? Math.round(maxOffer - listPrice) : null;
 
-    return { arv, maxOffer, offerPct, gapPerSqft, negotiationGap, rehabTotal, targetProfit };
+    return { arv, maxOffer, offerPct, gapListPerSqft, gapOfferPerSqft, negotiationGap, rehabTotal, targetProfit };
   }, [partnerArvInput, partnerRehabInput, partnerProfitInput, dealMath, data]);
 
   // ── Comp data from server (loaded via service-role client, no
@@ -192,11 +192,12 @@ export function PartnerAnalysisView({
       if (!lat || !lng || !Number.isFinite(lat) || !Number.isFinite(lng)) continue;
       const compSqft = Number(m.building_area_total_sqft) || null;
       const compNetPrice = Number(m.net_price) || Number(m.close_price) || 0;
-      const perCompGapPerSqft =
-        subjectSqft > 0 && compNetPrice > 0 && subjectListPrice > 0
-          ? Math.round((compNetPrice - subjectListPrice) / subjectSqft) : null;
       const compArvDetail = c.comp_listing_row_id
         ? serverCompData.arvByCompListingId[c.comp_listing_row_id] ?? null : null;
+      const compImpliedArv = compArvDetail?.arv ?? null;
+      const perCompGapPerSqft =
+        compImpliedArv != null && subjectSqft > 0 && subjectListPrice > 0
+          ? Math.round((compImpliedArv - subjectListPrice) / subjectSqft) : null;
       pins.push({
         id: c.id,
         lat, lng,
@@ -284,6 +285,9 @@ export function PartnerAnalysisView({
           origListPrice: fmt(data.listing?.originalListPrice),
           ucDate: fmtIsoDate(data.listing?.purchaseContractDate),
           listPrice: fmt(data.listing?.listPrice),
+          netClosePrice: data.listing?.closePrice != null
+            ? fmt((data.listing.closePrice) - (data.listing.concessionsAmount ?? 0))
+            : "\u2014",
           closeDate: fmtIsoDate(data.listing?.closeDate),
         }}
         physical={{
@@ -396,7 +400,8 @@ export function PartnerAnalysisView({
           arv={partnerLiveDeal.arv}
           maxOffer={partnerLiveDeal.maxOffer}
           offerPct={partnerLiveDeal.offerPct}
-          gapPerSqft={partnerLiveDeal.gapPerSqft}
+          gapListPerSqft={partnerLiveDeal.gapListPerSqft}
+          gapOfferPerSqft={partnerLiveDeal.gapOfferPerSqft}
           negotiationGap={partnerLiveDeal.negotiationGap}
           rehabTotal={partnerLiveDeal.rehabTotal}
           targetProfit={partnerLiveDeal.targetProfit}
@@ -407,7 +412,8 @@ export function PartnerAnalysisView({
           arv={dealMath.arv}
           maxOffer={dealMath.maxOffer}
           offerPct={dealMath.offerPct}
-          gapPerSqft={dealMath.estGapPerSqft}
+          gapListPerSqft={dealMath.gapListPerSqft ?? dealMath.estGapPerSqft}
+          gapOfferPerSqft={dealMath.gapOfferPerSqft ?? null}
           negotiationGap={dealMath.negotiationGap ?? null}
           rehabTotal={dealMath.rehabTotal}
           targetProfit={dealMath.targetProfit}
@@ -428,6 +434,7 @@ export function PartnerAnalysisView({
                 ? ({
                     ...serverCompData,
                     closePrice: null,
+                    concessionsAmount: null,
                     mlsStatus: null,
                     mlsNumber: null,
                     mlsChangeType: null,
@@ -455,6 +462,7 @@ export function PartnerAnalysisView({
                     trendRawRate: data.trend?.rawBlendedRate ?? null,
                     trendPositiveCapApplied: data.trend?.positiveRateCapApplied ?? false,
                     trendConfidence: data.trend?.confidence ?? null,
+                    gapOfferPerSqft: dealMath?.gapOfferPerSqft ?? null,
                     isPrimeCandidate: false,
                     reviewAction: null,
                     passReason: null,
@@ -465,7 +473,7 @@ export function PartnerAnalysisView({
             mapPins={compMapPins}
             liveDeal={{
               arv: dealMath?.arv ?? null,
-              gapPerSqft: dealMath?.estGapPerSqft ?? null,
+              gapListPerSqft: dealMath?.gapListPerSqft ?? dealMath?.estGapPerSqft ?? null,
             }}
             compStats={compStats}
             onToggleSelection={() => {}}
