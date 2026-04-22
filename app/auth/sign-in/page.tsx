@@ -2,6 +2,7 @@
 
 "use client";
 
+import Link from "next/link";
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -78,7 +79,9 @@ function SignInPageInner() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(
+    searchParams.get("error"),
+  );
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [loadingAction, setLoadingAction] = useState<
     "signin" | "signup" | null
@@ -114,9 +117,23 @@ function SignInPageInner() {
     setErrorMessage(null);
     setInfoMessage(null);
 
+    // emailRedirectTo must be listed in the Supabase dashboard's
+    // Auth → URL Configuration → Redirect URLs allowlist. The
+    // /auth/callback route exchanges the PKCE code and routes the
+    // user by role.
+    const nextParam = searchParams.get("next");
+    const callbackUrl = new URL(
+      "/auth/callback",
+      window.location.origin,
+    );
+    if (nextParam) callbackUrl.searchParams.set("next", nextParam);
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        emailRedirectTo: callbackUrl.toString(),
+      },
     });
 
     setLoadingAction(null);
@@ -127,14 +144,14 @@ function SignInPageInner() {
     }
 
     if (data.session) {
-      const destination = await getPostLoginPath(supabase, searchParams.get("next"));
+      const destination = await getPostLoginPath(supabase, nextParam);
       router.push(destination);
       router.refresh();
       return;
     }
 
     setInfoMessage(
-      "Account created. If email confirmation is enabled, check your inbox and confirm your signup before signing in.",
+      `Account created. Check your inbox at ${email} for a confirmation email, then click the link to finish signing in.`,
     );
   }
 
@@ -202,6 +219,15 @@ function SignInPageInner() {
           >
             {loadingAction === "signup" ? "Creating account..." : "Sign up"}
           </button>
+        </div>
+
+        <div className="pt-1">
+          <Link
+            href="/auth/forgot-password"
+            className="text-sm font-medium text-slate-700 underline"
+          >
+            Forgot password?
+          </Link>
         </div>
       </form>
     </main>

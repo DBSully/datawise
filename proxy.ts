@@ -33,6 +33,9 @@ const PUBLIC_PATHS = new Set<string>([
   "/methodology",
   "/contact",
   "/auth/sign-in",
+  "/auth/forgot-password",
+  "/auth/reset-password",
+  "/auth/callback",
 ]);
 
 /**

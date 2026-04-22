@@ -1,3 +1,72 @@
+## 2026-04-22 — Auth email overhaul: password reset, signup confirmation, Resend SMTP
+
+Dan couldn't log into his `dan@datawisere.com` profile on the deployed app — the auth user existed, but the site had no password-reset flow and the default Supabase sender was unreliable enough that email confirmation on signup had been disabled. This landed a full self-service auth-email flow through the already-connected Resend account, re-enabled confirmation-on-signup, and reassigned all historical analysis work from the legacy `danbsullivan@gmail.com` login to the canonical `dan@datawisere.com` account.
+
+### New pages / routes
+
+- `/auth/forgot-password` — email form that calls `supabase.auth.resetPasswordForEmail` with `redirectTo=<origin>/auth/callback?next=/auth/reset-password`.
+- `/auth/reset-password` — post-exchange form that calls `supabase.auth.updateUser({ password })`. Verifies a session cookie exists on mount; shows "request a new link" if the user navigated here directly.
+- `/auth/callback/route.ts` — server route handler. Reads the PKCE `?code=`, calls `exchangeCodeForSession`, then routes by role: partners → `/portal`, analysts → `/dashboard`, with `?next=/auth/*` targets honored for all roles so recovery / email-change flows aren't hijacked by role routing. Surfaces Supabase verification errors via `/auth/sign-in?error=...`.
+
+### Why the server-side exchange matters
+
+First attempt used a client-side `exchangeCodeForSession` inside `/auth/reset-password`. It failed with `PKCE code verifier not found in storage`. Root cause: `@supabase/ssr` writes the code verifier into an HTTP-only cookie that browser-side code cannot read. The fix is architectural, not a flag — all PKCE exchange must happen in a server route handler where the `createServerClient` has cookie access. The reset-password page is now just a form that runs on an already-established session. Saved as a memory rule so future work doesn't regress.
+
+### Sign-in page changes — `app/auth/sign-in/page.tsx`
+
+- Added "Forgot password?" link under the Sign in / Sign up buttons.
+- `handleSignUp` now passes `emailRedirectTo: <origin>/auth/callback?next=...` and surfaces a "check your inbox at {email}" message after signup (email confirmation is now required).
+- Initial `errorMessage` reads from `?error=` so messages bounced back from `/auth/callback` are visible.
+
+### Proxy — `proxy.ts`
+
+`/auth/forgot-password`, `/auth/reset-password`, `/auth/callback` added to `PUBLIC_PATHS`. Unauthenticated users (who by definition can't yet sign in) need to reach these.
+
+### Dashboard configuration (Supabase console)
+
+Code changes are paired with three dashboard-side changes that make the flow actually deliver email and land on the right URLs:
+
+1. **Auth → Settings → SMTP Settings** — custom SMTP enabled with Resend (`smtp.resend.com`, port `465`, username `resend`, password = Resend API key). Sender `auth@datawisere.com` / `DataWise RE`. Domain `datawisere.com` was verified in Resend (SPF / DKIM / DMARC records at registrar).
+2. **Auth → Providers → Email** — "Confirm email" toggled ON.
+3. **Auth → URL Configuration → Redirect URLs** — `http://localhost:3000/auth/callback` + the production Vercel domain equivalent added.
+
+The existing application-side emails (`lib/analysis/email-actions.ts`, `lib/partner-portal/share-actions.ts`) continue to send from `analysis@datawisere.com` via direct Resend API calls — different sender local-part by design, same verified domain. Auth SMTP config does NOT affect those paths.
+
+### Sender pattern going forward
+
+| Purpose | Sender | Where set |
+|---|---|---|
+| Auth (signup confirmation, password reset) | `DataWise RE <auth@datawisere.com>` | Supabase dashboard SMTP |
+| Deal emails | `DataWise <analysis@datawisere.com>` | `lib/analysis/email-actions.ts:13` |
+| Partner share invites | `DataWise <analysis@datawisere.com>` | `lib/partner-portal/share-actions.ts:131` |
+
+Single verified domain (`datawisere.com`) covers all three with one set of DNS records.
+
+### One-time data migration: ownership reassignment
+
+All historical analysis work had accumulated under `danbsullivan@gmail.com` (auth UUID `19d387a9-748e-41f0-9631-e19b11e74236`) during early testing. Reassigned to `dan@datawisere.com` (`725dd92d-7eb0-4d35-a335-563e7811044b`) via direct SQL in Supabase Studio. Seven ownership columns, 1,514 rows total:
+
+| Table | Column | Rows moved |
+|---|---|---|
+| `analyses` | `created_by_user_id` | 487 |
+| `screening_batches` | `created_by_user_id` | 101 |
+| `screening_results` | `reviewed_by_user_id` | 771 |
+| `comparable_search_runs` | `created_by_user_id` | 45 |
+| `analysis_reports` | `created_by_user_id` | 12 |
+| `analysis_email_sends` | `sent_by_user_id` | 0 |
+| `import_batches` | `uploaded_by_user_id` | 98 |
+
+`analysis_shares.shared_with_user_id` was deliberately **not** reassigned (it represents the partner a share was addressed to, not authorship). The 6 test-data share rows that pointed at the old account were deleted outright.
+
+No migration file — this was one-off user-data repair, not a schema change. Recorded here for provenance.
+
+### Files
+
+- New: `app/auth/callback/route.ts`, `app/auth/forgot-password/page.tsx`, `app/auth/reset-password/page.tsx`.
+- Modified: `app/auth/sign-in/page.tsx` (forgot-password link, emailRedirectTo, error-from-query, updated info message), `proxy.ts` (PUBLIC_PATHS additions).
+
+---
+
 ## 2026-04-21 — Send Basic Email: deal summaries from the Analysis Workstation
 
 Partners occasionally want a quick, self-contained deal summary they can read in their inbox — no portal login, no clickthrough. This ships a new "Send Basic Email" action on the Analysis Workstation alongside the existing "Share" button. Intentionally temporary: it complements the partner-share portal flow rather than replacing it, and is expected to stay in place as a casual non-login channel until the partner portal is further refined.
