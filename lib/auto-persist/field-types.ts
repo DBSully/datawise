@@ -47,10 +47,18 @@ export type FinancingFieldUpdate =
   | { field: "financing_points_manual"; value: number | null }
   | { field: "financing_ltv_manual"; value: number | null };
 
+/** Transaction Costs modal — 2 commission-rate overrides (Buyer /
+ *  Seller), decimals (0.02 = 2%). Profile default is 2%/2% on
+ *  DENVER_FLIP_V1. */
+export type TransactionFieldUpdate =
+  | { field: "disposition_commission_buyer_manual"; value: number | null }
+  | { field: "disposition_commission_seller_manual"; value: number | null };
+
 export type ManualAnalysisFieldUpdate =
   | QuickAnalysisFieldUpdate
   | QuickStatusManualFieldUpdate
-  | FinancingFieldUpdate;
+  | FinancingFieldUpdate
+  | TransactionFieldUpdate;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // analysis_pipeline fields (1 of 11)

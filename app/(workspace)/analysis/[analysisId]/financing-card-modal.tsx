@@ -39,12 +39,22 @@ function parsePctInput(s: string): number | null {
 type FinancingCardModalProps = {
   data: WorkstationData;
   analysisId: string;
+  /** Live cascade values driven by the Quick Analysis Days Held override.
+   *  Interest cost and total scale with effective days held; origination
+   *  stays server-static (one-time fee at closing). */
+  liveDeal: {
+    daysHeld: number;
+    daysHeldManual: boolean;
+    interestCost: number;
+    total: number;
+  };
   onClose: () => void;
 };
 
 export function FinancingCardModal({
   data,
   analysisId,
+  liveDeal,
   onClose,
 }: FinancingCardModalProps) {
   const fin = data.financing;
@@ -225,8 +235,8 @@ export function FinancingCardModal({
           <div className="mt-4 space-y-0.5 text-[11px]">
             <CostLine
               label={`Interest (@ $${fmtNum(fin.dailyInterest, 2)}/day)`}
-              value={fmt(fin.interestCost)}
-              sub={`${fin.daysHeld}d`}
+              value={fmt(liveDeal.interestCost)}
+              sub={`${liveDeal.daysHeld}d${liveDeal.daysHeldManual ? " · override" : ""}`}
             />
             <CostLine label="Origination" value={fmt(fin.originationCost)} />
             <CostLine
@@ -239,7 +249,7 @@ export function FinancingCardModal({
                 Financing Total
               </span>
               <span className="font-mono font-semibold text-slate-800">
-                {fmt(fin.total)}
+                {fmt(liveDeal.total)}
               </span>
             </div>
           </div>

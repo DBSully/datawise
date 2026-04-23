@@ -16,8 +16,10 @@
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { DetailModal } from "@/components/workstation/detail-modal";
+import { SaveStatusDot } from "@/components/workstation/save-status-dot";
 import { fmt, fmtNum } from "@/lib/reports/format";
 import type { WorkstationData, ArvPerCompDetail } from "@/lib/reports/types";
+import type { UseDebouncedSaveResult } from "@/lib/auto-persist/use-debounced-save";
 import {
   ANALYST_ADJ_CATEGORIES,
   emptyAdjustments,
@@ -30,8 +32,16 @@ import { saveCompAdjustmentAction } from "@/lib/auto-persist/save-comp-adjustmen
 type ArvCardModalProps = {
   data: WorkstationData;
   liveDeal: { arv: number; arvManual: boolean };
+  /** Controlled input + save-status for the Manual ARV override. Shared
+   *  with Quick Analysis so edits from either surface flow through one
+   *  debounced save. Empty string = no override (reverts to auto).
+   *  Optional — the partner-portal view of this modal is read-only and
+   *  omits these, causing the override input to be hidden. */
+  arvInput?: string;
+  setArvInput?: (s: string) => void;
+  arvSave?: UseDebouncedSaveResult;
+  autoArv?: number | null;
   onClose: () => void;
-  onEditManualArv?: () => void;
 };
 
 function TierChip({
@@ -66,8 +76,11 @@ function TierChip({
 export function ArvCardModal({
   data,
   liveDeal,
+  arvInput,
+  setArvInput,
+  arvSave,
+  autoArv,
   onClose,
-  onEditManualArv,
 }: ArvCardModalProps) {
   const router = useRouter();
   const arv = data.arv;
@@ -114,21 +127,58 @@ export function ArvCardModal({
         />
       </div>
 
-      {/* Effective ARV row */}
-      <div className="mt-4 flex items-baseline justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-        <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-          Effective ARV
-        </span>
-        <div className="text-right">
-          <span className="font-mono text-lg font-bold text-slate-900">
-            {fmt(effectiveArv)}
+      {/* Effective ARV + inline Manual Override input. Writes flow
+       *  through the lifted useDebouncedSave hook shared with the
+       *  Quick Analysis tile — one debounced save, one source of
+       *  truth for status UI. */}
+      <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+        <div className="flex items-baseline justify-between">
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Effective ARV
           </span>
-          {liveDeal.arvManual && (
-            <span className="ml-1 text-[9px] font-semibold text-indigo-600">
-              manual override
+          <div className="text-right">
+            <span className="font-mono text-lg font-bold text-slate-900">
+              {fmt(effectiveArv)}
             </span>
-          )}
+            {liveDeal.arvManual && (
+              <span className="ml-1 text-[9px] font-semibold text-indigo-600">
+                manual override
+              </span>
+            )}
+          </div>
         </div>
+        {setArvInput && arvSave && (
+          <div className="mt-2 flex items-center justify-between border-t border-slate-200 pt-2">
+            <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Manual ARV Override
+            </label>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                value={arvInput ?? ""}
+                onChange={(e) => setArvInput(e.target.value)}
+                placeholder={
+                  autoArv != null ? autoArv.toLocaleString() : "—"
+                }
+                className="w-[120px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-right text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
+              />
+              <SaveStatusDot
+                status={arvSave.status}
+                errorMessage={arvSave.errorMessage}
+              />
+              {arvInput && (
+                <button
+                  type="button"
+                  onClick={() => setArvInput("")}
+                  className="text-[10px] text-slate-400 hover:text-red-500"
+                  title="Clear override"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* PSF comparisons */}
@@ -231,21 +281,6 @@ export function ArvCardModal({
         </span>
       </div>
 
-      {/* Footer link */}
-      {onEditManualArv && (
-        <div className="mt-4 border-t border-slate-200 pt-3">
-          <button
-            type="button"
-            onClick={() => {
-              onClose();
-              onEditManualArv();
-            }}
-            className="text-xs font-semibold text-blue-600 hover:text-blue-800"
-          >
-            Edit Manual ARV →
-          </button>
-        </div>
-      )}
     </DetailModal>
   );
 }

@@ -763,12 +763,8 @@ function screenSubject(
     config: profile.holding,
   });
 
-  const transaction = calculateTransaction({
-    acquisitionPrice: costAnchor,
-    arvPrice: arv.arvAggregate,
-    config: profile.transaction,
-  });
-
+  // Financing runs before transaction so the FITCO matrix has a loan
+  // amount to feed into the Bundled Concurrent Loan Rate lookup.
   const financing = profile.financing.enabled
     ? calculateFinancing({
         arv: arv.arvAggregate,
@@ -776,6 +772,13 @@ function screenSubject(
         config: profile.financing,
       })
     : null;
+
+  const transaction = calculateTransaction({
+    acquisitionPrice: costAnchor,
+    arvPrice: arv.arvAggregate,
+    loanAmount: financing?.loanAmount ?? 0,
+    config: profile.transaction,
+  });
 
   const dealMath = calculateDealMath({
     arv: arv.arvAggregate,

@@ -586,14 +586,8 @@ export async function loadWorkstationData(
     config: profile.holding,
   }) : null;
 
-  // Transaction — full result
-  const transResult = effectiveArv > 0 ? calculateTransaction({
-    acquisitionPrice: costAnchor,
-    arvPrice: effectiveArv,
-    config: profile.transaction,
-  }) : null;
-
-  // Financing
+  // Financing — computed before transaction so the FITCO matrix has a
+  // loan amount to look up the Bundled Concurrent Loan Rate.
   const financingOverrides = {
     annualRate: manualAnalysis?.financing_rate_manual ? toNum(manualAnalysis.financing_rate_manual) : null,
     pointsRate: manualAnalysis?.financing_points_manual ? toNum(manualAnalysis.financing_points_manual) : null,
@@ -607,6 +601,25 @@ export async function loadWorkstationData(
         overrides: financingOverrides,
       })
     : null;
+
+  // Transaction — uses finResult.loanAmount (ARV × LTV) for the matrix
+  // lookup. Falls back to 0 if financing is disabled; the matrix then
+  // returns the $50k-tier loan rate ($400), a conservative minimum.
+  // Per-analysis commission overrides from manual_analysis flow in here
+  // too (analyst can bump default 2%/2% to a custom rate per deal).
+  const transactionOverrides = {
+    dispositionCommissionBuyerRate: manualAnalysis?.disposition_commission_buyer_manual
+      ? toNum(manualAnalysis.disposition_commission_buyer_manual) : null,
+    dispositionCommissionSellerRate: manualAnalysis?.disposition_commission_seller_manual
+      ? toNum(manualAnalysis.disposition_commission_seller_manual) : null,
+  };
+  const transResult = effectiveArv > 0 ? calculateTransaction({
+    acquisitionPrice: costAnchor,
+    arvPrice: effectiveArv,
+    loanAmount: finResult?.loanAmount ?? 0,
+    config: profile.transaction,
+    overrides: transactionOverrides,
+  }) : null;
 
   // Target profit (manual override or profile default)
   const manualTargetProfit = manualAnalysis?.target_profit_manual ? toNum(manualAnalysis.target_profit_manual) : null;

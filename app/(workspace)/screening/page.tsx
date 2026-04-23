@@ -91,50 +91,36 @@ export default async function ScreeningQueuePage({
     return cutoff.toISOString().slice(0, 10);
   })();
 
-  // Pre-query: the current analyst's active-analysis property IDs. We
-  // exclude these from the default queue (open your existing analysis
-  // instead). Properties where ANOTHER analyst has an active analysis
-  // remain visible — cross-analyst communication is the goal.
-  async function loadMyActiveAnalysisPropertyIds(): Promise<string[]> {
-    if (showReviewed || !currentUserId) return [];
-    const { data, error } = await supabase
-      .from("analyses")
-      .select("real_property_id, analysis_pipeline!inner(disposition, lifecycle_stage)")
-      .eq("created_by_user_id", currentUserId)
-      .eq("is_archived", false)
-      .in("analysis_pipeline.disposition", ["active", "closed"]);
-    if (error) throw new Error(error.message);
-    return Array.from(
-      new Set(
-        (data ?? [])
-          .map((r) => (r as { real_property_id: string }).real_property_id)
-          .filter((v): v is string => v != null),
-      ),
-    );
-  }
-
-  // Run filter options + pre-query in parallel. The mls_status /
+  // Run filter options in parallel. The mls_status /
   // listing_contract_date filters now apply directly to the slim view
   // (denormalized via migration 20260416240000), so no pre-query is
-  // needed for them.
+  // needed for them. The analyst's own active-analysis exclusion used
+  // to live here as a separate round-trip that fed a URL IN-list; it
+  // now lives server-side inside screening_queue_v (migration
+  // 20260422140000) so long analyst histories can't blow the URL.
   const [
     { data: cityRows },
     { data: typeRows },
     { data: statusRows },
-    myActiveAnalysisPropertyIds,
   ] = await Promise.all([
     supabase.from("property_city_options_v").select("city").order("city", { ascending: true }).range(0, 500),
     supabase.from("property_type_options_v").select("property_type").order("property_type", { ascending: true }).range(0, 100),
     supabase.from("mls_status_counts_v").select("mls_status").order("mls_status", { ascending: true }),
-    loadMyActiveAnalysisPropertyIds(),
   ]);
 
   const cities = (cityRows ?? []).map((r: { city: string }) => r.city).filter(Boolean);
   const propertyTypes = (typeRows ?? []).map((r: { property_type: string }) => r.property_type).filter(Boolean);
   const mlsStatuses = (statusRows ?? []).map((r: { mls_status: string }) => r.mls_status).filter(Boolean);
 
-  // Main query: slim view, all filters only touch screening_results columns.
-  let query = supabase.from("screening_results_latest_v").select("*");
+  // Main query: screening_queue_v already excludes caller-owned active
+  // analyses via auth.uid() in the view body. When the user has toggled
+  // "show reviewed", we want the full queue (including their own open
+  // deals), so fall back to the raw latest view. All other filters
+  // touch screening_results columns directly.
+  let query = (showReviewed
+    ? supabase.from("screening_results_latest_v")
+    : supabase.from("screening_queue_v")
+  ).select("*");
 
   if (cityFilter !== "all") query = query.eq("subject_city", cityFilter);
   if (typeFilter !== "all") query = query.eq("subject_property_type", typeFilter);
@@ -143,9 +129,6 @@ export default async function ScreeningQueuePage({
   // Denormalized MLS filters — direct column access, no pre-query.
   if (mlsStatusFilter !== "all") query = query.eq("latest_mls_status", mlsStatusFilter);
   if (listingDaysCutoffIso) query = query.gte("latest_listing_contract_date", listingDaysCutoffIso);
-  if (myActiveAnalysisPropertyIds.length > 0) {
-    query = query.not("real_property_id", "in", `(${myActiveAnalysisPropertyIds.join(",")})`);
-  }
   if (screenedDays && screenedDays > 0) {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - (screenedDays - 1));

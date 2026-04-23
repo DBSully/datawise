@@ -36,12 +36,14 @@ import { DetailModal } from "@/components/workstation/detail-modal";
 import { ArvCardModal } from "./arv-card-modal";
 import { CashRequiredCardModal } from "./cash-required-card-modal";
 import { FinancingCardModal } from "./financing-card-modal";
-import { HoldTransCardModal } from "./hold-trans-card-modal";
+import { HoldingCardModal } from "./holding-card-modal";
+import { TransactionCardModal } from "./transaction-card-modal";
 import { NotesCardModal } from "./notes-card-modal";
 import { PartnerSharingCardModal } from "./partner-sharing-card-modal";
 import { PipelineCardModal } from "./pipeline-card-modal";
 import { PriceTrendCardModal } from "./price-trend-card-modal";
 import { RehabCardModal } from "./rehab-card-modal";
+import { TargetProfitCardModal } from "./target-profit-card-modal";
 import { SendBasicEmailModal } from "@/components/workstation/send-basic-email-modal";
 import {
   loadAnalysisSharesAction,
@@ -54,6 +56,8 @@ import {
   parseDollarInput,
   parseIntInput,
 } from "@/components/workstation/quick-analysis-tile";
+import { useDebouncedSave } from "@/lib/auto-persist/use-debounced-save";
+import { saveManualAnalysisFieldAction } from "@/lib/auto-persist/save-manual-analysis-field-action";
 import { QuickStatusTile } from "@/components/workstation/quick-status-tile";
 import { SubjectTileRow } from "@/components/workstation/subject-tile-row";
 import { fmt, fmtNum } from "@/lib/reports/format";
@@ -132,6 +136,48 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
     initialDaysHeldManual != null ? String(initialDaysHeldManual) : "",
   );
 
+  // ── Auto-persist hooks (lifted from QuickAnalysisTile) ─────────────
+  // Each manual override field has a single useDebouncedSave hook
+  // rooted here at the workstation level. The resulting save-status
+  // object is passed down to BOTH the Quick Analysis tile AND the
+  // matching Deal Math card modal, so writes from either surface go
+  // through one debounced save — no duplicate writes, one source of
+  // truth for "saved / saving / error" UI state.
+  const arvSave = useDebouncedSave(parseDollarInput(arvInput), async (value) => {
+    await saveManualAnalysisFieldAction({
+      analysisId: data.analysisId,
+      field: "arv_manual",
+      value,
+    });
+  });
+  const rehabSave = useDebouncedSave(parseDollarInput(rehabInput), async (value) => {
+    await saveManualAnalysisFieldAction({
+      analysisId: data.analysisId,
+      field: "rehab_manual",
+      value,
+    });
+  });
+  const targetProfitSave = useDebouncedSave(
+    parseDollarInput(targetProfitInput),
+    async (value) => {
+      await saveManualAnalysisFieldAction({
+        analysisId: data.analysisId,
+        field: "target_profit_manual",
+        value,
+      });
+    },
+  );
+  const daysHeldSave = useDebouncedSave(
+    parseIntInput(daysHeldInput),
+    async (value) => {
+      await saveManualAnalysisFieldAction({
+        analysisId: data.analysisId,
+        field: "days_held_manual",
+        value,
+      });
+    },
+  );
+
   // ── Comp data state (declared early so liveDeal can read it) ────────
   const compSearchRunId = data.compModalData.latestRun?.id ?? null;
   const realPropertyId = data.propertyId;
@@ -179,20 +225,40 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
     const targetProfit =
       parsedTargetProfit ?? data.dealMath?.targetProfit ?? 40_000;
 
-    // Holding total: server-computed value if no override; if Days
-    // Held is overridden, scale the server's per-day rate by the new
-    // day count. This is the simplest cascade — full recomputation
-    // (re-running holding-engine) belongs in 3E.8 polish if needed.
+    // Effective days held — user override wins, else server-computed.
+    // Drives the cascading recomputation of holding line items and
+    // financing interest cost below.
     const serverDaysHeld = data.holding?.daysHeld ?? null;
-    const serverHoldTotal = data.holding?.total ?? 0;
-    const dailyHoldTotal = data.holding?.dailyTotal ?? 0;
-    const holdTotal =
+    const effectiveDaysHeld =
       parsedDaysHeld != null && parsedDaysHeld > 0
-        ? Math.round(dailyHoldTotal * parsedDaysHeld)
-        : serverHoldTotal;
+        ? parsedDaysHeld
+        : serverDaysHeld ?? 0;
+
+    // Holding: each line item (Tax, Ins, HOA, Util) scales with
+    // effective days held, and the total is the sum. Mirrors the
+    // server-side calculateHolding output shape so we can hand a full
+    // HoldingDetail to the modal and keep its line items in sync.
+    const h = data.holding;
+    const holdTax = h ? Math.round(h.dailyTax * effectiveDaysHeld) : 0;
+    const holdInsurance = h
+      ? Math.round(h.dailyInsurance * effectiveDaysHeld)
+      : 0;
+    const holdHoa = h ? Math.round(h.dailyHoa * effectiveDaysHeld) : 0;
+    const holdUtilities = h
+      ? Math.round(h.dailyUtilities * effectiveDaysHeld)
+      : 0;
+    const holdTotal = holdTax + holdInsurance + holdHoa + holdUtilities;
 
     const transactionTotal = data.transaction?.total ?? 0;
-    const financingTotal = data.financing?.total ?? 0;
+
+    // Financing: interest cost scales with days held (origination is a
+    // one-time fee at closing and does not). Mirrors the server-side
+    // calculateFinancing formula: interest = loan × rate × days/365.
+    const fin = data.financing;
+    const financingInterestCost = fin
+      ? Math.round(fin.loanAmount * fin.annualRate * (effectiveDaysHeld / 365))
+      : 0;
+    const financingTotal = fin ? financingInterestCost + fin.originationCost : 0;
 
     const costs =
       rehabTotal + holdTotal + transactionTotal + financingTotal + targetProfit;
@@ -222,8 +288,16 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
       rehabTotal,
       targetProfit,
       holdTotal,
+      // Per-line holding costs scaled by effectiveDaysHeld — feeds the
+      // Hold & Trans modal so its line items stay in sync with the total
+      // when Days Held is overridden.
+      holdTax,
+      holdInsurance,
+      holdHoa,
+      holdUtilities,
       transactionTotal,
       financingTotal,
+      financingInterestCost,
       // Track the parsed override values so cards downstream can detect
       // which fields are user-overridden vs auto-computed.
       arvManual: parsedArv != null,
@@ -231,7 +305,7 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
       targetProfitManual: parsedTargetProfit != null,
       daysHeldManual: parsedDaysHeld != null,
       // Effective days held (used by Holding card headline cascade)
-      daysHeld: parsedDaysHeld ?? serverDaysHeld ?? 0,
+      daysHeld: effectiveDaysHeld,
     };
   }, [
     arvInput,
@@ -436,8 +510,10 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
   type CardModalId =
     | "arv"
     | "rehab"
-    | "holdTrans"
+    | "holding"
+    | "transaction"
     | "financing"
+    | "targetProfit"
     | "cashRequired"
     | "priceTrend"
     | "pipeline"
@@ -457,6 +533,15 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
         onSendBasicEmail={() => setOpenModal("sendBasicEmail")}
       />
 
+      {/* TWO-COLUMN BODY — Deal Math cards live in the LEFT column (far
+       *  left) so the most important KPIs stay visible on narrow laptop
+       *  screens; the analysis workspace (subject tiles, recent activity
+       *  strip, deal stat strip, hero comp workspace) flows in the right
+       *  1fr column. DOM order is workspace-first (CSS `order` flips the
+       *  visual layout) so tab / screen-reader order still leads with
+       *  the primary content. */}
+      <div className="grid gap-2" style={{ gridTemplateColumns: "320px 1fr" }}>
+        <div className="flex flex-col gap-2" style={{ order: 2 }}>
       {/* TOP TILE ROW — 4 tiles. SubjectTileRow handles MLS Info +
        *  Property Physical (with bed/bath grid). QuickAnalysisTile
        *  handles the 4 auto-persisting numeric inputs. QuickStatusTile
@@ -527,9 +612,8 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
           }}
         />
 
-        {/* TILE 3 — Quick Analysis (auto-persist, controlled by parent) */}
+        {/* TILE 3 — Quick Analysis (controlled inputs + lifted save hooks) */}
         <QuickAnalysisTile
-          analysisId={data.analysisId}
           arvInput={arvInput}
           setArvInput={setArvInput}
           rehabInput={rehabInput}
@@ -538,6 +622,10 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
           setTargetProfitInput={setTargetProfitInput}
           daysHeldInput={daysHeldInput}
           setDaysHeldInput={setDaysHeldInput}
+          arvSave={arvSave}
+          rehabSave={rehabSave}
+          targetProfitSave={targetProfitSave}
+          daysHeldSave={daysHeldSave}
           autoArv={data.arv.effective}
           autoRehab={data.rehab.effective}
           autoTargetProfit={data.dealMath?.targetProfit ?? null}
@@ -585,9 +673,9 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
         }}
       />
 
-      {/* HERO + RIGHT COLUMN — 3E.5 (hero) + 3E.6 (right column) */}
-      <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 320px" }}>
-        <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+      {/* HERO COMP WORKSPACE — full left-column width (cards are in
+       *  the outer right column). */}
+      <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
           <CompWorkspace
             loading={compLoading}
             data={compData}
@@ -602,8 +690,13 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
             onReloadData={reloadCompData}
           />
         </div>
-        {/* RIGHT TILE COLUMN — 9 collapsible detail cards per spec §5 */}
-        <div className="flex flex-col gap-1.5">
+        </div>{/* close workspace column (visual right) */}
+
+        {/* DEAL MATH CARDS — 10 collapsible detail cards. Explicit
+         *  `order: 1` puts them in the visual LEFT column despite being
+         *  second in DOM. Aligned with the top of the Quick Analysis
+         *  tile so KPIs stay above the fold on laptop-height screens. */}
+        <div className="flex flex-col gap-1.5" style={{ order: 1 }}>
           {/* 1. ARV card — reads from liveDeal (cascade-affected) */}
           <DetailCard
             title="ARV"
@@ -621,7 +714,7 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
 
           {/* 2. Rehab card — reads from liveDeal (cascade-affected) */}
           <DetailCard
-            title="Rehab"
+            title="Rehab Budget"
             headline={fmt(liveDeal.rehabTotal)}
             context={`$${fmtNum(data.physical?.buildingSqft ? Math.round(liveDeal.rehabTotal / data.physical.buildingSqft) : 0)}/sf bldg`}
             badge={
@@ -634,11 +727,15 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
             onExpand={() => setOpenModal("rehab")}
           />
 
-          {/* 3. Holding & Transaction card — reads from liveDeal (cascade-affected via daysHeld) */}
+          {/* 3. Holding Costs card — cascade-affected via daysHeld */}
           <DetailCard
-            title="Hold & Trans"
-            headline={`Hold ${fmt(liveDeal.holdTotal)} · Trans ${fmt(liveDeal.transactionTotal)}`}
-            context={`${liveDeal.daysHeld} days held`}
+            title="Holding Costs"
+            headline={fmt(liveDeal.holdTotal)}
+            context={
+              data.holding
+                ? `${liveDeal.daysHeld} days held | $${fmtNum(data.holding.dailyTotal, 2)}/day`
+                : `${liveDeal.daysHeld} days held`
+            }
             badge={
               liveDeal.daysHeldManual ? (
                 <span className="rounded bg-emerald-100 px-1 py-0.5 text-[8px] font-semibold text-emerald-700">
@@ -646,22 +743,64 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
                 </span>
               ) : undefined
             }
-            onExpand={() => setOpenModal("holdTrans")}
+            onExpand={() => setOpenModal("holding")}
           />
 
-          {/* 4. Financing card — reads from server data (not cascade-affected by Quick Analysis) */}
+          {/* 4. Transaction Costs card — static against Quick Analysis
+           *  (FITCO matrix is price-based, not time-based). */}
+          <DetailCard
+            title="Transaction Costs"
+            headline={fmt(liveDeal.transactionTotal)}
+            context={
+              data.transaction
+                ? `Acq ${fmt(data.transaction.acquisitionSubtotal)} · Disp ${fmt(data.transaction.dispositionSubtotal)}`
+                : "No transaction data"
+            }
+            onExpand={() => setOpenModal("transaction")}
+          />
+
+          {/* 5. Financing card — interest cost cascades from Days Held
+           *  override (origination is a one-time fee and stays static). */}
           <DetailCard
             title="Financing"
-            headline={fmt(data.financing?.total)}
+            headline={fmt(data.financing ? liveDeal.financingTotal : null)}
             context={
               data.financing
-                ? `$${fmtNum(data.financing.loanAmount)} loan · ${fmtNum(data.financing.ltvPct * 100, 0)}% · ${fmtNum(data.financing.annualRate * 100, 1)}%`
+                ? `$${fmtNum(data.financing.loanAmount)} loan · ${fmtNum(data.financing.ltvPct * 100, 0)}% · ${fmtNum(data.financing.annualRate * 100, 1)}% · $${fmtNum(data.financing.dailyInterest, 2)}/day`
                 : "No financing data"
+            }
+            badge={
+              liveDeal.daysHeldManual && data.financing ? (
+                <span className="rounded bg-emerald-100 px-1 py-0.5 text-[8px] font-semibold text-emerald-700">
+                  Override
+                </span>
+              ) : undefined
             }
             onExpand={() => setOpenModal("financing")}
           />
 
-          {/* 5. Cash Required card — server data for now; full cascade through
+          {/* 6. Target Profit card — analyst assumption that flows into
+           *  Max Offer. Editable in both Quick Analysis and this modal
+           *  via the same lifted useDebouncedSave. */}
+          <DetailCard
+            title="Target Profit"
+            headline={fmt(liveDeal.targetProfit)}
+            context={
+              liveDeal.targetProfitManual
+                ? "Analyst override"
+                : "Strategy default"
+            }
+            badge={
+              liveDeal.targetProfitManual ? (
+                <span className="rounded bg-emerald-100 px-1 py-0.5 text-[8px] font-semibold text-emerald-700">
+                  Override
+                </span>
+              ) : undefined
+            }
+            onExpand={() => setOpenModal("targetProfit")}
+          />
+
+          {/* 7. Cash Required card — server data for now; full cascade through
            *  Quick Analysis → Cash Required is a 3E.8 polish item */}
           <DetailCard
             title="Cash Required"
@@ -751,6 +890,10 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
         <ArvCardModal
           data={data}
           liveDeal={{ arv: liveDeal.arv, arvManual: liveDeal.arvManual }}
+          arvInput={arvInput}
+          setArvInput={setArvInput}
+          arvSave={arvSave}
+          autoArv={data.arv.effective}
           onClose={() => setOpenModal(null)}
         />
       )}
@@ -771,19 +914,36 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
         <RehabCardModal
           data={data}
           rehabManual={liveDeal.rehabManual}
-          rehabManualValue={parseDollarInput(rehabInput)}
+          rehabInput={rehabInput}
+          setRehabInput={setRehabInput}
+          rehabSave={rehabSave}
+          autoRehab={data.rehab.effective}
           onClose={() => setOpenModal(null)}
         />
       )}
-      {openModal === "holdTrans" && (
-        <HoldTransCardModal
+      {openModal === "holding" && (
+        <HoldingCardModal
           data={data}
           liveDeal={{
+            holdTax: liveDeal.holdTax,
+            holdInsurance: liveDeal.holdInsurance,
+            holdHoa: liveDeal.holdHoa,
+            holdUtilities: liveDeal.holdUtilities,
             holdTotal: liveDeal.holdTotal,
-            transactionTotal: liveDeal.transactionTotal,
             daysHeld: liveDeal.daysHeld,
             daysHeldManual: liveDeal.daysHeldManual,
           }}
+          daysHeldInput={daysHeldInput}
+          setDaysHeldInput={setDaysHeldInput}
+          daysHeldSave={daysHeldSave}
+          autoDaysHeld={data.holding?.daysHeld ?? null}
+          onClose={() => setOpenModal(null)}
+        />
+      )}
+      {openModal === "transaction" && (
+        <TransactionCardModal
+          data={data}
+          analysisId={data.analysisId}
           onClose={() => setOpenModal(null)}
         />
       )}
@@ -791,6 +951,23 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
         <FinancingCardModal
           data={data}
           analysisId={data.analysisId}
+          liveDeal={{
+            daysHeld: liveDeal.daysHeld,
+            daysHeldManual: liveDeal.daysHeldManual,
+            interestCost: liveDeal.financingInterestCost,
+            total: liveDeal.financingTotal,
+          }}
+          onClose={() => setOpenModal(null)}
+        />
+      )}
+      {openModal === "targetProfit" && (
+        <TargetProfitCardModal
+          effectiveTargetProfit={liveDeal.targetProfit}
+          targetProfitManual={liveDeal.targetProfitManual}
+          targetProfitInput={targetProfitInput}
+          setTargetProfitInput={setTargetProfitInput}
+          targetProfitSave={targetProfitSave}
+          autoTargetProfit={data.dealMath?.targetProfit ?? null}
           onClose={() => setOpenModal(null)}
         />
       )}

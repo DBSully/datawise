@@ -1,3 +1,69 @@
+## 2026-04-22 — FITCO title matrix, Deal Math column redesign, inline overrides, screening URL-length fix
+
+A long session that reshaped the Analysis Workstation's right-hand "Deal Math" column and replaced the percentage-based transaction-cost model with Dan's actual FITCO / Chicago Title rate sheet. Also fixed a reproducible "TypeError: fetch failed" crash on `/screening` caused by a long URL IN-list when the analyst had accumulated many open analyses.
+
+### Days Held cascade bug fix
+
+Overriding Days Held in Quick Analysis updated `liveDeal.daysHeld` and the Hold & Trans card headline, but the per-line items in the modal (Property Tax, Insurance, HOA, Utilities) stayed frozen at server-computed day counts — and financing interest cost didn't cascade at all. `analysis-workstation.tsx` now recomputes each holding line item and the financing interest cost inside the `liveDeal` useMemo, using `daily × effectiveDaysHeld`. The modal receives pre-scaled values as props so totals reconcile with line items.
+
+### FITCO title matrix replaces percentage-based transaction costs
+
+Source: `reports/FITCO-Resale-Rate-Sheet_CT_Zone-1_Updated-01.02.26.pdf`. New module `lib/screening/title-matrix.ts` encodes both tables with round-up-to-next-$50k lookups:
+
+- `lookupOwnerTitlePremium(arv)` — Owner's Title Premium Basic Rate, $100k → $1M tiered, extends +$100 per $50k above $1M.
+- `lookupBundledLoanRate(loanAmount)` — Bundled Concurrent Loan Rate, $50k → $1M tiered, flat $900 above $1M (rare outlier per analyst decision).
+
+`calculateTransaction` now takes `loanAmount` (from the financing engine — financing runs before transaction in both `load-workstation-data.ts` and `bulk-runner.ts`) and returns two breakdown objects on `TransactionResult`: `acquisitionTitleBreakdown` (6 line items) and `dispositionTitleBreakdown` (Owner's Premium Basic + share + three fixed fees). `TransactionDetail` mirrors with optional breakdowns so pre-change stored report snapshots still deserialize.
+
+Analyst decisions baked into DENVER_FLIP_V1:
+
+- **65% seller share** of Owner's Premium Basic Rate (not 100%).
+- **ARV-based loan amount** for the bundled-loan-rate lookup, even though the actual closing loan is typically 80% of offer — Dan's call: "default to higher quote."
+- Acquisition add-ons: $180 bundled closing (50% of $360) + $150 disbursement + $43 recording + $25 CPL + $5.25 e-recording.
+- Disposition add-ons: $180 bundled closing + $95 owner's extended coverage + $25 tax cert.
+
+Migration `20260422100000_fitco_title_matrix_backfill.sql` recomputes `transaction_total`, `max_offer`, `offer_pct`, and `negotiation_gap` on every `screening_status = 'screened'` row, plus creates reusable IMMUTABLE SQL functions `fitco_bundled_loan_rate` and `fitco_owner_title_premium_basic` for ad-hoc queries. First push attempt timed out on a split 3-UPDATE form; rewrote as a single-pass UPDATE with a CTE, second push succeeded. `spread` and `est_gap_per_sqft` are transaction-independent and left alone.
+
+### Transaction Costs — per-deal commission overrides
+
+Buyer and Seller commission rates (default 2% / 2%) are now analyst-adjustable per deal, visible only in the Transaction Costs modal (not in Quick Analysis, per Dan's direction). Migration `20260422120000_manual_commission_overrides.sql` adds `disposition_commission_buyer_manual` and `disposition_commission_seller_manual` to `manual_analysis` (numeric(6,4), [0,1]). Added to the auto-persist allow-list in `field-types.ts` and `save-manual-analysis-field-action.ts`.
+
+`calculateTransaction` gained an optional `overrides` parameter mirroring `calculateFinancing`; `load-workstation-data.ts` reads the manual values off `manual_analysis` and passes them in. The modal owns its own two `useDebouncedSave` hooks (local-to-modal exception to the usual "lift hooks" pattern, since commissions aren't shared with Quick Analysis). Labels now show the effective rate — "Commission — Buyer 2.5%" instead of hardcoded "(2%)".
+
+### Deal Math column moved to the far left; added Target Profit card
+
+Previously the Analysis Workstation body was a 1fr → 320px two-column grid with the subject tiles + hero comp workspace on the left and the 10 detail cards on the right. For laptop visibility Dan prioritized the KPIs. New layout: outer `gridTemplateColumns: "320px 1fr"` with CSS `order: 1` on the cards div and `order: 2` on the workspace div. DOM order stays workspace-first so tab / screen-reader flow still leads with primary content; only visual layout flips.
+
+Added an 11th card: **Target Profit**, sitting below Financing. Editable via a dedicated modal using the same lifted-useDebouncedSave pattern as ARV / Rehab / Days Held.
+
+Card label cleanup: "Rehab" → "Rehab Budget", "Hold & Trans" split into separate "Holding Costs" and "Transaction Costs" cards (reversed an earlier combination decision — Dan: "This will improve the page visually, and will stay more in line with the overall theme"). Holding card context now reads `"N days held | $X.XX/day"`. Financing card context appends `· $X.XX/day` after the interest rate.
+
+### Inline override inputs in detail modals
+
+Deleted the "Edit in Quick Analysis" footer links from the ARV and Holding modals. Analysts can now edit ARV, Rehab, Days Held, and Target Profit directly inside their detail modals — same SaveStatusDot + "×" clear-button + debounced-save UX the Quick Analysis tile has.
+
+To make this work with one debounced save per field (not double-saves from two hooks watching the same value), the four `useDebouncedSave` hooks moved from `QuickAnalysisTile` up to `AnalysisWorkstation`. The tile and every matching modal receive the `{ status, errorMessage }` object as a prop instead of instantiating their own hook.
+
+Partner-portal compat: `ArvCardModal`'s override props (`arvInput`, `setArvInput`, `arvSave`, `autoArv`) are now optional so `partner-analysis-view.tsx` can keep rendering the modal read-only for partners.
+
+### Screening page — "TypeError: fetch failed" fix
+
+Migration `20260422140000_screening_queue_view.sql` creates `public.screening_queue_v`, a `security_invoker` view that wraps `screening_results_latest_v` and hides the caller's own active/closed analyses via a `NOT EXISTS` subquery on `auth.uid()`. The composite index `ix_analyses_property_user (real_property_id, created_by_user_id)` covers the predicate so there's no perf hit.
+
+`app/(workspace)/screening/page.tsx` now queries `screening_queue_v` and drops two things: (1) the `loadMyActiveAnalysisPropertyIds` pre-query round-trip, and (2) the `.not("real_property_id", "in", "(…)")` URL filter. The old pattern serialized every active-analysis UUID into the query string — each UUID is 37 chars, so once Dan crossed ~200 open analyses the URL blew past the HTTP transport budget and the whole fetch died before PostgREST could return a 414. Supabase-JS surfaces that failure as a raw `TypeError: fetch failed` inside `{ error }`, not as a clean HTTP error — which is why the stack trace landed on the `throw new Error(error.message)` line and masked the real cause. When "Show Reviewed" is toggled on, the page falls back to the raw `screening_results_latest_v` (toggle's meaning is "show the full queue including my open deals").
+
+### Files touched (non-exhaustive)
+
+- `lib/screening/title-matrix.ts` (new), `lib/screening/transaction-engine.ts`, `lib/screening/strategy-profiles.ts`, `lib/screening/types.ts`, `lib/screening/bulk-runner.ts`.
+- `lib/analysis/load-workstation-data.ts`, `lib/reports/types.ts`.
+- `lib/auto-persist/field-types.ts`, `lib/auto-persist/save-manual-analysis-field-action.ts`.
+- `app/(workspace)/analysis/[analysisId]/analysis-workstation.tsx`, `arv-card-modal.tsx`, `rehab-card-modal.tsx`, `holding-card-modal.tsx` (new), `transaction-card-modal.tsx` (new), `target-profit-card-modal.tsx` (new), `financing-card-modal.tsx`. Deleted `hold-trans-card-modal.tsx`.
+- `components/workstation/quick-analysis-tile.tsx`.
+- `app/(workspace)/screening/page.tsx`.
+- Migrations `20260422100000_fitco_title_matrix_backfill.sql`, `20260422120000_manual_commission_overrides.sql`, `20260422140000_screening_queue_view.sql`.
+
+---
+
 ## 2026-04-22 — Auth email overhaul: password reset, signup confirmation, Resend SMTP
 
 Dan couldn't log into his `dan@datawisere.com` profile on the deployed app — the auth user existed, but the site had no password-reset flow and the default Supabase sender was unreliable enough that email confirmation on signup had been disabled. This landed a full self-service auth-email flow through the already-connected Resend account, re-enabled confirmation-on-signup, and reassigned all historical analysis work from the legacy `danbsullivan@gmail.com` login to the canonical `dan@datawisere.com` account.

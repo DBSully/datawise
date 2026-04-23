@@ -114,48 +114,54 @@ export type HoldingConfig = {
 // Transaction configuration
 // ---------------------------------------------------------------------------
 
+/** Title/closing matrix identifier. Drives which rate sheet the
+ *  transaction engine consults for Owner's Title Premium (disposition)
+ *  and Bundled Concurrent Loan Rate (acquisition).
+ *
+ *  "fitco_ct_zone1" — FITCO/Chicago Title, Colorado CT Zone 1 counties
+ *  (Adams, Arapahoe, Broomfield, Clear Creek, Denver, Douglas, Elbert,
+ *  Gilpin, Jefferson). See lib/screening/title-matrix.ts. */
+export type TitleMatrixKey = "fitco_ct_zone1";
+
 export type TransactionConfig = {
-  /** Acquisition title/closing as fraction of purchase price. */
-  acquisitionTitleRate: number;
+  /** Rate sheet used for title/closing matrix lookups. */
+  titleMatrix: TitleMatrixKey;
 
-  /**
-   * NEW (Decision 5): Signed acquisition commission as fraction of purchase price.
-   * Positive = OOP at closing; negative = credit at closing.
-   * Default 0 — most flips don't have an acquisition-side commission.
-   */
+  // ── Acquisition side ──
+  // Bundled Concurrent Loan Rate comes from the matrix (keyed by loan
+  // amount from the financing engine). The fees below are fixed-dollar
+  // add-ons that stack on top of the matrix lookup.
+  /** Buyer's share of Bundled Resale Closing Fee (50% of $360 = $180). */
+  acquisitionBundledClosingFee: number;
+  /** Disbursement of Loan Only Fee ($150). */
+  acquisitionLoanDisbursementFee: number;
+  /** Estimated Recording Costs ($43 per document). */
+  acquisitionRecordingCosts: number;
+  /** Closing Protection Letter Fee ($25). */
+  acquisitionClosingProtectionLetter: number;
+  /** E-recording fee ($5.25 per document). */
+  acquisitionERecordingFee: number;
+  /** Signed acquisition commission as fraction of purchase price.
+   *  Positive = OOP at closing; negative = credit at closing. Default 0. */
   acquisitionCommissionRate: number;
-
-  /**
-   * NEW (Decision 5): Flat acquisition fee in dollars.
-   * E.g. wholesale assignment fee, service fee.
-   * Default 0 — most flips don't have a flat acquisition fee.
-   */
+  /** Flat acquisition fee in dollars (e.g. wholesale assignment). Default 0. */
   acquisitionFeeFlat: number;
 
-  /** Disposition title/closing as fraction of sale price. */
-  dispositionTitleRate: number;
-
-  /**
-   * NEW (Decision 5): Disposition buyer-agent commission as fraction of sale price.
-   * Replaces the old combined dispositionCommissionRate.
-   * Default 0.02 (2%) — split half of the previous 4% combined rate.
-   */
+  // ── Disposition side ──
+  // Owner's Title Premium Basic Rate comes from the matrix (keyed by ARV).
+  // Seller pays a configurable share of it; remaining fees are fixed.
+  /** Seller's share of Owner's Title Premium Basic Rate (e.g. 0.65). */
+  dispositionOwnerTitlePremiumShare: number;
+  /** Seller's share of Bundled Resale Closing Fee (50% of $360 = $180). */
+  dispositionBundledClosingFee: number;
+  /** Owner's Extended Coverage ($95). */
+  dispositionOwnerExtendedCoverage: number;
+  /** Tax Certificate ($25). */
+  dispositionTaxCertificate: number;
+  /** Disposition buyer-agent commission as fraction of sale price. */
   dispositionCommissionBuyerRate: number;
-
-  /**
-   * NEW (Decision 5): Disposition seller-agent commission as fraction of sale price.
-   * Replaces the old combined dispositionCommissionRate.
-   * Default 0.02 (2%) — split half of the previous 4% combined rate.
-   */
+  /** Disposition seller-agent commission as fraction of sale price. */
   dispositionCommissionSellerRate: number;
-
-  /**
-   * @deprecated Use dispositionCommissionBuyerRate + dispositionCommissionSellerRate.
-   * Kept as a backwards-compat field for any code that still references the
-   * combined rate. Will be removed in 3F. The engine ignores this field —
-   * it computes commissions from the split rates above.
-   */
-  dispositionCommissionRate?: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -432,19 +438,27 @@ export const DENVER_FLIP_V1: FlipStrategyProfile = {
     utilityPerSqftMonthly: 0.08,
   },
 
-  // -- Transaction (per WORKSTATION_CARD_SPEC.md Decision 5) ---------------
-  // Six configurable line items.
-  // Defaults preserve the prior 4.77% combined rate exactly:
-  //   0.003 + 0 + 0 + 0.0047 + 0.02 + 0.02 = 0.0477
-  // (was: 0.003 + 0.0047 + 0.04 = 0.0477)
-  // So existing screening_results.transaction_total values remain valid.
+  // -- Transaction (FITCO/Chicago Title matrix — 2026-04-22) --------------
+  // Acquisition title comes from the Bundled Concurrent Loan Rate matrix
+  // (keyed by loan amount) plus the fixed-dollar add-ons below.
+  // Disposition title is 65% of the Owner's Title Premium Basic Rate
+  // (keyed by ARV) plus the fixed-dollar add-ons below.
+  // See lib/screening/title-matrix.ts for the published rate sheets.
   transaction: {
-    acquisitionTitleRate:            0.003,    // unchanged
-    acquisitionCommissionRate:       0,        // NEW — default 0 (no fee at acquisition)
-    acquisitionFeeFlat:              0,        // NEW — default $0 flat
-    dispositionTitleRate:            0.0047,   // unchanged
-    dispositionCommissionBuyerRate:  0.02,     // NEW — split from old 0.04
-    dispositionCommissionSellerRate: 0.02,     // NEW — split from old 0.04
+    titleMatrix: "fitco_ct_zone1",
+    acquisitionBundledClosingFee:       180,    // 50% of $360
+    acquisitionLoanDisbursementFee:     150,
+    acquisitionRecordingCosts:          43,
+    acquisitionClosingProtectionLetter: 25,
+    acquisitionERecordingFee:           5.25,
+    acquisitionCommissionRate:          0,      // default 0
+    acquisitionFeeFlat:                 0,      // default $0
+    dispositionOwnerTitlePremiumShare:  0.65,   // seller pays 65% of Basic Rate
+    dispositionBundledClosingFee:       180,    // 50% of $360
+    dispositionOwnerExtendedCoverage:   95,
+    dispositionTaxCertificate:          25,
+    dispositionCommissionBuyerRate:     0.02,
+    dispositionCommissionSellerRate:    0.02,
   },
 
   // -- Financing ------------------------------------------------------------

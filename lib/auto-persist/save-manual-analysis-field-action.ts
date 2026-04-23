@@ -75,6 +75,9 @@ const FIELD_TABLE: Record<
   financing_rate_manual: "manual_analysis",
   financing_points_manual: "manual_analysis",
   financing_ltv_manual: "manual_analysis",
+  // Transaction Costs modal (2 commission-rate overrides)
+  disposition_commission_buyer_manual: "manual_analysis",
+  disposition_commission_seller_manual: "manual_analysis",
   // Quick Status tile — analysis_pipeline side (1 field)
   interest_level: "analysis_pipeline",
 };

@@ -36,8 +36,7 @@
 
 "use client";
 
-import { useDebouncedSave } from "@/lib/auto-persist/use-debounced-save";
-import { saveManualAnalysisFieldAction } from "@/lib/auto-persist/save-manual-analysis-field-action";
+import type { UseDebouncedSaveResult } from "@/lib/auto-persist/use-debounced-save";
 import { SaveStatusDot } from "@/components/workstation/save-status-dot";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -67,7 +66,6 @@ export function parseIntInput(s: string): number | null {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type QuickAnalysisTileProps = {
-  analysisId: string;
   /** Controlled input strings owned by the parent. */
   arvInput: string;
   setArvInput: (s: string) => void;
@@ -77,6 +75,13 @@ type QuickAnalysisTileProps = {
   setTargetProfitInput: (s: string) => void;
   daysHeldInput: string;
   setDaysHeldInput: (s: string) => void;
+  /** Save-status objects from useDebouncedSave hooks owned by the
+   *  workstation parent. Lifting the hooks lets the Deal Math card
+   *  modals write to the same state without double-saving. */
+  arvSave: UseDebouncedSaveResult;
+  rehabSave: UseDebouncedSaveResult;
+  targetProfitSave: UseDebouncedSaveResult;
+  daysHeldSave: UseDebouncedSaveResult;
   /** Auto-computed values to show as placeholders when the
    *  corresponding manual override is not set. The placeholder
    *  reflects "what would happen if you cleared this input". */
@@ -96,7 +101,6 @@ type QuickAnalysisTileProps = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function QuickAnalysisTile({
-  analysisId,
   arvInput,
   setArvInput,
   rehabInput,
@@ -105,50 +109,16 @@ export function QuickAnalysisTile({
   setTargetProfitInput,
   daysHeldInput,
   setDaysHeldInput,
+  arvSave,
+  rehabSave,
+  targetProfitSave,
+  daysHeldSave,
   autoArv,
   autoRehab,
   autoTargetProfit,
   autoDaysHeld,
   onTargetProfitTab,
 }: QuickAnalysisTileProps) {
-  const arvSave = useDebouncedSave(parseDollarInput(arvInput), async (value) => {
-    await saveManualAnalysisFieldAction({
-      analysisId,
-      field: "arv_manual",
-      value,
-    });
-  });
-
-  const rehabSave = useDebouncedSave(parseDollarInput(rehabInput), async (value) => {
-    await saveManualAnalysisFieldAction({
-      analysisId,
-      field: "rehab_manual",
-      value,
-    });
-  });
-
-  const targetProfitSave = useDebouncedSave(
-    parseDollarInput(targetProfitInput),
-    async (value) => {
-      await saveManualAnalysisFieldAction({
-        analysisId,
-        field: "target_profit_manual",
-        value,
-      });
-    },
-  );
-
-  const daysHeldSave = useDebouncedSave(
-    parseIntInput(daysHeldInput),
-    async (value) => {
-      await saveManualAnalysisFieldAction({
-        analysisId,
-        field: "days_held_manual",
-        value,
-      });
-    },
-  );
-
   // Placeholder strings — show the auto value as a hint of what the
   // input will revert to if cleared.
   const arvPlaceholder =

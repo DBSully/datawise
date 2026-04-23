@@ -71,27 +71,52 @@ export type HoldingDetail = {
   total: number;
 };
 
+/** Itemized breakdown of acquisition-side title/closing fees per the
+ *  FITCO rate sheet — mirror of AcquisitionTitleBreakdown in
+ *  lib/screening/types.ts. */
+export type AcquisitionTitleBreakdownDetail = {
+  bundledLoanRate: number;
+  bundledClosingFee: number;
+  loanDisbursementFee: number;
+  recordingCosts: number;
+  closingProtectionLetter: number;
+  eRecordingFee: number;
+};
+
+/** Itemized breakdown of disposition-side title/closing fees per the
+ *  FITCO rate sheet — mirror of DispositionTitleBreakdown in
+ *  lib/screening/types.ts. */
+export type DispositionTitleBreakdownDetail = {
+  ownerTitlePremiumBasic: number;
+  premiumShare: number;
+  ownerTitlePremium: number;
+  bundledClosingFee: number;
+  ownerExtendedCoverage: number;
+  taxCertificate: number;
+};
+
 export type TransactionDetail = {
   // ─── Acquisition side ───
   acquisitionTitle: number;
-  /** NEW (Decision 5): signed. */
+  /** Optional — reports generated before the FITCO matrix change
+   *  (2026-04-22) don't carry breakdowns. Callers must null-check. */
+  acquisitionTitleBreakdown?: AcquisitionTitleBreakdownDetail;
   acquisitionCommission: number;
-  /** NEW (Decision 5): flat dollars. */
   acquisitionFee: number;
-  /** NEW (Decision 5): sum of acquisition-side line items. */
   acquisitionSubtotal: number;
 
   // ─── Disposition side ───
   dispositionTitle: number;
-  /** NEW (Decision 5): split from old combined dispositionCommissions. */
+  /** Optional — see note on acquisitionTitleBreakdown. */
+  dispositionTitleBreakdown?: DispositionTitleBreakdownDetail;
   dispositionCommissionBuyer: number;
-  /** NEW (Decision 5): split from old combined dispositionCommissions. */
+  /** Optional — pre-2026-04-22 snapshots don't carry effective rates. */
+  dispositionCommissionBuyerRate?: number;
   dispositionCommissionSeller: number;
-  /** NEW (Decision 5): sum of disposition-side line items. */
+  dispositionCommissionSellerRate?: number;
   dispositionSubtotal: number;
 
   // ─── Total ───
-  /** Sum of all 6 line items. */
   total: number;
 };
 

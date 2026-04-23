@@ -25,20 +25,31 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { DetailModal } from "@/components/workstation/detail-modal";
 import { RehabCard } from "@/components/workstation/rehab-card";
+import { SaveStatusDot } from "@/components/workstation/save-status-dot";
 import { fmt } from "@/lib/reports/format";
 import type { WorkstationData, RehabCategoryScopes } from "@/lib/reports/types";
+import type { UseDebouncedSaveResult } from "@/lib/auto-persist/use-debounced-save";
 
 type RehabCardModalProps = {
   data: WorkstationData;
   rehabManual: boolean;
-  rehabManualValue: number | null;
+  /** Controlled input + save-status for the Rehab Override. Shared
+   *  with Quick Analysis so edits from either surface flow through
+   *  one debounced save. */
+  rehabInput: string;
+  setRehabInput: (s: string) => void;
+  rehabSave: UseDebouncedSaveResult;
+  autoRehab: number | null;
   onClose: () => void;
 };
 
 export function RehabCardModal({
   data,
   rehabManual,
-  rehabManualValue,
+  rehabInput,
+  setRehabInput,
+  rehabSave,
+  autoRehab,
   onClose,
 }: RehabCardModalProps) {
   const router = useRouter();
@@ -56,18 +67,53 @@ export function RehabCardModal({
   const [isSaving, setIsSaving] = useState(false);
 
   return (
-    <DetailModal title="Rehab" onClose={onClose}>
-      {/* Rehab Override banner */}
-      {rehabManual && (
-        <div className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          <span className="font-semibold">⚠ Rehab Override active</span>
-          {rehabManualValue != null && (
-            <> in Quick Analysis ({fmt(rehabManualValue)})</>
-          )}
-          . Category math below is informational only — the override
-          takes priority in all deal calculations.
+    <DetailModal title="Rehab Budget" onClose={onClose}>
+      {/* Rehab Override — editable inline. Writes through the lifted
+       *  useDebouncedSave hook shared with Quick Analysis. When set,
+       *  the category math below is informational only (shows what
+       *  the auto-computed rehab would be). */}
+      <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+        <div className="flex items-center justify-between">
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            Rehab Override
+          </label>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              value={rehabInput}
+              onChange={(e) => setRehabInput(e.target.value)}
+              placeholder={
+                autoRehab != null
+                  ? Math.round(autoRehab).toLocaleString()
+                  : "—"
+              }
+              className="w-[120px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-right text-[11px] font-mono text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
+            />
+            <SaveStatusDot
+              status={rehabSave.status}
+              errorMessage={rehabSave.errorMessage}
+            />
+            {rehabInput && (
+              <button
+                type="button"
+                onClick={() => setRehabInput("")}
+                className="text-[10px] text-slate-400 hover:text-red-500"
+                title="Clear override"
+              >
+                ×
+              </button>
+            )}
+          </div>
         </div>
-      )}
+        {rehabManual && (
+          <p className="mt-1.5 text-[10px] text-amber-700">
+            Override active — category math below is informational only.
+            {autoRehab != null && (
+              <> Auto would be {fmt(Math.round(autoRehab))}.</>
+            )}
+          </p>
+        )}
+      </div>
 
       <RehabCard
         d={data}

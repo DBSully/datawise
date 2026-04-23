@@ -172,53 +172,89 @@ export type HoldingResult = {
 // Transaction
 // ---------------------------------------------------------------------------
 
+/** Itemized breakdown of acquisition-side title/closing fees.
+ *  Matches the FITCO rate-sheet structure: a Bundled Concurrent Loan
+ *  Rate (matrix-driven) plus five fixed-dollar add-ons. Sum of fields
+ *  equals TransactionResult.acquisitionTitle. */
+export type AcquisitionTitleBreakdown = {
+  /** Bundled Concurrent Loan Rate — matrix lookup by loan amount. */
+  bundledLoanRate: number;
+  /** Buyer's share of Bundled Resale Closing Fee ($180 default). */
+  bundledClosingFee: number;
+  /** Loan Disbursement Fee ($150 default). */
+  loanDisbursementFee: number;
+  /** Estimated Recording Costs ($43 default). */
+  recordingCosts: number;
+  /** Closing Protection Letter Fee ($25 default). */
+  closingProtectionLetter: number;
+  /** E-recording fee ($5.25 default). */
+  eRecordingFee: number;
+};
+
+/** Itemized breakdown of disposition-side title/closing fees.
+ *  65% × Owner's Title Premium Basic Rate (matrix lookup by ARV) plus
+ *  three fixed-dollar add-ons. ownerTitlePremium equals
+ *  ownerTitlePremiumBasic × premiumShare (preserved for transparency).
+ *  Sum of ownerTitlePremium + the three fixed fees equals
+ *  TransactionResult.dispositionTitle. */
+export type DispositionTitleBreakdown = {
+  /** Raw Owner's Title Premium Basic Rate from the matrix (pre-share). */
+  ownerTitlePremiumBasic: number;
+  /** Share of Basic Rate paid by seller (e.g. 0.65). */
+  premiumShare: number;
+  /** Seller's share of Basic Rate = ownerTitlePremiumBasic × premiumShare. */
+  ownerTitlePremium: number;
+  /** Seller's share of Bundled Resale Closing Fee ($180 default). */
+  bundledClosingFee: number;
+  /** Owner's Extended Coverage ($95 default). */
+  ownerExtendedCoverage: number;
+  /** Tax Certificate ($25 default). */
+  taxCertificate: number;
+};
+
 export type TransactionResult = {
   // ─── Acquisition side (paid out-of-pocket at closing) ───
 
-  /** Acquisition title/closing fee. */
+  /** Total acquisition title/closing fee — sum of acquisitionTitleBreakdown. */
   acquisitionTitle: number;
+  /** Itemized breakdown per FITCO rate sheet. */
+  acquisitionTitleBreakdown: AcquisitionTitleBreakdown;
 
-  /**
-   * NEW (Decision 5): Signed acquisition commission.
-   * Positive = OOP at closing (analyst pays a fee, e.g. to a buyer's agent).
-   * Negative = credit at closing (analyst receives a credit).
-   * Default rate is 0, so this is 0 in normal flips.
-   */
+  /** Signed acquisition commission. Positive = OOP at closing, negative =
+   *  credit. Default 0. */
   acquisitionCommission: number;
 
-  /**
-   * NEW (Decision 5): Flat acquisition fee in dollars.
-   * E.g. wholesale assignment fee, service fee. Always positive.
-   * Default is $0, so this is 0 in normal flips.
-   */
+  /** Flat acquisition fee (e.g. wholesale assignment). Default 0. */
   acquisitionFee: number;
 
-  /** NEW (Decision 5): Sum of acquisition-side line items. Cash impact at purchase. */
+  /** Sum of acquisition-side line items. Cash impact at purchase. */
   acquisitionSubtotal: number;
 
   // ─── Disposition side (deducted from sale proceeds, not OOP) ───
 
-  /** Disposition title/closing fee. */
+  /** Total disposition title/closing fee — sum of ownerTitlePremium +
+   *  the three fixed add-ons in dispositionTitleBreakdown. */
   dispositionTitle: number;
+  /** Itemized breakdown per FITCO rate sheet. */
+  dispositionTitleBreakdown: DispositionTitleBreakdown;
 
-  /**
-   * NEW (Decision 5): Buyer-agent commission paid at sale.
-   * Replaces the combined dispositionCommissions field.
-   */
+  /** Buyer-agent commission paid at sale. */
   dispositionCommissionBuyer: number;
+  /** Effective rate applied (strategy-profile default unless overridden
+   *  per-analysis). Preserved so display labels can show the actual
+   *  percentage instead of a hardcoded "2%". */
+  dispositionCommissionBuyerRate: number;
 
-  /**
-   * NEW (Decision 5): Seller-agent commission paid at sale.
-   * Replaces the combined dispositionCommissions field.
-   */
+  /** Seller-agent commission paid at sale. */
   dispositionCommissionSeller: number;
+  dispositionCommissionSellerRate: number;
 
-  /** NEW (Decision 5): Sum of disposition-side line items. Deducted from sale proceeds. */
+  /** Sum of disposition-side line items. Deducted from sale proceeds. */
   dispositionSubtotal: number;
 
   // ─── Total ───
 
-  /** Sum of all 6 line items (acquisitionSubtotal + dispositionSubtotal). */
+  /** Sum of acquisitionSubtotal + dispositionSubtotal. */
   total: number;
 };
 
