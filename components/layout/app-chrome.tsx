@@ -30,8 +30,6 @@ const primaryNav = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/intake", label: "Intake" },
   { href: "/pipeline", label: "Pipeline" },
-  { href: "/analysis", label: "Analysis" },
-  { href: "/action", label: "Action" },
   { href: "/reports", label: "Reports" },
   { href: "/admin", label: "Admin" },
 ];
@@ -64,36 +62,25 @@ function getSectionConfig(pathname: string): SectionConfig {
     };
   }
 
+  // /analysis/[analysisId] still renders the workstation (the per-property
+  // detail page). The bare /analysis route redirects to /pipeline?view=focus.
+  // Breadcrumb stays as "Analysis" so the workstation context is clear.
   if (pathname.startsWith("/analysis")) {
     return {
       title: "Analysis",
       subtitle:
-        "Deep underwriting of promoted properties — comps, ARV, rehab, deal math.",
-      tabs: [{ href: "/analysis", label: "Watch List" }],
+        "Deep underwriting of a single property — comps, ARV, rehab, deal math.",
+      tabs: [{ href: "/pipeline?view=focus", label: "← Back to Pipeline" }],
     };
   }
 
+  // /action is now just a redirect to /pipeline?view=action; the section
+  // config only matters if the redirect hasn't fired yet.
   if (pathname.startsWith("/action")) {
     return {
-      title: "Action",
-      subtitle:
-        "Deals being moved to closing — showings, offers, contract, close.",
-      tabs: [
-        {
-          href: "/action",
-          label: "Pipeline",
-          isActive: (p, sp) =>
-            (p === "/action" || p.startsWith("/action/")) &&
-            sp.get("status") !== "closed",
-        },
-        {
-          href: "/action?status=closed",
-          label: "Closed",
-          isActive: (p, sp) =>
-            (p === "/action" || p.startsWith("/action/")) &&
-            sp.get("status") === "closed",
-        },
-      ],
+      title: "Pipeline",
+      subtitle: "Every property you're tracking — screening, watch list, action.",
+      tabs: [{ href: "/pipeline", label: "Pipeline" }],
     };
   }
 
@@ -139,11 +126,11 @@ function getPageLabel(
   if (pathname === "/screening") return "Pipeline";
   if (pathname.startsWith("/screening/")) return "Pipeline";
 
-  if (pathname === "/analysis") return "Watch List";
+  // /analysis (list) redirects to /pipeline; workstation pages still render.
+  if (pathname === "/analysis") return "Pipeline";
   if (pathname.startsWith("/analysis/")) return "Analysis Workstation";
-  if (pathname === "/action") {
-    return searchParams.get("status") === "closed" ? "Closed" : "Pipeline";
-  }
+  // /action redirects to /pipeline.
+  if (pathname === "/action") return "Pipeline";
 
   if (pathname === "/reports") return "Report Library";
   if (pathname.startsWith("/reports/")) return "Report Detail";

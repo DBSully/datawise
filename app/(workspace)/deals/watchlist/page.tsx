@@ -1,5 +1,8 @@
+// Legacy /deals/watchlist — both this and /analysis are now absorbed
+// into /pipeline?view=focus. Redirect points directly at /pipeline to
+// avoid a double-hop.
 import { redirect } from "next/navigation";
 
 export default function LegacyWatchListRedirect() {
-  redirect("/analysis");
+  redirect("/pipeline?view=focus");
 }

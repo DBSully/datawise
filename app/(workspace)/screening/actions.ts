@@ -893,6 +893,24 @@ export async function promoteAndOpenAction(formData: FormData): Promise<void> {
   await promoteToAnalysisAction(formData);
 }
 
+// Same as above but stays on the current page (no workstation redirect).
+// Used by the /pipeline row-action popover where we want the page to
+// revalidate in place so the analyst can immediately act on the next row.
+export async function promoteInPlaceAction(formData: FormData): Promise<void> {
+  formData.set("open_workstation", "false");
+  await promoteToAnalysisAction(formData);
+}
+
+// FormData variant of reactivateScreeningResultAction — form actions can't
+// accept positional args, so the popover uses this.
+export async function reactivateScreeningResultFormAction(
+  formData: FormData,
+): Promise<void> {
+  const resultId = textValue(formData, "result_id");
+  if (!resultId) throw new Error("Missing result_id");
+  await reactivateScreeningResultAction(resultId);
+}
+
 // ---------------------------------------------------------------------------
 // Pass on a screening result
 // ---------------------------------------------------------------------------

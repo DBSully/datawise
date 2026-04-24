@@ -279,6 +279,44 @@ body {
   border-bottom: none;
 }
 
+/* Denser variant — matches /analysis watch-list density. 11px body /
+   9px uppercase head + tight padding. Used by /pipeline where the
+   wider table benefits from tighter rows. */
+.dw-table-dense {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.dw-table-dense thead th {
+  background: var(--dw-surface-alt);
+  color: #64748b;
+  font-weight: 600;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 4px 4px;
+  border-bottom: 1px solid var(--dw-border);
+  white-space: nowrap;
+}
+
+.dw-table-dense tbody td {
+  color: #0f172a;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 2px 4px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.dw-table-dense tbody tr:hover {
+  background: #f8fafc;
+}
+
+.dw-table-dense tbody tr:last-child td {
+  border-bottom: none;
+}
+
 /* Leaflet distance circle labels */
 .leaflet-distance-label {
   background: rgba(255, 255, 255, 0.85) !important;

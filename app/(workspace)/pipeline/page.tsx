@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 // pool, scores subjects, writes comps). 300s is the Vercel Pro max.
 export const maxDuration = 300;
 
-type ViewMode = "focus" | "screen" | "action" | "all";
+type ViewMode = "focus" | "screen" | "action" | "closed" | "all";
 
 type PipelinePageProps = {
   searchParams?: Promise<{
@@ -40,6 +40,7 @@ const VIEW_MODES: { value: ViewMode; label: string; hint: string }[] = [
   { value: "focus",  label: "My Focus",  hint: "Watch-list + ongoing work" },
   { value: "screen", label: "Screening", hint: "Fresh, unreviewed" },
   { value: "action", label: "Action",    hint: "Pending showing / offer" },
+  { value: "closed", label: "Closed",    hint: "Won / Lost — archive" },
   { value: "all",    label: "All",       hint: "Everything" },
 ];
 
@@ -80,7 +81,14 @@ function buildHref(
 }
 
 function parseViewMode(raw: string | undefined, batchMode: boolean): ViewMode {
-  if (raw === "focus" || raw === "screen" || raw === "action" || raw === "all") return raw;
+  if (
+    raw === "focus" ||
+    raw === "screen" ||
+    raw === "action" ||
+    raw === "closed" ||
+    raw === "all"
+  )
+    return raw;
   // Default depends on context. Main pipeline: "focus" pushes the analyst
   // toward action. Batch mode: "all" because the analyst explicitly pulled
   // the batch and wants full visibility; chips still let them narrow to
@@ -192,7 +200,13 @@ export default async function PipelinePage({
     case "action":
       query = query
         .eq("has_caller_active_analysis", true)
+        .eq("caller_active_disposition", "active")
         .or("caller_active_showing_status.not.is.null,caller_active_offer_status.not.is.null");
+      break;
+    case "closed":
+      query = query
+        .eq("has_caller_active_analysis", true)
+        .eq("caller_active_disposition", "closed");
       break;
     case "all":
     default:
@@ -257,7 +271,18 @@ export default async function PipelinePage({
     string,
     { amount: number | null; status: string | null; deadlineAt: string | null }
   >();
+  const acceptedOfferAnalysisIds = new Set<string>();
   const ucDateByPropertyId = new Map<string, string | null>();
+  const domByPropertyId = new Map<string, number | null>();
+  const physicalByPropertyId = new Map<
+    string,
+    {
+      beds: number | null;
+      baths: number | null;
+      buildingSqft: number | null;
+      yearBuilt: number | null;
+    }
+  >();
   const closeDateByPropertyId = new Map<string, string | null>();
 
   type RecentEvent = {
@@ -292,13 +317,21 @@ export default async function PipelinePage({
       .order("detected_at", { ascending: false })
       .limit(600);
 
-    // 3. Latest MLS listing per property — UC + close dates.
+    // 3. Latest MLS listing per property — UC + close dates + DOM source.
     const mlsPromise = supabase
       .from("mls_listings")
       .select("real_property_id, purchase_contract_date, close_date, listing_contract_date, created_at")
       .in("real_property_id", visiblePropertyIds)
       .order("listing_contract_date", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false });
+
+    // 3a. Property physical — powers the focus-view physical columns.
+    const physicalPromise = supabase
+      .from("property_physical")
+      .select(
+        "real_property_id, bedrooms_total, bathrooms_total, building_area_total_sqft, above_grade_finished_area_sqft, year_built",
+      )
+      .in("real_property_id", visiblePropertyIds);
 
     // 4. Shared-analysis attribution for "Reviewed by X" — non-self analyses.
     //    We pull analyses by property_id and filter to non-caller-owned ones
@@ -317,8 +350,15 @@ export default async function PipelinePage({
       { data: runRows },
       { data: eventRows },
       { data: mlsRows },
+      { data: physicalRows },
       { data: foreignAnalyses },
-    ] = await Promise.all([runsPromise, eventsPromise, mlsPromise, foreignAnalysesPromise]);
+    ] = await Promise.all([
+      runsPromise,
+      eventsPromise,
+      mlsPromise,
+      physicalPromise,
+      foreignAnalysesPromise,
+    ]);
 
     for (const row of runRows ?? []) {
       const r = row as { real_property_id: string };
@@ -340,17 +380,58 @@ export default async function PipelinePage({
       }
     }
 
+    const todayMs = Date.now();
     for (const row of mlsRows ?? []) {
       const m = row as {
         real_property_id: string;
         purchase_contract_date: string | null;
         close_date: string | null;
+        listing_contract_date: string | null;
       };
       // First row per property wins (ordered by listing_contract_date desc).
       if (!ucDateByPropertyId.has(m.real_property_id)) {
         ucDateByPropertyId.set(m.real_property_id, m.purchase_contract_date);
         closeDateByPropertyId.set(m.real_property_id, m.close_date);
+
+        // DOM — matches watch_list_v computation.
+        let dom: number | null = null;
+        if (m.purchase_contract_date && m.listing_contract_date) {
+          dom = Math.max(
+            0,
+            Math.round(
+              (new Date(m.purchase_contract_date).getTime() -
+                new Date(m.listing_contract_date).getTime()) /
+                86_400_000,
+            ),
+          );
+        } else if (m.listing_contract_date) {
+          dom = Math.max(
+            0,
+            Math.round(
+              (todayMs - new Date(m.listing_contract_date).getTime()) / 86_400_000,
+            ) + 1,
+          );
+        }
+        domByPropertyId.set(m.real_property_id, dom);
       }
+    }
+
+    for (const row of physicalRows ?? []) {
+      const p = row as {
+        real_property_id: string;
+        bedrooms_total: number | null;
+        bathrooms_total: number | null;
+        building_area_total_sqft: number | null;
+        above_grade_finished_area_sqft: number | null;
+        year_built: number | null;
+      };
+      physicalByPropertyId.set(p.real_property_id, {
+        beds: p.bedrooms_total,
+        baths: p.bathrooms_total,
+        buildingSqft:
+          p.building_area_total_sqft ?? p.above_grade_finished_area_sqft,
+        yearBuilt: p.year_built,
+      });
     }
 
     for (const row of foreignAnalyses ?? []) {
@@ -383,12 +464,12 @@ export default async function PipelinePage({
         .not("scheduled_at", "is", null)
         .order("scheduled_at", { ascending: true });
 
+      // All offers — the loop categorizes into open (pending work on the
+      // Action pill) vs accepted (drives Won pill for closed deals).
       const offersPromise = supabase
         .from("analysis_offers")
         .select("analysis_id, offer_amount, status, submitted_at, deadline_at, accepted_at, expired_at")
         .in("analysis_id", activeAnalysisIds)
-        .is("accepted_at", null)
-        .is("expired_at", null)
         .order("submitted_at", { ascending: false });
 
       const [
@@ -445,7 +526,16 @@ export default async function PipelinePage({
           offer_amount: number | null;
           status: string | null;
           deadline_at: string | null;
+          accepted_at: string | null;
+          expired_at: string | null;
         };
+        if (r.accepted_at) {
+          acceptedOfferAnalysisIds.add(r.analysis_id);
+          continue;
+        }
+        // Open = neither accepted nor expired. Keep the most recent (the
+        // query orders by submitted_at DESC).
+        if (r.expired_at) continue;
         if (!openOfferByAnalysisId.has(r.analysis_id)) {
           openOfferByAnalysisId.set(r.analysis_id, {
             amount: r.offer_amount,
@@ -561,6 +651,21 @@ export default async function PipelinePage({
       open_offer_status: offer?.status ?? null,
       open_offer_deadline: offer?.deadlineAt ?? null,
       recent_event: recentEvent,
+
+      // Step 4 — disposition + Won/Lost signal for single-pill rendering.
+      active_disposition: callerAnalysisId
+        ? (r.caller_active_disposition as string | null)
+        : null,
+      has_accepted_offer: callerAnalysisId
+        ? acceptedOfferAnalysisIds.has(callerAnalysisId)
+        : false,
+
+      // Physical columns (rendered only when view=focus).
+      beds_total: physicalByPropertyId.get(propertyId)?.beds ?? null,
+      baths_total: physicalByPropertyId.get(propertyId)?.baths ?? null,
+      building_sqft: physicalByPropertyId.get(propertyId)?.buildingSqft ?? null,
+      year_built: physicalByPropertyId.get(propertyId)?.yearBuilt ?? null,
+      dom: domByPropertyId.get(propertyId) ?? null,
     };
   });
 
@@ -747,8 +852,12 @@ export default async function PipelinePage({
         ))}
       </div>
 
-      {/* Results table */}
-      <QueueResultsTable results={tableRows} />
+      {/* Results table — focus view surfaces physical columns (beds,
+          baths, bldg SF, year, DOM) for watch-list scanning. */}
+      <QueueResultsTable
+        results={tableRows}
+        showPhysicalColumns={viewMode === "focus"}
+      />
 
       {/* Pagination */}
       {totalPages > 1 && (

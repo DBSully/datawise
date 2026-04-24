@@ -1,3 +1,96 @@
+## 2026-04-24 — Pipeline merger: /analysis + /action absorbed, single-pill model, row-action popover
+
+Follow-on session to this morning's /pipeline launch. Original direction from the user: "the next logical piece is absorbing /analysis (richer watchlist UI) and /action into /pipeline — the 'action' page's unique value was its different columns for properties that are moving through our system. I'm not sure that's necessary — I think it could be displayed in the Dashboard or otherwise."
+
+End state: `/pipeline` is now the single list-level page for every property the analyst is tracking. Three list pages (`/screening`, `/analysis`, `/action`) collapse into one URL with view-mode chips. Primary nav drops from seven items to five.
+
+### Pill model rewrite — single stage pill + shared badge
+
+The 5-pill cluster from step 2b was overengineered. User's insight: "just display the most recent pill in the process. That would allow the user to visually understand exactly where we are. 'Analysis' would never be lit up if it hadn't passed Screening." Rewrote the primary pill as a single stage indicator showing the furthest stage reached:
+
+| Stage | Pill | Color |
+|---|---|---|
+| Screened only | `Scr` / `Scr·2` | slate |
+| On my watch list | `Hot` / `Warm` / `Curious` | red / orange / slate |
+| Manual analysis done | `Anl` | blue |
+| Upcoming showing | `Sho 4/28` | amber |
+| Open offer | `Ofr $450k` | amber |
+| Closed — accepted offer | `Won` | emerald |
+| Closed — no accepted offer | `Lost` | red |
+| Passed (no forward motion) | `Passed` | slate-dim |
+| Foreign active analysis | `By Alice` | slate |
+
+User explicitly wanted "Shared" to remain visible on every analysis even when further stages are reached — so a secondary `Shr` / `Shr·N` pill renders alongside whenever `analysis_shares` rows exist, independent of stage.
+
+**Rule (iii) for Passed:** active analysis overrides stale Passed markers. If an analyst passed on a property at screening time, then later promoted it, the primary pill shows the current forward stage — not Passed. "The latest forward motion wins."
+
+Saved 110px of horizontal space vs. the old 5-pill cluster (240px → 130px).
+
+### Row-action popover
+
+Click the primary pill → stage-contextual popover opens anchored below. Header shows address + stage. Body presents the actions relevant to that stage:
+
+- **Screened** → Promote to Watch List (with interest selector) + Pass (with reason selector)
+- **Watch List / Analyzed / Showing / Offer** → edit interest, edit showing status, inline note, stage-progression button (→ Pipeline / → Offer / → Under Contract), Pass (archive), Close Deal disclosure
+- **Closed** → Re-open to Watch List
+- **Passed** → Reactivate
+- **Foreign active** → read-only (pill isn't clickable; falls through to plain link)
+
+All actions invoke existing server actions in `/deals/watchlist/actions.ts`, `/deals/pipeline/actions.ts`, `/screening/actions.ts`. Added `revalidatePath("/pipeline")` throughout so pipeline updates when actions fire from any path.
+
+Two new action variants needed because client components can't inline `"use server"`:
+- `promoteInPlaceAction` — wraps `promoteToAnalysisAction` with `open_workstation=false` so the analyst stays on the pipeline after promoting
+- `reactivateScreeningResultFormAction` — FormData wrapper around the `(resultId: string)` positional signature
+
+Close-on-outside-click + Escape. Positioning flips above the pill if below would overflow the viewport.
+
+### `screening_pipeline_v` extended with caller_active_disposition
+
+New migration `20260424150000_pipeline_view_add_disposition.sql` appends `caller_active_disposition` to the view. The Closed chip needs to distinguish active analyses (`disposition='active'`) from closed ones (`disposition='closed'`) server-side; Won vs. Lost within closed is derived from whether any `analysis_offers` row has `accepted_at` set (follow-up query in the app).
+
+**Postgres gotcha:** `CREATE OR REPLACE VIEW` forbids reordering existing columns. The first push failed trying to insert the new column in the middle of the caller_active_* block — reordering. Appended it at the end instead and the replace succeeded.
+
+### Closed view chip — fifth chip
+
+View modes become: My Focus (default) / Screening / Action / Closed / All. The `closed` chip filters to `has_caller_active_analysis=true AND caller_active_disposition='closed'`. Analysts can now scan "what did I win/lose recently" without leaving `/pipeline`. The old `/action?status=closed` page becomes a redirect.
+
+### Focus-view physical columns
+
+User: "In general, I am OK with a denser page with smaller type, similar to current Analysis page." Added five property_physical columns — DOM, Beds, Baths, Bldg SF, Year Built — visible only when `view=focus`. Watch-list analysts eye-scan these to decide what to tour; the Screening view (where you're triaging prime candidates) doesn't need them. Min-width grows from 1500 → 1780 in focus mode only.
+
+DOM computation matches `watch_list_v`: `purchase_contract_date - listing_contract_date` if under contract, else `current_date - listing_contract_date + 1`. Fetched via a new `mls_listings` follow-up column read on already-cached rows.
+
+### Density pass
+
+New `dw-table-dense` class in `globals.css` matching `/analysis` watch-list density: 11px body / 9px uppercase head with 0.05em letter-spacing / 2px vertical padding. `/pipeline` now uses `dw-table-dense` instead of `dw-table-compact`. Header row height drops ~30%, body row density increases ~15%, roughly matching analyst muscle memory from `/analysis`.
+
+### Page absorption + nav cleanup
+
+| Old URL | New URL |
+|---|---|
+| `/screening` | `/pipeline` (redirect; shipped step 3) |
+| `/screening/[batchId]` | `/pipeline?batchId=X` (redirect; shipped step 3) |
+| `/analysis` | `/pipeline?view=focus` (new redirect) |
+| `/action` | `/pipeline?view=action` (new redirect) |
+| `/action?status=closed` | `/pipeline?view=closed` (new redirect) |
+| `/deals/watchlist` | `/pipeline?view=focus` (was going through `/analysis`, now direct) |
+| `/deals/pipeline` | `/pipeline?view=action` (was going through `/action`) |
+| `/deals/closed` | `/pipeline?view=closed` (was going through `/action?status=closed`) |
+| `/deals` | `/pipeline` (was going through `/analysis`) |
+
+`/analysis/[analysisId]` (the per-property workstation) is **unchanged** — that's a detail page, a different level of the hierarchy. Section config updated so the breadcrumb tab becomes "← Back to Pipeline" instead of "Watch List" since the list view no longer exists standalone.
+
+Primary nav drops from seven items to five: Dashboard / Intake / **Pipeline** / Reports / Admin. Analysis and Action are gone — the workstation is still reachable by clicking a property row in the pipeline.
+
+### Follow-ups captured in memory
+
+Not shipped in this session, deferred:
+- **Unread-events signal in My Focus.** `caller_events_last_seen_at` is already plumbed through `screening_pipeline_v` — just needs consumption in the app for sort/highlight of rows with newer `property_events` than the last-seen marker.
+- **Denormalize UC Date / Close Date onto `screening_results`.** Would eliminate the `mls_listings` follow-up query that today serves UC/Close + DOM data.
+- **Move per-result detail page URL** from `/screening/[batchId]/[resultId]` to `/pipeline/results/[resultId]` — cosmetic, no data change.
+
+---
+
 ## 2026-04-24 — Pipeline page, property_events RLS fix, pill cluster + Why Now
 
 Rethink of the list-level UX. The analyst's complaint: "I promote a property to the watch list and it disappears." Previously, `/screening`'s default view excluded properties with caller-owned active analyses (via `screening_queue_v`'s `NOT EXISTS` filter), so every watchlist item vanished from the queue the moment it was promoted. The mental model was wrong — "Screening" and "Analysis" weren't stages of a funnel, they were two views of the same object. This session unifies them into `/pipeline`: one list, one set of filters, pills showing where each property is in the flow.

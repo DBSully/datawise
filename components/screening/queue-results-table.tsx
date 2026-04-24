@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { ScreeningCompModal } from "./screening-comp-modal";
+import { RowActionPopover } from "./row-action-popover";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -65,10 +66,23 @@ export type QueueResultRow = {
   // Step 3 — extra MLS dates (UC / Close) fetched from mls_listings.
   uc_date?: string | null;
   close_date?: string | null;
+
+  // Step 4 — single-pill stage model + Won/Lost signal for closed deals.
+  active_disposition?: string | null;
+  has_accepted_offer?: boolean;
+
+  // Focus-view physical columns (property_physical + DOM from mls_listings).
+  // Only rendered when the parent sets showPhysicalColumns=true.
+  beds_total?: number | null;
+  baths_total?: number | null;
+  building_sqft?: number | null;
+  year_built?: number | null;
+  dom?: number | null;
 };
 
 type QueueResultsTableProps = {
   results: QueueResultRow[];
+  showPhysicalColumns?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -151,16 +165,17 @@ function trendColor(rate: number, detailJson: Record<string, unknown> | null): s
 // Pill primitive + per-pill renderers
 // ---------------------------------------------------------------------------
 
-type PillColor = "slate" | "red" | "orange" | "blue" | "purple" | "amber" | "dim";
+type PillColor = "slate" | "red" | "orange" | "blue" | "purple" | "amber" | "emerald" | "dim";
 
 const PILL_COLORS: Record<PillColor, string> = {
-  slate:  "bg-slate-200 text-slate-700",
-  red:    "bg-red-100 text-red-800",
-  orange: "bg-orange-100 text-orange-800",
-  blue:   "bg-blue-100 text-blue-800",
-  purple: "bg-purple-100 text-purple-800",
-  amber:  "bg-amber-100 text-amber-800",
-  dim:    "bg-slate-50 text-slate-400",
+  slate:   "bg-slate-200 text-slate-700",
+  red:     "bg-red-100 text-red-800",
+  orange:  "bg-orange-100 text-orange-800",
+  blue:    "bg-blue-100 text-blue-800",
+  purple:  "bg-purple-100 text-purple-800",
+  amber:   "bg-amber-100 text-amber-800",
+  emerald: "bg-emerald-100 text-emerald-800",
+  dim:     "bg-slate-50 text-slate-400",
 };
 
 function Pill({
@@ -168,18 +183,33 @@ function Pill({
   label,
   title,
   href,
+  onClick,
   widthPx,
 }: {
   color: PillColor;
   label: string;
   title: string;
   href?: string;
+  onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   widthPx: number;
 }) {
   // Fixed-width pills keep the cluster column-aligned across rows so the
   // analyst's eye can scan a single pill column top-to-bottom.
   const className = `inline-flex items-center justify-center rounded px-1 py-0.5 text-[10px] font-semibold leading-none overflow-hidden whitespace-nowrap ${PILL_COLORS[color]}`;
   const style = { width: `${widthPx}px` };
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        title={title}
+        onClick={onClick}
+        className={`${className} hover:opacity-80`}
+        style={style}
+      >
+        {label}
+      </button>
+    );
+  }
   if (href) {
     return (
       <Link href={href} title={title} className={`${className} hover:opacity-80`} style={style}>
@@ -191,74 +221,171 @@ function Pill({
 }
 
 // Per-pill fixed widths (px) — tuned for the longest realistic label.
+// Single stage pill must fit "Ofr $450k" / "Passed" / "By Alice"; shared
+// pill is optional alongside.
 const PILL_W = {
-  screened: 36,
-  watch: 56,
-  analyzed: 32,
+  stage: 82,
   shared: 36,
-  action: 76,
 } as const;
 
-function ScreenedPill({ count }: { count: number }) {
-  if (count <= 0) {
-    return <Pill color="dim" label="Scr" title="Never screened" widthPx={PILL_W.screened} />;
+// Single-pill stage model — one primary pill per row showing the furthest
+// stage reached. The click popover (step 4 follow-up) will surface
+// stage-appropriate actions. A secondary SharedPill renders alongside
+// when any shares exist, independent of the stage.
+//
+// Progression (furthest wins):
+//   Foreign active → "By Alice"
+//   Closed + accepted offer → "Won"
+//   Closed + no accepted offer → "Lost"
+//   Open offer → "Ofr $450k"
+//   Upcoming showing → "Sho 4/28"
+//   Manual analysis done → "Anl"
+//   Caller active analysis only → interest-level label (Hot / Warm / Curious)
+//   Passed (no active analysis) → "Passed"
+//   Screened only → "Scr" (or "Scr·N" for re-screened)
+//
+// Rule (iii): an active analysis overrides a stale "passed" marker — the
+// analyst un-passed the property by promoting it, so forward motion wins.
+
+type StagePill = {
+  label: string;
+  color: PillColor;
+  title: string;
+  href?: string;
+};
+
+function resolveStagePill(row: QueueResultRow): StagePill {
+  const callerActive = row.active_analysis_is_mine === true && row.active_analysis_id != null;
+  const foreignActive = row.active_analysis_is_mine === false;
+
+  // Foreign analysis — another analyst owns this property.
+  if (foreignActive) {
+    const firstName = row.active_analysis_owner_name?.split(" ")[0] ?? "other";
+    return {
+      label: `By ${firstName}`,
+      color: "slate",
+      title: `Another analyst (${row.active_analysis_owner_name ?? "unknown"}) is working on this property`,
+    };
   }
-  return (
-    <Pill
-      color="slate"
-      label={count > 1 ? `Scr·${count}` : "Scr"}
-      title={count > 1 ? `Screened ${count}× — latest run shown` : "Screened once"}
-      widthPx={PILL_W.screened}
-    />
-  );
+
+  // Caller's active or closed analysis.
+  if (callerActive) {
+    const href = `/analysis/${row.active_analysis_id}`;
+
+    // Closed → Won / Lost.
+    if (row.active_disposition === "closed") {
+      if (row.has_accepted_offer) {
+        return { label: "Won", color: "emerald", title: "Closed — offer accepted", href };
+      }
+      return { label: "Lost", color: "red", title: "Closed — no accepted offer", href };
+    }
+
+    // Open offer takes precedence over showing (later in funnel).
+    if (row.open_offer_amount != null || row.open_offer_status) {
+      const amount = formatShortPrice(row.open_offer_amount);
+      const label = amount ? `Ofr ${amount}` : "Offer";
+      const deadline = row.open_offer_deadline
+        ? ` · deadline ${formatShortDate(row.open_offer_deadline)}`
+        : "";
+      return {
+        label,
+        color: "amber",
+        title: `Open offer${row.open_offer_status ? ` (${row.open_offer_status})` : ""}${deadline}`,
+        href,
+      };
+    }
+
+    // Upcoming showing.
+    if (row.next_showing_at) {
+      const short = formatShortDate(row.next_showing_at);
+      return {
+        label: `Sho ${short ?? ""}`,
+        color: "amber",
+        title: `Showing scheduled${row.next_showing_status ? ` (${row.next_showing_status})` : ""} · ${row.next_showing_at.slice(0, 16).replace("T", " ")}`,
+        href,
+      };
+    }
+
+    // Manual analysis done.
+    if (row.analyzed_updated_at) {
+      const ago = formatDaysAgo(row.analyzed_updated_at);
+      return {
+        label: "Anl",
+        color: "blue",
+        title: `Manual analysis last updated ${ago ?? row.analyzed_updated_at}`,
+        href,
+      };
+    }
+
+    // Watch List — color by interest.
+    const level = (row.active_interest_level ?? "warm").toLowerCase();
+    const colorByLevel: Record<string, PillColor> = { hot: "red", warm: "orange", curious: "slate" };
+    const labelByLevel: Record<string, string> = { hot: "Hot", warm: "Warm", curious: "Curious" };
+    return {
+      label: labelByLevel[level] ?? "Warm",
+      color: colorByLevel[level] ?? "orange",
+      title: `Watch list · ${level}${row.has_newer_screening_than_analysis ? " · newer screening available" : ""}`,
+      href,
+    };
+  }
+
+  // No active analysis. Falls back to promoted_analysis_id for the
+  // batch-detail view which didn't enrich (defensive fallback — should
+  // rarely fire on /pipeline proper).
+  if (row.promoted_analysis_id) {
+    return {
+      label: "WL",
+      color: "orange",
+      title: "On watch list",
+      href: `/analysis/${row.promoted_analysis_id}`,
+    };
+  }
+
+  // Passed — only wins when there's no forward motion (rule iii).
+  if (row.review_action === "passed") {
+    return { label: "Passed", color: "dim", title: "Passed on this property" };
+  }
+
+  // Just screened.
+  const count = row.screening_run_count ?? 0;
+  return {
+    label: count > 1 ? `Scr·${count}` : "Scr",
+    color: "slate",
+    title: count > 1 ? `Screened ${count}× — latest run shown` : "Screened",
+  };
 }
 
-function WatchListPill({ row }: { row: QueueResultRow }) {
-  // Active-analysis is the primary signal (enriched in /pipeline page.tsx).
-  // Batch-detail page doesn't enrich, so fall back to promoted_analysis_id
-  // on the screening_results row itself.
-  const analysisId = row.active_analysis_id ?? row.promoted_analysis_id;
-  if (!analysisId) {
-    return <Pill color="dim" label="WL" title="Not on watch list" widthPx={PILL_W.watch} />;
-  }
-  const level = (row.active_interest_level ?? "warm").toLowerCase();
-  const colorByLevel: Record<string, PillColor> =
-    { hot: "red", warm: "orange", curious: "slate" };
-  const isMine = row.active_analysis_is_mine ?? true;
-  const color = isMine ? (colorByLevel[level] ?? "orange") : "slate";
-  const label = isMine
-    ? level.charAt(0).toUpperCase() + level.slice(1)
-    : `By ${row.active_analysis_owner_name?.split(" ")[0] ?? "other"}`;
-  const title = isMine
-    ? `Watch list · ${level}${row.has_newer_screening_than_analysis ? " · newer screening available" : ""}`
-    : `Another analyst (${row.active_analysis_owner_name ?? "unknown"}) is working on this property`;
-  const href = isMine ? `/analysis/${analysisId}` : undefined;
-  return <Pill color={color} label={label} title={title} href={href} widthPx={PILL_W.watch} />;
-}
-
-function AnalyzedPill({ row }: { row: QueueResultRow }) {
-  if (!row.active_analysis_is_mine) {
-    return <Pill color="dim" label="Anl" title="No analysis of your own yet" widthPx={PILL_W.analyzed} />;
-  }
-  if (!row.analyzed_updated_at) {
-    return <Pill color="dim" label="Anl" title="Promoted but no manual analysis yet" widthPx={PILL_W.analyzed} />;
-  }
-  const ago = formatDaysAgo(row.analyzed_updated_at);
+function StagePillCell({
+  row,
+  onOpen,
+}: {
+  row: QueueResultRow;
+  onOpen: (row: QueueResultRow, rect: DOMRect) => void;
+}) {
+  const pill = resolveStagePill(row);
+  // Foreign-active rows are read-only; keep those as plain (non-clickable)
+  // so analysts don't accidentally open a popover with no relevant actions.
+  const isForeign = row.active_analysis_is_mine === false;
+  const handleClick = isForeign
+    ? undefined
+    : (e: React.MouseEvent<HTMLButtonElement>) => {
+        onOpen(row, e.currentTarget.getBoundingClientRect());
+      };
   return (
     <Pill
-      color="blue"
-      label="Anl"
-      title={`Manual analysis last updated ${ago ?? row.analyzed_updated_at}`}
-      widthPx={PILL_W.analyzed}
+      color={pill.color}
+      label={pill.label}
+      title={`${pill.title} — click for actions`}
+      onClick={handleClick}
+      href={isForeign ? pill.href : undefined}
+      widthPx={PILL_W.stage}
     />
   );
 }
 
 function SharedPill({ row }: { row: QueueResultRow }) {
   const count = row.share_count ?? 0;
-  if (count <= 0) {
-    return <Pill color="dim" label="Shr" title="Not shared" widthPx={PILL_W.shared} />;
-  }
+  if (count <= 0) return null;
   const ago = formatDaysAgo(row.latest_share_at);
   return (
     <Pill
@@ -268,37 +395,6 @@ function SharedPill({ row }: { row: QueueResultRow }) {
       widthPx={PILL_W.shared}
     />
   );
-}
-
-function ActionPill({ row }: { row: QueueResultRow }) {
-  // Priority: open offer > upcoming showing > nothing.
-  if (row.open_offer_amount != null || row.open_offer_status) {
-    const amount = formatShortPrice(row.open_offer_amount);
-    const label = amount ? `Ofr ${amount}` : "Offer";
-    const deadline = row.open_offer_deadline
-      ? ` · deadline ${formatShortDate(row.open_offer_deadline)}`
-      : "";
-    return (
-      <Pill
-        color="amber"
-        label={label}
-        title={`Open offer${row.open_offer_status ? ` (${row.open_offer_status})` : ""}${deadline}`}
-        widthPx={PILL_W.action}
-      />
-    );
-  }
-  if (row.next_showing_at) {
-    const short = formatShortDate(row.next_showing_at);
-    return (
-      <Pill
-        color="amber"
-        label={`Sho ${short ?? ""}`}
-        title={`Showing scheduled${row.next_showing_status ? ` (${row.next_showing_status})` : ""} · ${row.next_showing_at.slice(0, 16).replace("T", " ")}`}
-        widthPx={PILL_W.action}
-      />
-    );
-  }
-  return <Pill color="dim" label="Act" title="No pending actions" widthPx={PILL_W.action} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -368,26 +464,54 @@ function renderWhyNow(row: QueueResultRow) {
 // Component
 // ---------------------------------------------------------------------------
 
-export function QueueResultsTable({ results }: QueueResultsTableProps) {
+export function QueueResultsTable({
+  results,
+  showPhysicalColumns = false,
+}: QueueResultsTableProps) {
   const [activeResultId, setActiveResultId] = useState<string | null>(null);
   const activeRow = activeResultId
     ? results.find((r) => r.id === activeResultId) ?? null
     : null;
 
+  const [popoverState, setPopoverState] = useState<{
+    rowId: string;
+    anchorRect: DOMRect;
+  } | null>(null);
+  const popoverRow = popoverState
+    ? results.find((r) => r.id === popoverState.rowId) ?? null
+    : null;
+
+  const openPopover = (row: QueueResultRow, rect: DOMRect) => {
+    setPopoverState({ rowId: row.id, anchorRect: rect });
+  };
+
   return (
     <>
       <div className="dw-table-wrap">
-        <table className="dw-table-compact min-w-[1600px]" style={{ tableLayout: "fixed" }}>
+        <table
+          className={`dw-table-dense ${showPhysicalColumns ? "min-w-[1780px]" : "min-w-[1500px]"}`}
+          style={{ tableLayout: "fixed" }}
+        >
           <colgroup>
             {/* Map  Pills  WhyNow  Star */}
             <col style={{ width: 38 }} />
-            <col style={{ width: 240 }} />
+            <col style={{ width: 130 }} />
             <col style={{ width: 140 }} />
             <col style={{ width: 20 }} />
             {/* Address  City  Type  ChangeType */}
             <col style={{ width: 220 }} />
             <col style={{ width: 100 }} />
             <col style={{ width: 68 }} />
+            {showPhysicalColumns && (
+              <>
+                {/* DOM  Beds  Baths  BldgSF  YrBuilt */}
+                <col style={{ width: 46 }} />
+                <col style={{ width: 40 }} />
+                <col style={{ width: 40 }} />
+                <col style={{ width: 64 }} />
+                <col style={{ width: 54 }} />
+              </>
+            )}
             <col style={{ width: 105 }} />
             {/* ListDate  UCDate  CloseDate */}
             <col style={{ width: 78 }} />
@@ -413,6 +537,15 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
               <th className="text-left">Address</th>
               <th className="text-left">City</th>
               <th className="text-left">Type</th>
+              {showPhysicalColumns && (
+                <>
+                  <th className="text-right">DOM</th>
+                  <th className="text-right">Bd</th>
+                  <th className="text-right">Ba</th>
+                  <th className="text-right">Bldg SF</th>
+                  <th className="text-right">Yr</th>
+                </>
+              )}
               <th className="text-left">Change Type</th>
               <th className="text-left">List Date</th>
               <th className="text-left">UC Date</th>
@@ -430,7 +563,10 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
           <tbody>
             {results.length === 0 ? (
               <tr>
-                <td colSpan={19} className="py-8 text-center text-sm text-slate-400">
+                <td
+                  colSpan={showPhysicalColumns ? 24 : 19}
+                  className="py-8 text-center text-sm text-slate-400"
+                >
                   No screened properties found.
                 </td>
               </tr>
@@ -454,11 +590,8 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
                   </td>
                   <td>
                     <div className="flex items-center gap-1">
-                      <ScreenedPill count={r.screening_run_count ?? 0} />
-                      <WatchListPill row={r} />
-                      <AnalyzedPill row={r} />
+                      <StagePillCell row={r} onOpen={openPopover} />
                       <SharedPill row={r} />
-                      <ActionPill row={r} />
                     </div>
                   </td>
                   <td>{renderWhyNow(r)}</td>
@@ -477,6 +610,27 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
                   </td>
                   <td className="truncate text-slate-500">{r.subject_city}</td>
                   <td className="text-slate-500">{r.subject_property_type ?? "—"}</td>
+                  {showPhysicalColumns && (
+                    <>
+                      <td className="text-right text-slate-600">
+                        {r.dom != null ? r.dom : "—"}
+                      </td>
+                      <td className="text-right text-slate-600">
+                        {r.beds_total != null ? r.beds_total : "—"}
+                      </td>
+                      <td className="text-right text-slate-600">
+                        {r.baths_total != null ? r.baths_total : "—"}
+                      </td>
+                      <td className="text-right text-slate-600">
+                        {r.building_sqft != null
+                          ? formatNumber(r.building_sqft)
+                          : "—"}
+                      </td>
+                      <td className="text-right text-slate-600">
+                        {r.year_built != null ? r.year_built : "—"}
+                      </td>
+                    </>
+                  )}
                   <td className="truncate text-slate-600">{r.mls_major_change_type ?? r.mls_status ?? "—"}</td>
                   <td className="text-slate-500">
                     {r.listing_contract_date ? r.listing_contract_date.slice(0, 10) : "—"}
@@ -544,6 +698,15 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
           promotedAnalysisId={activeRow.active_analysis_id ?? activeRow.promoted_analysis_id}
           realPropertyId={activeRow.real_property_id}
           onClose={() => setActiveResultId(null)}
+        />
+      )}
+
+      {/* Row-action popover (click stage pill) */}
+      {popoverState && popoverRow && (
+        <RowActionPopover
+          row={popoverRow}
+          anchorRect={popoverState.anchorRect}
+          onClose={() => setPopoverState(null)}
         />
       )}
     </>
