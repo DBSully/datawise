@@ -16,7 +16,10 @@ type PartnerOverrideField =
   | "arv_override"
   | "rehab_override"
   | "target_profit_override"
-  | "days_held_override";
+  | "days_held_override"
+  | "financing_override"
+  | "buyer_commission_pct_override"
+  | "seller_commission_pct_override";
 
 type SavePartnerOverrideInput = {
   shareId: string;

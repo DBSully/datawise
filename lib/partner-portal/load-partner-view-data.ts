@@ -79,6 +79,9 @@ export type PartnerViewData = {
     rehabOverride: number | null;
     targetProfitOverride: number | null;
     daysHeldOverride: number | null;
+    financingOverride: number | null;
+    buyerCommissionPctOverride: number | null;
+    sellerCommissionPctOverride: number | null;
     selectedCompIds: string[] | null;
     notes: string | null;
   } | null;
@@ -163,7 +166,7 @@ export async function loadPartnerViewData(
   const { data: partnerVersion } = await supabase
     .from("partner_analysis_versions")
     .select(
-      "arv_override, rehab_override, target_profit_override, days_held_override, selected_comp_ids, notes",
+      "arv_override, rehab_override, target_profit_override, days_held_override, financing_override, buyer_commission_pct_override, seller_commission_pct_override, selected_comp_ids, notes",
     )
     .eq("analysis_share_id", share.id)
     .maybeSingle();
@@ -234,6 +237,16 @@ export async function loadPartnerViewData(
             partnerVersion.target_profit_override as number | null,
           daysHeldOverride:
             partnerVersion.days_held_override as number | null,
+          financingOverride:
+            ((partnerVersion as Record<string, unknown>).financing_override as
+              | number
+              | null) ?? null,
+          buyerCommissionPctOverride:
+            ((partnerVersion as Record<string, unknown>)
+              .buyer_commission_pct_override as number | null) ?? null,
+          sellerCommissionPctOverride:
+            ((partnerVersion as Record<string, unknown>)
+              .seller_commission_pct_override as number | null) ?? null,
           selectedCompIds:
             (partnerVersion.selected_comp_ids as string[] | null) ?? null,
           notes: (partnerVersion.notes as string | null) ?? null,

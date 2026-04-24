@@ -54,9 +54,20 @@ type DetailModalProps = {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  /** Size preset:
+   *  - "compact" — 400px (single-column, simple label/value pairs)
+   *  - "medium"  — 520px (multi-row breakdown with several line items)
+   *  - "default" — 720px (original width used by card methodology modals)
+   *  - "wide"    — 95vw × 92vh (Comp Workspace expand view, etc.) */
+  size?: "compact" | "medium" | "default" | "wide";
 };
 
-export function DetailModal({ title, onClose, children }: DetailModalProps) {
+export function DetailModal({
+  title,
+  onClose,
+  children,
+  size = "default",
+}: DetailModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -132,7 +143,17 @@ export function DetailModal({ title, onClose, children }: DetailModalProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="dw-detail-modal-title"
-        className="flex max-h-[80vh] w-full max-w-[720px] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl"
+        className={`flex w-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl ${
+          size === "wide" ? "max-h-[92vh]" : "max-h-[80vh]"
+        } ${
+          size === "compact"
+            ? "max-w-[400px]"
+            : size === "medium"
+              ? "max-w-[520px]"
+              : size === "wide"
+                ? "max-w-[95vw]"
+                : "max-w-[720px]"
+        }`}
       >
         {/* Header */}
         <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-slate-50 px-4 py-2.5">

@@ -119,6 +119,11 @@ type SubjectTileRowProps = {
   /** Additional tiles rendered after Quick Analysis in the flex row.
    *  Used by the screening modal to slot in Quick Status. */
   children?: React.ReactNode;
+  /** Compact variant — tighter padding and row gap on the MLS + Physical
+   *  tiles. Used by the partner portal deal spreadsheet where vertical
+   *  space is tight. Default false preserves the original spacing on
+   *  the analyst workstation and screening modal. */
+  compact?: boolean;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -131,7 +136,10 @@ export function SubjectTileRow({
   quickAnalysis,
   showQuickAnalysis = true,
   children,
+  compact = false,
 }: SubjectTileRowProps) {
+  const tilePadding = compact ? "px-2 py-1" : "px-3 py-2";
+  const rowGap = compact ? "gap-2" : "gap-3";
   const handleTargetProfitKeyDown = quickAnalysis.onTargetProfitTab
     ? (e: KeyboardEvent<HTMLInputElement>) => {
         if (e.key === "Tab" && !e.shiftKey) {
@@ -142,7 +150,7 @@ export function SubjectTileRow({
     : undefined;
 
   return (
-    <div className="flex gap-3">
+    <div className={`flex ${rowGap}`}>
       {/* MLS Info tile.
        *
        * `whitespace-nowrap` cascades to all child text so values like
@@ -155,7 +163,7 @@ export function SubjectTileRow({
        * layout naturally.
        */}
       <div
-        className="shrink-0 whitespace-nowrap rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-snug"
+        className={`shrink-0 whitespace-nowrap rounded border border-slate-200 bg-slate-50 ${tilePadding} text-[11px] leading-snug`}
         style={{ width: "max-content" }}
       >
         <div className="grid grid-cols-[auto_auto_16px_auto_auto] gap-x-2 gap-y-0.5">
@@ -193,7 +201,7 @@ export function SubjectTileRow({
 
       {/* Property Physical tile */}
       <div
-        className="shrink-0 rounded border border-slate-200 bg-slate-50 px-3 py-2"
+        className={`shrink-0 rounded border border-slate-200 bg-slate-50 ${tilePadding}`}
         style={{ maxWidth: 400 }}
       >
         <div className="grid grid-cols-[auto_auto_16px_auto_auto_16px_auto_auto] gap-x-2 gap-y-0.5 text-[11px] leading-snug">

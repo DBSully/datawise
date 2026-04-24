@@ -1,3 +1,89 @@
+## 2026-04-23 — Partner Portal deal spreadsheet redesign
+
+Rebuilt the partner-facing view at `/portal/deals/[shareToken]` around an interactive two-column deal-math grid: read-only Analyst cards on the left, editable Partner Entry cards on the right, paired row-by-row so "ARV" sits directly across from "Your ARV", "Rehab" from "Your Rehab", etc. Each partner entry auto-persists to `partner_analysis_versions` and cascades live into a bottom "Your Max Offer" result card with a delta badge (▲ emerald / ▼ red) vs. the analyst's max offer. Replaces the old single-tile "Your Analysis (private)" sandbox + separate DealStatStrip, which felt like a side quest; the new layout IS the deal.
+
+### Partner override columns
+
+Two migrations add the remaining override fields the partner sandbox was missing:
+
+- `20260423100000_partner_financing_override.sql` — `financing_override numeric` (total dollar amount; partners don't re-model points/rate/LTV, they just say "my financing costs X").
+- `20260423120000_partner_commission_overrides.sql` — `buyer_commission_pct_override numeric` + `seller_commission_pct_override numeric` (stored as decimals, 0.025 = 2.5%).
+
+`savePartnerOverrideAction`'s field union grew accordingly, and `loadPartnerViewData` selects + exposes all three. Title and non-commission closing costs are explicitly NOT partner-overridable — those come straight from the FITCO matrix and aren't under negotiation.
+
+### Paired-grid layout with row auto-alignment
+
+The six rows (ARV / Rehab / Holding / Transaction / Financing / Target Profit / Max Offer) live in a single CSS grid spanning both analyst and partner columns (`gridTemplateColumns: "210px 210px"`). Because it's one grid, row heights auto-match to the tallest cell in each row — no flex-column fiddling, no manual height matching. This was the key insight: two independent flex columns would have drifted out of alignment every time a card changed.
+
+The analyst cards use a new `layout="stacked"` variant on `DetailCard` (default stays "compact" so the analyst workstation is unchanged): Row 1 title, Row 2 big right-aligned headline number, Row 3 context text. That puts the analyst's number directly across from the partner's input in the paired cell.
+
+### Partner card components
+
+Three new files in `components/workstation/`:
+
+- `partner-entry-card.tsx` — single-input card (ARV, Rehab, Financing, Target Profit). Title row + input row + optional reset link. Prompt + hint live in a hover tooltip.
+- `partner-result-card.tsx` — base for cards where the result is a **computed** dollar figure with **embedded inputs** (Holding, Transaction Costs). Row 1 title, Row 2 big right-aligned computed result, Row 3 is a children slot for the inline compact input(s). Holding row 3: `Days held: [60]`. Transaction row 3: `Commissions:` then `Buyer [2.5]% Seller [1.0]%` inline.
+- `max-offer-card.tsx` — result card at the bottom of each column, with `variant: "analyst" | "partner"`. Partner variant shows a colored delta badge vs. the analyst's max offer (`+$12K` / `-$8K`) and a 3-column metric strip below (Offer %, $/sf Gap, vs. List).
+
+Numbers across all three card types are right-aligned so columns read like an accounting ledger.
+
+### partnerLiveDeal cascade
+
+Mirrors the analyst workstation's `liveDeal` memo. Five partner inputs feed one Max Offer number:
+
+- ARV / Rehab / Target Profit — direct dollar substitutions
+- Days Held — scales each holding line item (tax, insurance, HOA, utilities) via daily rate AND financing interest cost via `loan × rate × days/365`, matching the analyst's formula
+- Financing Override — wins over the days-held financing cascade when set
+- Buyer/Seller Commission Rates — `transactionTotal = fixed (title + fees) + ARV × partner buyer rate + ARV × partner seller rate`. Commissions also scale with partner's ARV override.
+
+Max Offer = ARV − (Rehab + Holding + Transaction + Financing + Target Profit). All live.
+
+### Vertical compaction + hover tooltips
+
+Early iterations had the partner prompt text (e.g. "Disagree with the ARV? Enter yours here.") rendered inline below each input, which made the cards tall. Replaced with a hover tooltip that pops out to the **right** of the card (`absolute left-full ml-2`, fixed `w-60`) in a light-blue bubble matching the "Expand Comparable Search" palette (`border-blue-200 bg-blue-50 text-blue-800`). `pointer-events-none` keeps it from blocking clicks on neighboring cards. A small ⓘ indicator in each card's top-right hints at the hover — upgrades to ✓ when the partner has saved an override.
+
+The `DetailCard` stacked layout and both partner card components use tightened padding (`px-2.5 py-1.5`) and `leading-tight` to cut row height by roughly half.
+
+### Modal size tiers
+
+`DetailModal`'s size prop expanded from `"default" | "wide"` to `"compact" | "medium" | "default" | "wide"`:
+
+- compact — 400px (single-column simple label/value pairs: Rehab, Target Profit)
+- medium — 520px (multi-row detail breakdown: Holding, Transaction, Financing)
+- default — 720px (complex modals with tables: ArvCardModal, PriceTrendCardModal — unchanged)
+- wide — 95vw × 92vh (Comp Workspace expand modal)
+
+Numbers in the inline methodology modals were previously flung to the far right of a 720px panel with huge gaps between label and value. Per-card sizing fixes the layout density without changing the content.
+
+### Layout restructure — deal math moved up, subject tiles moved right, portal widened
+
+First iteration had the SubjectTileRow spanning full-width at the top and deal-math cards below. Flipped it: deal-math grid sits directly under the header on the far left; SubjectTileRow (MLS Info + Property Physical), the Price Trend / ROC / ROR strip, and the Comp Workspace all stack in the right column. The interactive surface is the first thing the partner sees.
+
+`app/portal/layout.tsx` was capped at `max-w-7xl` (1280px) which felt cramped on widescreen displays. Bumped to `max-w-[1800px]` so the deal spreadsheet can breathe. Matching change on the header nav.
+
+Bed/Bath per-level mini-grid removed from the partner's Property Physical tile (`bedBathLevels` prop simply not passed — the SubjectTileRow already renders it conditionally). Added a `compact` prop to SubjectTileRow that uses `px-2 py-1` instead of `px-3 py-2` and `gap-2` instead of `gap-3`; default is false so the analyst workstation is unaffected.
+
+### Comp Workspace: expand-to-modal + CopyMls tooltips
+
+Added an optional `onExpand` prop to `CompWorkspace`; when provided, renders a light-orange "⤢ Expand Comparables Panel" button inline next to the Copy Selected / Copy All buttons (first attempt absolute-positioned it at top-right of the card, which covered "Show Selected Only"). The partner view wires it to open a `size="wide"` DetailModal containing another CompWorkspace instance — shared via a `compWorkspaceProps` object so inline + modal render identically.
+
+Hover tooltips added to both Copy Selected and Copy All buttons, derived from the `selectedOnly` flag: "Copy Selected MLS numbers (for paste into MLS Search)" / "Copy All MLS numbers (for paste into MLS Search)". Same blue-50 palette as the partner card tooltips. Shared across analyst workstation and partner portal since `CopyMlsButton` is a private component inside `comp-workspace.tsx`.
+
+### Price Trend / ROC / ROR placeholder strip
+
+Per Dan's direction, Price Trend moved to the top-right of the page above the Comp Workspace as a 3-card strip with placeholders for "Return on Cash" and "Return on Risk" (`PlaceholderStatCard` inline — dashed border, "Coming soon" note). Return-on-cash and return-on-risk calculations are deferred to a later session.
+
+### What shipped vs. what's deferred
+
+Shipped: 5 partner override fields fully wired, paired-grid layout, hover tooltips, modal size tiers, comp workspace expand, widened portal, CopyMls tooltips.
+
+Deferred:
+- Return on Cash / Return on Risk calculations (placeholder cards scaffolded)
+- Methodology modals for Holding / Financing / Target Profit currently use lightweight inline DetailModal content rather than the analyst's full editing modals (which carry analyst-only input props that would leak write actions into the partner view)
+- Touch-device tooltip pattern — `group-hover:` doesn't fire on touch. Partner view is assumed desktop for MVP.
+
+---
+
 ## 2026-04-22 — FITCO title matrix, Deal Math column redesign, inline overrides, screening URL-length fix
 
 A long session that reshaped the Analysis Workstation's right-hand "Deal Math" column and replaced the percentage-based transaction-cost model with Dan's actual FITCO / Chicago Title rate sheet. Also fixed a reproducible "TypeError: fetch failed" crash on `/screening` caused by a long URL IN-list when the analyst had accumulated many open analyses.

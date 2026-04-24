@@ -17,7 +17,7 @@ export default function PortalLayout({
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex h-12 max-w-7xl items-center justify-between px-4">
+        <div className="mx-auto flex h-12 max-w-[1800px] items-center justify-between px-4">
           <div className="flex items-center gap-6">
             <Link
               href="/portal"
@@ -47,7 +47,7 @@ export default function PortalLayout({
           <PortalSignOutButton />
         </div>
       </header>
-      <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
+      <main className="mx-auto max-w-[1800px] px-4 py-6">{children}</main>
     </div>
   );
 }

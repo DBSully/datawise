@@ -42,6 +42,15 @@ type DetailCardProps = {
   context: string;
   badge?: ReactNode;
   onExpand: () => void;
+  /** Layout variant:
+   *  - "compact" (default): title + headline on row 1, context + badge
+   *    on row 2. Used in the analyst workstation's right rail.
+   *  - "stacked": title on row 1, headline on row 2 (aligns vertically
+   *    with an adjacent input box in a paired-card grid), context on
+   *    row 3. Used in the partner portal deal spreadsheet so the
+   *    analyst's headline number sits across from the partner's entry
+   *    input in the matching row. */
+  layout?: "compact" | "stacked";
 };
 
 export function DetailCard({
@@ -50,7 +59,47 @@ export function DetailCard({
   context,
   badge,
   onExpand,
+  layout = "compact",
 }: DetailCardProps) {
+  if (layout === "stacked") {
+    return (
+      <button
+        type="button"
+        onClick={onExpand}
+        className="group flex w-full flex-col rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-left shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-200"
+      >
+        {/* Row 1 — title + optional badge + chevron */}
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">
+            {title}
+          </span>
+          <span className="flex items-center gap-1.5">
+            {badge && <span className="shrink-0">{badge}</span>}
+            <span
+              aria-hidden="true"
+              className="text-[10px] text-slate-400 transition-colors group-hover:text-slate-600"
+            >
+              ▾
+            </span>
+          </span>
+        </div>
+
+        {/* Row 2 — headline value (aligns with the partner input box
+         *  in the paired card on the right). Right-aligned for
+         *  accounting-style readability. */}
+        <div className="mt-0.5 text-right font-mono text-[14px] font-bold leading-tight text-slate-800">
+          {headline}
+        </div>
+
+        {/* Row 3 — context at the bottom */}
+        <div className="mt-0.5 truncate text-[10px] leading-tight text-slate-400">
+          {context}
+        </div>
+      </button>
+    );
+  }
+
+  // Default "compact" layout — unchanged from the original spec.
   return (
     <button
       type="button"

@@ -124,6 +124,10 @@ type CompWorkspaceProps = {
   ) => void;
   /** Reload comps after AddCompByMls / ExpandSearchPanel completion. */
   onReloadData: () => void;
+  /** Optional — when provided, renders an "Expand Comparables Panel"
+   *  button next to the Copy buttons. The consumer is expected to open
+   *  a wide modal with the same CompWorkspace rendered inside it. */
+  onExpand?: () => void;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -139,6 +143,7 @@ export function CompWorkspace({
   onToggleSelection,
   onMapPinToggle,
   onReloadData,
+  onExpand,
 }: CompWorkspaceProps) {
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const [sortCol, setSortCol] = useState<SortCol>("gap");
@@ -263,6 +268,16 @@ export function CompWorkspace({
               mlsNumber={data.mlsNumber ?? null}
               selectedOnly={false}
             />
+            {onExpand && (
+              <button
+                type="button"
+                onClick={onExpand}
+                className="rounded border border-orange-200 bg-orange-50 px-2 py-0.5 text-[10px] font-semibold text-orange-700 hover:bg-orange-100"
+                title="Open the comparables panel in a larger view"
+              >
+                ⤢ Expand Comparables Panel
+              </button>
+            )}
           </div>
           <button
             type="button"
@@ -687,14 +702,26 @@ function CopyMlsButton({
     setTimeout(() => setCopied(false), 1500);
   }, [mlsNumbers]);
 
+  const tooltipText = selectedOnly
+    ? "Copy Selected MLS numbers (for paste into MLS Search)"
+    : "Copy All MLS numbers (for paste into MLS Search)";
+
   return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      disabled={mlsNumbers.length === 0}
-      className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-    >
-      {copied ? "Copied!" : `${label} (${mlsNumbers.length})`}
-    </button>
+    <div className="group relative inline-block">
+      <button
+        type="button"
+        onClick={handleCopy}
+        disabled={mlsNumbers.length === 0}
+        className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+      >
+        {copied ? "Copied!" : `${label} (${mlsNumbers.length})`}
+      </button>
+      <div
+        className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-56 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-2 text-[11px] leading-snug text-blue-800 shadow-lg group-hover:block"
+        role="tooltip"
+      >
+        {tooltipText}
+      </div>
+    </div>
   );
 }
