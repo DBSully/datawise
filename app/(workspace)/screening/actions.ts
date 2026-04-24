@@ -344,6 +344,7 @@ export async function runScreeningTickAction(
   if (result.done) {
     revalidatePath(`/screening/${batchId}`);
     revalidatePath("/screening");
+    revalidatePath("/pipeline");
     revalidatePath("/intake/imports");
     revalidatePath("/dashboard");
   }
@@ -378,6 +379,7 @@ export async function cancelScreeningBatchAction(
 
   revalidatePath("/intake/imports");
   revalidatePath("/screening");
+  revalidatePath("/pipeline");
   revalidatePath("/dashboard");
 
   redirect(redirectTo);
@@ -868,6 +870,7 @@ export async function promoteToAnalysisAction(
   });
 
   revalidatePath("/screening");
+  revalidatePath("/pipeline");
   revalidatePath("/dashboard");
   revalidatePath("/deals/watchlist");
   revalidatePath("/analysis");
@@ -935,6 +938,7 @@ export async function passOnScreeningResultAction(
   }
 
   revalidatePath("/screening");
+  revalidatePath("/pipeline");
   revalidatePath("/dashboard");
 }
 
@@ -970,6 +974,7 @@ export async function reactivateScreeningResultAction(
   }
 
   revalidatePath("/screening");
+  revalidatePath("/pipeline");
   revalidatePath("/dashboard");
 }
 

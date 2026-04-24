@@ -29,7 +29,7 @@ type SectionConfig = {
 const primaryNav = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/intake", label: "Intake" },
-  { href: "/screening", label: "Screening" },
+  { href: "/pipeline", label: "Pipeline" },
   { href: "/analysis", label: "Analysis" },
   { href: "/action", label: "Action" },
   { href: "/reports", label: "Reports" },
@@ -56,11 +56,11 @@ function getSectionConfig(pathname: string): SectionConfig {
     };
   }
 
-  if (pathname.startsWith("/screening")) {
+  if (pathname.startsWith("/pipeline") || pathname.startsWith("/screening")) {
     return {
-      title: "Screening",
-      subtitle: "Screen properties for opportunities and identify Prime Candidates.",
-      tabs: [{ href: "/screening", label: "Screening Queue" }],
+      title: "Pipeline",
+      subtitle: "Every property you're tracking — screening, watch list, action.",
+      tabs: [{ href: "/pipeline", label: "Pipeline" }],
     };
   }
 
@@ -132,8 +132,12 @@ function getPageLabel(
   if (pathname === "/intake/imports") return "Imports";
   if (pathname === "/intake/manual") return "Manual Entry";
 
-  if (pathname === "/screening") return "Screening Queue";
-  if (pathname.startsWith("/screening/")) return "Screening Batch";
+  if (pathname === "/pipeline") return "Pipeline";
+  if (pathname.startsWith("/pipeline/")) return "Pipeline";
+  // Legacy URLs — redirects handle navigation, but breadcrumbs may render
+  // briefly before the redirect takes effect.
+  if (pathname === "/screening") return "Pipeline";
+  if (pathname.startsWith("/screening/")) return "Pipeline";
 
   if (pathname === "/analysis") return "Watch List";
   if (pathname.startsWith("/analysis/")) return "Analysis Workstation";

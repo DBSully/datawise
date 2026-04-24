@@ -1,3 +1,89 @@
+## 2026-04-24 — Pipeline page, property_events RLS fix, pill cluster + Why Now
+
+Rethink of the list-level UX. The analyst's complaint: "I promote a property to the watch list and it disappears." Previously, `/screening`'s default view excluded properties with caller-owned active analyses (via `screening_queue_v`'s `NOT EXISTS` filter), so every watchlist item vanished from the queue the moment it was promoted. The mental model was wrong — "Screening" and "Analysis" weren't stages of a funnel, they were two views of the same object. This session unifies them into `/pipeline`: one list, one set of filters, pills showing where each property is in the flow.
+
+Along the way, discovered that `property_events` (the change-detection log shipped 2026-04-16) had been silently blocked by an RLS misconfiguration for 8 days. Fixed it, plus an ordering bug that left new screening_results rows with NULL MLS denormalization columns.
+
+### Property events — silent RLS block (8 days)
+
+Migration `20260416180000` created `property_events` with row-level security enabled and a SELECT-only policy, trusting a comment that said "inserts happen only from the service role." The actual runtime path uses `lib/supabase/server.ts` (cookie-backed authenticated client) — not the service role. Every `.insert()` from `lib/imports/process-batch.ts` returned `"new row violates row-level security policy"`, got caught by the warning handler, and buried in `import_batches.summary.warningsThisRun`. No user-facing error ever fired. Zero events had ever landed in production.
+
+Discovered while investigating why 6106 S Valleyview showed up in the screening queue today with no indication that its status had changed from "Coming Soon" to "Active." User's query against `property_events` returned zero rows for that property despite the obvious transition. Checked `import_batches.summary->'warningsThisRun'` on today's import and found the table populated with RLS denials, one for every listing touched.
+
+**Fix — `20260424120000_property_events_via_trigger.sql`:**
+
+- New `SECURITY DEFINER` function `emit_listing_change_events()` — statement-level, compares `OLD`/`NEW` transition tables via `IS DISTINCT FROM` for the six watched fields (list_price, close_price, mls_status, mls_major_change_type, purchase_contract_date, close_date), emits one `property_events` row per change. Definer privileges bypass RLS entirely, so no INSERT policy is needed.
+- Trigger `trg_mls_emit_change_events` on `mls_listings` — `AFTER UPDATE` with `NEW TABLE` + `OLD TABLE` transitions, `FOR EACH STATEMENT` (matches the trigger perf checklist).
+- Removed `buildListingChangeEvents()` + `normalizeNumeric`/`normalizeText` helpers from `process-batch.ts` — detection now lives entirely in the DB.
+
+Postgres gotcha uncovered on the first push: `AFTER UPDATE OF col1, col2` can't be combined with transition tables (SQLSTATE `0A000`). Trigger fires on every UPDATE instead; the body's `IS DISTINCT FROM` filter keeps non-watched-field updates as cheap no-ops.
+
+No backfill — upserts overwrote prior snapshots, so the 8-day gap is unrecoverable. Go-forward only.
+
+### `screening_queue_v` dropped, pill cluster + Why Now column
+
+Step 1 of the list-level fix. `screening_queue_v` (migration 20260422140000) was created to solve a real problem — per-user IN-list UUIDs were exceeding the PostgREST URL limit — but the fix cemented the "promoted properties disappear" behavior. Switched `/screening` to query `screening_results_latest_v` directly. Default filter changed from `review_action IS NULL` to `review_action != 'passed'` so promoted rows stay visible; `?passed=1` includes passed rows for archival lookup.
+
+New **pill cluster** column replaces the single Watch List / Reviewed-by / Passed status badge. Five pills per row:
+
+| Pill | Data source | Lit when | Detail |
+|---|---|---|---|
+| Screened | `screening_results` count per property | Any screening exists | `Scr·2` for re-screened |
+| Watch List | `analyses` + `analysis_pipeline` (caller's active) | Promoted | Color by interest (Hot/Warm/Curious); "By Alice" slate if another analyst owns it |
+| Analyzed | `manual_analysis` judgment fields non-null | Analyst has done work | Tooltip has last-touched date |
+| Shared | `analysis_shares` count | Shared to partner | `Shr·2`, tooltip has latest share date |
+| Action | `analysis_offers` / `analysis_showings` / pipeline flags | Pending work | `Ofr $450k`, `Sho 4/28` |
+
+Dim state when not achieved. Each pill carries a `title` attribute for the full story.
+
+New **Why Now** column. Renders the latest `property_events` row per property, formatted by type: `Price $850k → $825k` (green on drop), `Coming Soon → Active` (blue), `UC 4/22`, etc. Plus a "2d ago" / "3h ago" subline. This was the surface that 6106 S Valleyview exposed — the listing went Coming Soon → Active today, but nothing in the UI mentioned that.
+
+### `/pipeline` page + route unification
+
+Step 2. Renamed from `/screening` to `/pipeline` to match the canonical database vocabulary (`analysis_pipeline`) and the deal-pipeline mental model analysts already use. `/screening` and `/screening/[batchId]` redirect to `/pipeline?batchId=X` preserving query strings. `/screening/[batchId]/[resultId]` (per-result detail page) unchanged.
+
+**View-mode chips** at top of page: My Focus (default, `focus`), Screening, Action, All. Server-side filter via a new view:
+
+**`20260424130000_screening_pipeline_view.sql`** — `screening_pipeline_v` wraps raw `screening_results` with a LATERAL join that embeds `auth.uid()` and exposes `has_caller_active_analysis`, `caller_active_*`, `caller_events_last_seen_at` as columns. The chips become plain column predicates (`.eq("has_caller_active_analysis", true)`) — no IN-list UUIDs in the URL, no PostgREST URL-length trap. Also drops the now-unused `screening_queue_v`.
+
+View semantics:
+- `focus` = `has_caller_active_analysis = true`
+- `screen` = `has_caller_active_analysis = false AND review_action IS NULL`
+- `action` = `has_caller_active_analysis = true AND (showing_status OR offer_status)`
+- `all` = no view filter
+
+**Batch mode folds in** via `?batchId=X`. Previously `/screening/[batchId]` was its own page. Now it's a query-param preset on `/pipeline` with the same component code. `BatchProgressTracker` + cancel-batch form mount on `/pipeline` when `batchId` is set and the batch is running. `maxDuration = 300` moved onto the `/pipeline` segment. Batch semantics are explicit: show ALL results in the batch, including stale/non-latest ones — if the analyst pulled the batch, every property in it should stay visible. Default `view=all` in batch mode (vs. `view=focus` on main `/pipeline`), but chips are still rendered so the analyst can narrow to "My Focus scoped to this batch" — called out by the user as the highest-value filter ("new information on properties I already like").
+
+### Table column changes
+
+User-requested column cleanup on the queue table: dropped Spread, Rehab, Hold (low scan value at the list level; still available in the result-detail page). Added UC Date (purchase_contract_date) and Close Date immediately after List Date. UC/Close come from a batched mls_listings follow-up query scoped to visible rows (not yet denormalized onto screening_results — possible future migration).
+
+**Pill widths fixed per-pill** so the five pills column-align top-to-bottom across rows instead of reflowing to content: Screened 36px / Watch List 56px / Analyzed 32px / Shared 36px / Action 76px. Pill column set to 240px. Min-width trimmed from 1700 → 1600.
+
+### Late bug — denormalized MLS fields empty on new screening_results rows
+
+User reported a batch where most rows had UC Date filled but Change Type and List Date empty. Root cause: an ordering bug.
+
+Existing trigger `trg_mls_sync_screening_info` (migration 20260416240000) pushes `mls_status` / `mls_major_change_type` / `listing_contract_date` onto `screening_results.latest_*` whenever `mls_listings` changes. That works for ongoing MLS churn. But the bulk runner's insert path:
+
+1. MLS import updates `mls_listings` → trigger fires → nothing to update because no `screening_results` row for today's batch exists yet
+2. Screening batch inserts fresh `screening_results` rows with `latest_* = NULL`
+3. No further MLS change → NULLs stay → UI renders "—"
+
+**Fix — `20260424140000_screening_results_populate_latest_mls_on_insert.sql`:**
+
+- BEFORE INSERT trigger `trg_screening_results_populate_latest_mls` reads the current latest `mls_listings` snapshot for the property and stamps `latest_mls_*` onto the new row. Closes the ordering gap.
+- Backfilled currently-null rows with the same subquery shape.
+
+### Follow-up / deferred
+
+- Manual-analysis absorption of `/analysis` (richer watchlist UI with showing_status, dom) into `/pipeline` — deferred to future session. Direction captured in `project_pipeline_page_direction.md`.
+- Unread-events signal in My Focus — `caller_events_last_seen_at` is plumbed through `screening_pipeline_v` but not yet consumed.
+- Denormalizing UC/Close dates onto `screening_results` so we don't need the `mls_listings` follow-up query.
+- Watchlist/workstation event surfaces (shipped 2026-04-16) are now unblocked but still need end-to-end validation against a real import with deltas.
+
+---
+
 ## 2026-04-24 — Cash Required + Return on Cash/Risk cards
 
 Short follow-on session to the 2026-04-23 partner portal redesign. Added a Cash Required row underneath the Max Offer row, filled in the two placeholder stat cards (Return on Cash, Return on Risk) at the top right with real calculations, and wired both to methodology modals. Fixed one real bug in the partner cash-required formula along the way.

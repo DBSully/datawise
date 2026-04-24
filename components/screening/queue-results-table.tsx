@@ -35,19 +35,36 @@ export type QueueResultRow = {
   promoted_analysis_id: string | null;
   comp_search_run_id: string | null;
   review_action: string | null;
-  // Added by the interim queue fix migration (20260410130500). These come
-  // from analysis_queue_v's LEFT JOIN LATERAL to find any active analysis
-  // for this property, plus a "has the latest screening run happened
-  // since the analysis was created" flag.
   has_active_analysis: boolean | null;
   active_analysis_id: string | null;
   active_lifecycle_stage: string | null;
   active_interest_level: string | null;
-  /** Per-session: true when the active analysis is owned by the current user. */
   active_analysis_is_mine: boolean | null;
-  /** Display name or email of the analyst who owns the active analysis. */
   active_analysis_owner_name: string | null;
   has_newer_screening_than_analysis: boolean | null;
+
+  // Step 2b — pill + Why Now data. Optional so consumers that don't
+  // enrich keep compiling. Missing values render as dim pills / empty
+  // Why Now cell.
+  screening_run_count?: number;
+  analyzed_updated_at?: string | null;
+  share_count?: number;
+  latest_share_at?: string | null;
+  next_showing_at?: string | null;
+  next_showing_status?: string | null;
+  open_offer_amount?: number | null;
+  open_offer_status?: string | null;
+  open_offer_deadline?: string | null;
+  recent_event?: {
+    event_type: string;
+    before_value: unknown;
+    after_value: unknown;
+    detected_at: string;
+  } | null;
+
+  // Step 3 — extra MLS dates (UC / Close) fetched from mls_listings.
+  uc_date?: string | null;
+  close_date?: string | null;
 };
 
 type QueueResultsTableProps = {
@@ -80,6 +97,34 @@ function formatPercent(value: number | null | undefined) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+function formatShortPrice(value: number | null | undefined): string | null {
+  if (value == null) return null;
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(value % 1_000_000 === 0 ? 0 : 2)}M`;
+  if (value >= 1_000) return `$${Math.round(value / 1_000)}k`;
+  return `$${Math.round(value)}`;
+}
+
+function formatShortDate(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function formatDaysAgo(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return null;
+  const deltaMs = Date.now() - then;
+  if (deltaMs < 0) return null;
+  const mins = Math.round(deltaMs / 60_000);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `${hours}h`;
+  const days = Math.round(hours / 24);
+  return `${days}d`;
+}
+
 function classifyDirection(rate: number): string {
   if (rate >= 0.05) return "strong_appreciation";
   if (rate >= 0.02) return "appreciating";
@@ -103,6 +148,223 @@ function trendColor(rate: number, detailJson: Record<string, unknown> | null): s
 }
 
 // ---------------------------------------------------------------------------
+// Pill primitive + per-pill renderers
+// ---------------------------------------------------------------------------
+
+type PillColor = "slate" | "red" | "orange" | "blue" | "purple" | "amber" | "dim";
+
+const PILL_COLORS: Record<PillColor, string> = {
+  slate:  "bg-slate-200 text-slate-700",
+  red:    "bg-red-100 text-red-800",
+  orange: "bg-orange-100 text-orange-800",
+  blue:   "bg-blue-100 text-blue-800",
+  purple: "bg-purple-100 text-purple-800",
+  amber:  "bg-amber-100 text-amber-800",
+  dim:    "bg-slate-50 text-slate-400",
+};
+
+function Pill({
+  color,
+  label,
+  title,
+  href,
+  widthPx,
+}: {
+  color: PillColor;
+  label: string;
+  title: string;
+  href?: string;
+  widthPx: number;
+}) {
+  // Fixed-width pills keep the cluster column-aligned across rows so the
+  // analyst's eye can scan a single pill column top-to-bottom.
+  const className = `inline-flex items-center justify-center rounded px-1 py-0.5 text-[10px] font-semibold leading-none overflow-hidden whitespace-nowrap ${PILL_COLORS[color]}`;
+  const style = { width: `${widthPx}px` };
+  if (href) {
+    return (
+      <Link href={href} title={title} className={`${className} hover:opacity-80`} style={style}>
+        {label}
+      </Link>
+    );
+  }
+  return <span title={title} className={className} style={style}>{label}</span>;
+}
+
+// Per-pill fixed widths (px) — tuned for the longest realistic label.
+const PILL_W = {
+  screened: 36,
+  watch: 56,
+  analyzed: 32,
+  shared: 36,
+  action: 76,
+} as const;
+
+function ScreenedPill({ count }: { count: number }) {
+  if (count <= 0) {
+    return <Pill color="dim" label="Scr" title="Never screened" widthPx={PILL_W.screened} />;
+  }
+  return (
+    <Pill
+      color="slate"
+      label={count > 1 ? `Scr·${count}` : "Scr"}
+      title={count > 1 ? `Screened ${count}× — latest run shown` : "Screened once"}
+      widthPx={PILL_W.screened}
+    />
+  );
+}
+
+function WatchListPill({ row }: { row: QueueResultRow }) {
+  // Active-analysis is the primary signal (enriched in /pipeline page.tsx).
+  // Batch-detail page doesn't enrich, so fall back to promoted_analysis_id
+  // on the screening_results row itself.
+  const analysisId = row.active_analysis_id ?? row.promoted_analysis_id;
+  if (!analysisId) {
+    return <Pill color="dim" label="WL" title="Not on watch list" widthPx={PILL_W.watch} />;
+  }
+  const level = (row.active_interest_level ?? "warm").toLowerCase();
+  const colorByLevel: Record<string, PillColor> =
+    { hot: "red", warm: "orange", curious: "slate" };
+  const isMine = row.active_analysis_is_mine ?? true;
+  const color = isMine ? (colorByLevel[level] ?? "orange") : "slate";
+  const label = isMine
+    ? level.charAt(0).toUpperCase() + level.slice(1)
+    : `By ${row.active_analysis_owner_name?.split(" ")[0] ?? "other"}`;
+  const title = isMine
+    ? `Watch list · ${level}${row.has_newer_screening_than_analysis ? " · newer screening available" : ""}`
+    : `Another analyst (${row.active_analysis_owner_name ?? "unknown"}) is working on this property`;
+  const href = isMine ? `/analysis/${analysisId}` : undefined;
+  return <Pill color={color} label={label} title={title} href={href} widthPx={PILL_W.watch} />;
+}
+
+function AnalyzedPill({ row }: { row: QueueResultRow }) {
+  if (!row.active_analysis_is_mine) {
+    return <Pill color="dim" label="Anl" title="No analysis of your own yet" widthPx={PILL_W.analyzed} />;
+  }
+  if (!row.analyzed_updated_at) {
+    return <Pill color="dim" label="Anl" title="Promoted but no manual analysis yet" widthPx={PILL_W.analyzed} />;
+  }
+  const ago = formatDaysAgo(row.analyzed_updated_at);
+  return (
+    <Pill
+      color="blue"
+      label="Anl"
+      title={`Manual analysis last updated ${ago ?? row.analyzed_updated_at}`}
+      widthPx={PILL_W.analyzed}
+    />
+  );
+}
+
+function SharedPill({ row }: { row: QueueResultRow }) {
+  const count = row.share_count ?? 0;
+  if (count <= 0) {
+    return <Pill color="dim" label="Shr" title="Not shared" widthPx={PILL_W.shared} />;
+  }
+  const ago = formatDaysAgo(row.latest_share_at);
+  return (
+    <Pill
+      color="purple"
+      label={count > 1 ? `Shr·${count}` : "Shr"}
+      title={`${count} share${count > 1 ? "s" : ""}${ago ? ` · latest ${ago} ago` : ""}`}
+      widthPx={PILL_W.shared}
+    />
+  );
+}
+
+function ActionPill({ row }: { row: QueueResultRow }) {
+  // Priority: open offer > upcoming showing > nothing.
+  if (row.open_offer_amount != null || row.open_offer_status) {
+    const amount = formatShortPrice(row.open_offer_amount);
+    const label = amount ? `Ofr ${amount}` : "Offer";
+    const deadline = row.open_offer_deadline
+      ? ` · deadline ${formatShortDate(row.open_offer_deadline)}`
+      : "";
+    return (
+      <Pill
+        color="amber"
+        label={label}
+        title={`Open offer${row.open_offer_status ? ` (${row.open_offer_status})` : ""}${deadline}`}
+        widthPx={PILL_W.action}
+      />
+    );
+  }
+  if (row.next_showing_at) {
+    const short = formatShortDate(row.next_showing_at);
+    return (
+      <Pill
+        color="amber"
+        label={`Sho ${short ?? ""}`}
+        title={`Showing scheduled${row.next_showing_status ? ` (${row.next_showing_status})` : ""} · ${row.next_showing_at.slice(0, 16).replace("T", " ")}`}
+        widthPx={PILL_W.action}
+      />
+    );
+  }
+  return <Pill color="dim" label="Act" title="No pending actions" widthPx={PILL_W.action} />;
+}
+
+// ---------------------------------------------------------------------------
+// Why Now cell
+// ---------------------------------------------------------------------------
+
+function extractScalar(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  return null;
+}
+
+function renderWhyNow(row: QueueResultRow) {
+  const e = row.recent_event;
+  if (!e) {
+    return <span className="text-[10px] text-slate-300">—</span>;
+  }
+  const ago = formatDaysAgo(e.detected_at);
+  const before = extractScalar(e.before_value);
+  const after = extractScalar(e.after_value);
+  let main = "";
+  let tone = "text-slate-600";
+  switch (e.event_type) {
+    case "price_change": {
+      const b = before ? formatShortPrice(Number(before)) : "—";
+      const a = after ? formatShortPrice(Number(after)) : "—";
+      main = `Price ${b} → ${a}`;
+      if (before && after && Number(after) < Number(before)) tone = "text-emerald-700";
+      else if (before && after && Number(after) > Number(before)) tone = "text-red-600";
+      break;
+    }
+    case "status_change":
+      main = `${before ?? "—"} → ${after ?? "—"}`;
+      tone = "text-blue-700";
+      break;
+    case "change_type":
+      main = after ?? "Change";
+      tone = "text-slate-600";
+      break;
+    case "uc_date":
+      main = after ? `UC ${formatShortDate(after)}` : "UC cleared";
+      tone = "text-amber-700";
+      break;
+    case "close_date":
+      main = after ? `Closed ${formatShortDate(after)}` : "Close cleared";
+      tone = "text-slate-600";
+      break;
+    case "close_price": {
+      const a = after ? formatShortPrice(Number(after)) : "—";
+      main = `Closed ${a}`;
+      tone = "text-slate-600";
+      break;
+    }
+    default:
+      main = e.event_type;
+  }
+  return (
+    <div className={`text-[10px] leading-tight ${tone}`} title={`${e.event_type} · ${e.detected_at}`}>
+      <div className="truncate font-medium">{main}</div>
+      {ago && <div className="text-[9px] text-slate-400">{ago} ago</div>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -115,28 +377,29 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
   return (
     <>
       <div className="dw-table-wrap">
-        <table className="dw-table-compact min-w-[1500px]" style={{ tableLayout: "fixed" }}>
+        <table className="dw-table-compact min-w-[1600px]" style={{ tableLayout: "fixed" }}>
           <colgroup>
-            {/* Map   Status  Star */}
+            {/* Map  Pills  WhyNow  Star */}
             <col style={{ width: 38 }} />
-            <col style={{ width: 68 }} />
+            <col style={{ width: 240 }} />
+            <col style={{ width: 140 }} />
             <col style={{ width: 20 }} />
-            {/* Address  City  Type  ChangeType  ListDate */}
+            {/* Address  City  Type  ChangeType */}
             <col style={{ width: 220 }} />
             <col style={{ width: 100 }} />
             <col style={{ width: 68 }} />
             <col style={{ width: 105 }} />
+            {/* ListDate  UCDate  CloseDate */}
             <col style={{ width: 78 }} />
-            {/* ListPrice  ARV  Trend  Spread  Gap  Comps */}
+            <col style={{ width: 78 }} />
+            <col style={{ width: 78 }} />
+            {/* ListPrice  ARV  Trend  Gap  Comps */}
             <col style={{ width: 76 }} />
             <col style={{ width: 76 }} />
             <col style={{ width: 58 }} />
-            <col style={{ width: 76 }} />
             <col style={{ width: 58 }} />
             <col style={{ width: 44 }} />
-            {/* Rehab  Hold  MaxOffer  Offer%  Detail */}
-            <col style={{ width: 70 }} />
-            <col style={{ width: 66 }} />
+            {/* MaxOffer  Offer%  Detail */}
             <col style={{ width: 76 }} />
             <col style={{ width: 50 }} />
             <col style={{ width: 40 }} />
@@ -144,21 +407,21 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
           <thead>
             <tr>
               <th className="text-left"></th>
-              <th className="text-left"></th>
+              <th className="text-left">Status</th>
+              <th className="text-left">Why Now</th>
               <th className="text-left"></th>
               <th className="text-left">Address</th>
               <th className="text-left">City</th>
               <th className="text-left">Type</th>
               <th className="text-left">Change Type</th>
               <th className="text-left">List Date</th>
+              <th className="text-left">UC Date</th>
+              <th className="text-left">Close Date</th>
               <th className="text-right">List Price</th>
               <th className="text-right">ARV</th>
               <th className="text-right">Trend</th>
-              <th className="text-right">Spread</th>
               <th className="text-right">Gap (List)</th>
               <th className="text-right">Comps</th>
-              <th className="text-right">Rehab</th>
-              <th className="text-right">Hold</th>
               <th className="text-right">Max Offer</th>
               <th className="text-right">Offer%</th>
               <th className="text-left"></th>
@@ -190,52 +453,15 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
                     ) : null}
                   </td>
                   <td>
-                    {/* Status badge — three distinct cases:
-                        (1) MY active analysis: blue "Watch List" link → /analysis/[id]
-                        (2) ANOTHER analyst's active analysis: amber "Reviewed by [name]"
-                            (still visible per independence + communication decision)
-                        (3) Otherwise: "Passed" or "Ready". */}
-                    {r.active_analysis_is_mine && (r.active_analysis_id ?? r.promoted_analysis_id) ? (
-                      <Link
-                        href={`/analysis/${r.active_analysis_id ?? r.promoted_analysis_id}`}
-                        className="inline-flex items-center gap-1 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800 hover:bg-blue-200"
-                        title={
-                          r.has_newer_screening_than_analysis
-                            ? `Your active analysis (${r.active_lifecycle_stage ?? "active"}) — newer screening data available`
-                            : `Your active analysis (${r.active_lifecycle_stage ?? "active"})`
-                        }
-                      >
-                        Watch List
-                        {r.has_newer_screening_than_analysis && (
-                          <span
-                            className="inline-block h-1.5 w-1.5 rounded-full bg-red-500"
-                            aria-label="newer screening data available"
-                          />
-                        )}
-                      </Link>
-                    ) : r.active_analysis_id && !r.active_analysis_is_mine ? (
-                      <span
-                        className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800"
-                        title={`Another analyst (${r.active_analysis_owner_name ?? "unknown"}) is working on this property`}
-                      >
-                        Reviewed by {r.active_analysis_owner_name?.split(" ")[0] ?? "another analyst"}
-                      </span>
-                    ) : r.promoted_analysis_id ? (
-                      <Link
-                        href={`/analysis/${r.promoted_analysis_id}`}
-                        className="inline-flex items-center gap-1 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800 hover:bg-blue-200"
-                        title="Watch List"
-                      >
-                        Watch List
-                      </Link>
-                    ) : r.review_action === "passed" ? (
-                      <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
-                        Passed
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-slate-400">Ready</span>
-                    )}
+                    <div className="flex items-center gap-1">
+                      <ScreenedPill count={r.screening_run_count ?? 0} />
+                      <WatchListPill row={r} />
+                      <AnalyzedPill row={r} />
+                      <SharedPill row={r} />
+                      <ActionPill row={r} />
+                    </div>
                   </td>
+                  <td>{renderWhyNow(r)}</td>
                   <td className="text-center">
                     {r.is_prime_candidate ? (
                       <span title="Prime Candidate" className="text-emerald-600">★</span>
@@ -255,13 +481,16 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
                   <td className="text-slate-500">
                     {r.listing_contract_date ? r.listing_contract_date.slice(0, 10) : "—"}
                   </td>
+                  <td className="text-slate-500">
+                    {r.uc_date ? r.uc_date.slice(0, 10) : "—"}
+                  </td>
+                  <td className="text-slate-500">
+                    {r.close_date ? r.close_date.slice(0, 10) : "—"}
+                  </td>
                   <td className="text-right">{formatCurrency(r.subject_list_price)}</td>
                   <td className="text-right font-medium">{formatCurrency(r.arv_aggregate)}</td>
                   <td className="text-right">
                     {(() => {
-                      // Show the raw (uncapped) market rate so the analyst
-                      // sees the actual calculated trend, even when the ARV
-                      // engine capped it for defensibility.
                       const displayRate = r.trend_raw_rate ?? r.trend_annual_rate;
                       if (displayRate == null) return <span className="text-slate-300">—</span>;
                       return (
@@ -275,17 +504,6 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
                     })()}
                   </td>
                   <td
-                    className={`text-right font-medium ${
-                      (r.spread ?? 0) > 0
-                        ? "text-emerald-700"
-                        : (r.spread ?? 0) < 0
-                          ? "text-red-600"
-                          : ""
-                    }`}
-                  >
-                    {formatCurrency(r.spread)}
-                  </td>
-                  <td
                     className={`text-right font-semibold ${
                       (r.est_gap_per_sqft ?? 0) >= 60 ? "text-emerald-700" : ""
                     }`}
@@ -297,8 +515,6 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
                   <td className="text-right text-slate-500">
                     {formatNumber(r.arv_comp_count)}
                   </td>
-                  <td className="text-right">{formatCurrency(r.rehab_total)}</td>
-                  <td className="text-right">{formatCurrency(r.hold_total)}</td>
                   <td className="text-right font-medium">
                     {formatCurrency(r.max_offer)}
                   </td>
@@ -325,9 +541,6 @@ export function QueueResultsTable({ results }: QueueResultsTableProps) {
         <ScreeningCompModal
           resultId={activeResultId}
           batchId={activeRow.screening_batch_id}
-          // Prefer active_analysis_id (interim queue fix) over per-row
-          // promoted_analysis_id so the modal correctly recognizes a
-          // re-screened watch list property as already promoted.
           promotedAnalysisId={activeRow.active_analysis_id ?? activeRow.promoted_analysis_id}
           realPropertyId={activeRow.real_property_id}
           onClose={() => setActiveResultId(null)}

@@ -186,145 +186,6 @@ function toPropertyFinancialsPayload(row: RawImportRow, listingId: string) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Change detection — emit property_events on meaningful MLS deltas
-// ---------------------------------------------------------------------------
-
-type ListingChangeDetectionInput = {
-  realPropertyId: string;
-  mlsListingId: string;
-  before: {
-    list_price: number | string | null;
-    close_price: number | string | null;
-    mls_status: string | null;
-    mls_major_change_type: string | null;
-    purchase_contract_date: string | null;
-    close_date: string | null;
-  };
-  next: ReturnType<typeof toMlsListingPayload>;
-  sourceImportBatchId: string;
-};
-
-type PropertyEventInsert = {
-  real_property_id: string;
-  mls_listing_id: string;
-  event_type:
-    | "price_change"
-    | "close_price"
-    | "status_change"
-    | "change_type"
-    | "uc_date"
-    | "close_date";
-  before_value: unknown;
-  after_value: unknown;
-  source_import_batch_id: string;
-};
-
-function normalizeNumeric(value: unknown): number | null {
-  if (value === null || value === undefined || value === "") return null;
-  const n = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
-function normalizeText(value: unknown): string | null {
-  if (value === null || value === undefined || value === "") return null;
-  return String(value);
-}
-
-/**
- * Compare pre- and post-upsert values for the 6 fields we track. Emit an
- * event for every meaningful change. Per product decision, ANY price delta
- * emits an event (no threshold). Null→null is skipped. "Same value after
- * normalization" is skipped.
- */
-function buildListingChangeEvents(
-  input: ListingChangeDetectionInput,
-): PropertyEventInsert[] {
-  const { realPropertyId, mlsListingId, before, next, sourceImportBatchId } =
-    input;
-  const events: PropertyEventInsert[] = [];
-
-  const listPriceBefore = normalizeNumeric(before.list_price);
-  const listPriceAfter = normalizeNumeric(next.list_price);
-  if (listPriceBefore !== listPriceAfter && (listPriceBefore !== null || listPriceAfter !== null)) {
-    events.push({
-      real_property_id: realPropertyId,
-      mls_listing_id: mlsListingId,
-      event_type: "price_change",
-      before_value: listPriceBefore,
-      after_value: listPriceAfter,
-      source_import_batch_id: sourceImportBatchId,
-    });
-  }
-
-  const closePriceBefore = normalizeNumeric(before.close_price);
-  const closePriceAfter = normalizeNumeric(next.close_price);
-  if (closePriceBefore !== closePriceAfter && (closePriceBefore !== null || closePriceAfter !== null)) {
-    events.push({
-      real_property_id: realPropertyId,
-      mls_listing_id: mlsListingId,
-      event_type: "close_price",
-      before_value: closePriceBefore,
-      after_value: closePriceAfter,
-      source_import_batch_id: sourceImportBatchId,
-    });
-  }
-
-  const statusBefore = normalizeText(before.mls_status);
-  const statusAfter = normalizeText(next.mls_status);
-  if (statusBefore !== statusAfter) {
-    events.push({
-      real_property_id: realPropertyId,
-      mls_listing_id: mlsListingId,
-      event_type: "status_change",
-      before_value: statusBefore,
-      after_value: statusAfter,
-      source_import_batch_id: sourceImportBatchId,
-    });
-  }
-
-  const changeTypeBefore = normalizeText(before.mls_major_change_type);
-  const changeTypeAfter = normalizeText(next.mls_major_change_type);
-  if (changeTypeBefore !== changeTypeAfter) {
-    events.push({
-      real_property_id: realPropertyId,
-      mls_listing_id: mlsListingId,
-      event_type: "change_type",
-      before_value: changeTypeBefore,
-      after_value: changeTypeAfter,
-      source_import_batch_id: sourceImportBatchId,
-    });
-  }
-
-  const ucBefore = normalizeText(before.purchase_contract_date);
-  const ucAfter = normalizeText(next.purchase_contract_date);
-  if (ucBefore !== ucAfter) {
-    events.push({
-      real_property_id: realPropertyId,
-      mls_listing_id: mlsListingId,
-      event_type: "uc_date",
-      before_value: ucBefore,
-      after_value: ucAfter,
-      source_import_batch_id: sourceImportBatchId,
-    });
-  }
-
-  const closeDateBefore = normalizeText(before.close_date);
-  const closeDateAfter = normalizeText(next.close_date);
-  if (closeDateBefore !== closeDateAfter) {
-    events.push({
-      real_property_id: realPropertyId,
-      mls_listing_id: mlsListingId,
-      event_type: "close_date",
-      before_value: closeDateBefore,
-      after_value: closeDateAfter,
-      source_import_batch_id: sourceImportBatchId,
-    });
-  }
-
-  return events;
-}
-
 function toMlsListingPayload(params: {
   row: RawImportRow;
   realPropertyId: string;
@@ -577,15 +438,13 @@ export async function processImportBatch(
           result.financialUpserts += 1;
         }
 
-        // Fetch existing listing + the fields we track for change events.
-        // The same query answers both "does this listing exist?" and
-        // "what were the pre-update values for change detection?"
+        // Does the listing already exist? Drives the inserted/updated counter.
+        // Change detection runs in the DB via trg_mls_emit_change_events
+        // (migration 20260424120000) — we don't diff here.
         const { data: existingListingRows, error: existingListingError } =
           await supabase
             .from("mls_listings")
-            .select(
-              "id, list_price, close_price, mls_status, mls_major_change_type, purchase_contract_date, close_date",
-            )
+            .select("id")
             .eq("source_system", recoloradoBasic50Profile.sourceSystem)
             .eq("listing_id", listingId)
             .limit(1);
@@ -594,8 +453,7 @@ export async function processImportBatch(
           throw new Error(existingListingError.message);
         }
 
-        const existingListing = existingListingRows?.[0] ?? null;
-        const listingExisted = existingListing !== null;
+        const listingExisted = (existingListingRows?.length ?? 0) > 0;
 
         const mlsListingPayload = toMlsListingPayload({
           row,
@@ -616,33 +474,6 @@ export async function processImportBatch(
 
         if (listingExisted) {
           result.listingsUpdated += 1;
-
-          // Detect changes against the pre-upsert row. The payload carries
-          // raw (pre-null-stripped) values so we can tell "null → value"
-          // apart from "value unchanged-but-missing". Events flow to
-          // property_events; consumed by watchlist alerts + workstation
-          // timeline. See CHANGELOG 2026-04-16 change-alerts entry.
-          const pendingEvents = buildListingChangeEvents({
-            realPropertyId,
-            mlsListingId: existingListing.id,
-            before: existingListing,
-            next: mlsListingPayload,
-            sourceImportBatchId: batchId,
-          });
-
-          for (const event of pendingEvents) {
-            const { error: eventError } = await supabase
-              .from("property_events")
-              .insert(event);
-
-            if (eventError) {
-              // Don't fail the whole row on event insert failure — log as
-              // a warning. Events are observability, not correctness.
-              result.warnings.push(
-                `Event insert failed for listing ${listingId}: ${eventError.message}`,
-              );
-            }
-          }
         } else {
           result.listingsInserted += 1;
         }
