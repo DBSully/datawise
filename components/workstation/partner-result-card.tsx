@@ -31,8 +31,10 @@ type PartnerResultCardProps = {
   prompt: string;
   /** Optional secondary line in the tooltip (analyst baseline etc). */
   hint?: string;
-  /** Row-3 content — typically an inline label + compact input(s). */
-  children: ReactNode;
+  /** Row-3 content — typically an inline label + compact input(s).
+   *  Optional: when omitted, the card is just a computed result (e.g.
+   *  Your Cash Required) with no downstream editable inputs. */
+  children?: ReactNode;
 };
 
 export function PartnerResultCard({
@@ -88,10 +90,13 @@ export function PartnerResultCard({
         {result}
       </div>
 
-      {/* Row 3 — card-specific compact input(s) */}
-      <div className="mt-0.5 text-[10px] leading-tight text-slate-500">
-        {children}
-      </div>
+      {/* Row 3 — card-specific compact input(s). Omitted for result-only
+       *  cards (e.g. Your Cash Required) where there's nothing to edit. */}
+      {children && (
+        <div className="mt-0.5 text-[10px] leading-tight text-slate-500">
+          {children}
+        </div>
+      )}
 
       {/* Hover tooltip — pops out to the RIGHT of the card in a
        *  light-blue bubble (matches the "Expand Comparable Search"

@@ -1,3 +1,63 @@
+## 2026-04-24 — Cash Required + Return on Cash/Risk cards
+
+Short follow-on session to the 2026-04-23 partner portal redesign. Added a Cash Required row underneath the Max Offer row, filled in the two placeholder stat cards (Return on Cash, Return on Risk) at the top right with real calculations, and wired both to methodology modals. Fixed one real bug in the partner cash-required formula along the way.
+
+### Cash Required row under Max Offer
+
+New paired row at the bottom of the deal-math grid:
+
+- **Analyst side** — `DetailCard layout="stacked"` with headline `totalCashRequired` from `data.cashRequired`, context `@ Max Offer $X`. Opens a `size="medium"` methodology modal with the full breakdown (Down Payment / Acquisition Title / Origination → Acquisition Subtotal, Rehab OOP / Holding / Interest → Carry Subtotal, then Total).
+- **Partner side** — `PartnerResultCard` with a computed live value. `children` prop on `PartnerResultCard` is now optional, so result-only cards (no embedded inputs) render cleanly without a row-3 slot.
+
+Partner formula mirrors the analyst's server-side `calculateCashRequired` shape:
+
+```
+cashRequired = DownPayment + AcqSubtotal + RehabOOP + Holding + Financing
+  where DownPayment = partnerMaxOffer × (1 − LTV)
+        LTV comes from analyst's financing config (partners don't adjust loan structure)
+        AcqSubtotal = data.transaction.acquisitionSubtotal (title + fees — partner-stable)
+        RehabOOP = max(0, partnerRehab − min(loanAvailableForRehab, partnerRehab))
+        Financing = partner's financingTotal (interest + origination)
+```
+
+### Two bugs fixed in the partner cash-required formula
+
+First pass used `transactionTotal` which included disposition (title + buyer/seller commissions) — those come out of sale proceeds, not cash at closing, so they had to be pulled out. Replaced with `data.transaction.acquisitionSubtotal` (acquisition-only).
+
+Second bug surfaced when the partner card was exactly **$100k higher** than the analyst card at baseline. Cause: the analyst's financing model has a `loanAvailableForRehab = $100,000` line of credit that reduces rehab out-of-pocket. I was using the full `rehabTotal` in the partner formula instead of `rehabOOP`. Fixed by subtracting `min(loanAvailableForRehab, partnerRehab)` from the partner's rehab contribution. Now the cards match at baseline and the partner's overrides track cleanly.
+
+### Return on Cash card
+
+Replaces the "Coming soon" placeholder in the top-right stat strip. Shows:
+
+- Per-deal ROC: `Target Profit / Cash Required` as a percentage (e.g. `24.5%`)
+- Linear annualized rate: `ROC × (365 / days held)` with the hold period in the context line (e.g. `149%/yr · 60d hold`)
+
+Linear annualization is the flip-underwriting convention — partners think "my money's tied up N days, what's the yearly equivalent?" not in compound-interest terms.
+
+### Return on Risk card
+
+Replaces the second placeholder. Risk = total capital at stake if the deal fails mid-rehab and can't be unwound at cost:
+
+```
+Risk = Max Offer + Acquisition Subtotal + Rehab + Financing + Holding
+```
+
+Unlike cash required, this includes the **full purchase price** (not just the down payment) — the loan principal is also exposed if the asset can't be sold for what you paid. Disposition costs are excluded (they come out of sale proceeds, not money you front).
+
+### Shared ReturnStatCard helper + clickable methodology modals
+
+Both return cards share a `ReturnStatCard` component with a consistent layout: title + big percentage + annualized/hold context line. Optional `onClick` turns it into a button with a chevron for the methodology modal.
+
+Two new `size="medium"` modals:
+
+- **Return on Cash modal** — Target Profit ÷ Cash Required → ROC; ROC × 365/days → annualized. Note on linear annualization convention.
+- **Return on Risk modal** — full risk breakdown (Max Offer + Acquisition + Rehab + Holding + Financing → Total Risk), then Target Profit ÷ Total Risk → ROR, then annualized. Note explaining why disposition costs are excluded.
+
+Both modals surface the inputs, the formula, and the linear annualization step so the partner can always answer "where did this number come from?"
+
+---
+
 ## 2026-04-23 — Partner Portal deal spreadsheet redesign
 
 Rebuilt the partner-facing view at `/portal/deals/[shareToken]` around an interactive two-column deal-math grid: read-only Analyst cards on the left, editable Partner Entry cards on the right, paired row-by-row so "ARV" sits directly across from "Your ARV", "Rehab" from "Your Rehab", etc. Each partner entry auto-persists to `partner_analysis_versions` and cascades live into a bottom "Your Max Offer" result card with a delta badge (▲ emerald / ▼ red) vs. the analyst's max offer. Replaces the old single-tile "Your Analysis (private)" sandbox + separate DealStatStrip, which felt like a side quest; the new layout IS the deal.

@@ -282,6 +282,37 @@ export function PartnerAnalysisView({
       parsedBuyerComm != null ||
       parsedSellerComm != null;
 
+    // Cash required — partner-facing formula that respects every
+    // override and matches the analyst's server-side
+    // calculateCashRequired shape when no overrides are set:
+    //   Down Payment + Acquisition Subtotal (title + fees at closing)
+    //   + Rehab OOP + Holding + Financing (origination + interest).
+    // Disposition transaction costs (title + commissions) come out of
+    // the SALE proceeds, not cash at closing — they must NOT be in
+    // the cash-required formula. LTV comes from the analyst's
+    // financing config; partners don't adjust loan structure directly.
+    const ltv = data.financing?.ltvPct ?? 0;
+    const downPayment = Math.round(maxOffer * (1 - ltv));
+    const acquisitionSubtotal = data.transaction?.acquisitionSubtotal ?? 0;
+    // Rehab OOP: analyst may have a line of credit for rehab
+    // (loanAvailableForRehab) that reduces the cash the partner has to
+    // front. Mirror the analyst's formula: rehabOOP = rehab − min(loan
+    // available, rehab). Critical: without this subtraction the partner
+    // card over-reports cash required by the full loanAvailableForRehab
+    // amount (e.g. $100k).
+    const loanAvailableForRehab =
+      data.cashRequired?.loanAvailableForRehab ?? 0;
+    const rehabFromLoan = Math.min(loanAvailableForRehab, rehabTotal);
+    const rehabOOP = Math.max(0, rehabTotal - rehabFromLoan);
+    const cashRequired = Math.max(
+      0,
+      downPayment +
+        acquisitionSubtotal +
+        rehabOOP +
+        holdTotal +
+        financingTotal,
+    );
+
     return {
       arv,
       rehabTotal,
@@ -304,6 +335,7 @@ export function PartnerAnalysisView({
       buyerCommManual: parsedBuyerComm != null,
       sellerCommManual: parsedSellerComm != null,
       hasAnyOverride,
+      cashRequired,
     };
   }, [
     partnerArvInput,
@@ -414,6 +446,23 @@ export function PartnerAnalysisView({
   // snapshot (pre-2026-04-22 analyses); derive from commission $ ÷ ARV
   // when missing so the partner always has a placeholder.
   const analystTransactionTotal = data.transaction?.total ?? 0;
+  const analystHoldingTotal = data.holding
+    ? Math.round(data.holding.dailyTotal * analystDays)
+    : 0;
+  // Return on Risk: profit divided by total capital at stake —
+  // everything that goes INTO the deal, regardless of whether it's
+  // loan or cash. A flip that falls apart mid-rehab has all of this
+  // money exposed, so it's the right denominator for a risk-adjusted
+  // return. Disposition costs are NOT included (they come out of
+  // sale proceeds — you never front them).
+  const analystAcquisitionSubtotal =
+    data.transaction?.acquisitionSubtotal ?? 0;
+  const analystRisk =
+    (analystMaxOffer ?? 0) +
+    analystAcquisitionSubtotal +
+    analystRehab +
+    analystFinancing +
+    analystHoldingTotal;
   const analystBuyerRate =
     data.transaction?.dispositionCommissionBuyerRate ??
     (data.transaction && dealMath?.arv
@@ -750,6 +799,22 @@ export function PartnerAnalysisView({
             analystMaxOffer={analystMaxOffer}
             hasAnyOverride={partnerLiveDeal?.hasAnyOverride ?? false}
           />
+
+          {/* Row 8 — Cash Required (result only, no inputs) */}
+          <DetailCard
+            layout="stacked"
+            title="Cash Required"
+            headline={fmt(data.cashRequired?.totalCashRequired ?? null)}
+            context={`@ Max Offer ${fmt(analystMaxOffer)}`}
+            onExpand={() => setOpenModal("cashRequired")}
+          />
+          <PartnerResultCard
+            title="Your Cash Required"
+            result={fmt(partnerLiveDeal?.cashRequired ?? null)}
+            hasOverride={partnerLiveDeal?.hasAnyOverride ?? false}
+            prompt={`Cash at closing + carry: down payment (${fmtNum((data.financing?.ltvPct ?? 0) * 100, 0)}% LTV) + acquisition title/fees + rehab + holding + financing. Disposition costs come out of sale proceeds, not upfront cash.`}
+            hint="Loan structure (LTV, origination) is the analyst's; your overrides flow into everything else."
+          />
         </div>
 
         {/* RIGHT: subject tiles + top stat strip + comp workspace */}
@@ -827,13 +892,17 @@ export function PartnerAnalysisView({
               }
               onExpand={() => setOpenModal("priceTrend")}
             />
-            <PlaceholderStatCard
-              title="Return on Cash"
-              note="Coming soon"
+            <ReturnOnCashCard
+              targetProfit={analystProfit}
+              cashRequired={data.cashRequired?.totalCashRequired ?? null}
+              daysHeld={analystDays}
+              onClick={() => setOpenModal("returnOnCash")}
             />
-            <PlaceholderStatCard
-              title="Return on Risk"
-              note="Coming soon"
+            <ReturnOnRiskCard
+              targetProfit={analystProfit}
+              risk={analystRisk}
+              daysHeld={analystDays}
+              onClick={() => setOpenModal("returnOnRisk")}
             />
           </div>
 
@@ -1104,6 +1173,181 @@ export function PartnerAnalysisView({
           </div>
         </DetailModal>
       )}
+      {openModal === "returnOnCash" && (
+        <DetailModal
+          title="Return on Cash"
+          size="medium"
+          onClose={() => setOpenModal(null)}
+        >
+          <div className="space-y-2 text-[11px]">
+            <p className="text-slate-500">
+              How hard the cash you actually front is working for you —
+              target profit divided by total cash required, then linearly
+              annualized so you can compare against yearly benchmarks.
+            </p>
+            <div className="rounded border border-slate-200 bg-slate-50 p-2">
+              <Row label="Target Profit" value={fmt(analystProfit)} />
+              <Row
+                label="Cash Required"
+                value={fmt(data.cashRequired?.totalCashRequired ?? null)}
+              />
+              <div className="my-1 border-t border-slate-200" />
+              <Row
+                label="Return on Cash"
+                value={
+                  data.cashRequired && data.cashRequired.totalCashRequired > 0
+                    ? `${((analystProfit / data.cashRequired.totalCashRequired) * 100).toFixed(1)}%`
+                    : "—"
+                }
+                bold
+              />
+              <div className="my-1 border-t border-slate-200" />
+              <Row label="Days Held" value={String(analystDays)} />
+              <Row
+                label="Annualized"
+                value={
+                  data.cashRequired &&
+                  data.cashRequired.totalCashRequired > 0 &&
+                  analystDays > 0
+                    ? `${(
+                        (analystProfit / data.cashRequired.totalCashRequired) *
+                        (365 / analystDays) *
+                        100
+                      ).toFixed(0)}%/yr`
+                    : "—"
+                }
+                bold
+              />
+            </div>
+            <p className="text-[10px] italic text-slate-400">
+              Linear annualization (ROC × 365 ÷ days). Standard flip
+              convention — not compounded.
+            </p>
+          </div>
+        </DetailModal>
+      )}
+      {openModal === "returnOnRisk" && (
+        <DetailModal
+          title="Return on Risk"
+          size="medium"
+          onClose={() => setOpenModal(null)}
+        >
+          <div className="space-y-2 text-[11px]">
+            <p className="text-slate-500">
+              How hard the total capital at stake is working for you.
+              Unlike cash required, this includes the full purchase
+              price — the loan principal is also exposed if the deal
+              fails and the asset can't be sold for what you paid.
+            </p>
+            <div className="rounded border border-slate-200 bg-slate-50 p-2">
+              <Row label="Max Offer" value={fmt(analystMaxOffer)} />
+              <Row
+                label="Acquisition Costs"
+                value={fmt(analystAcquisitionSubtotal)}
+              />
+              <Row label="Rehab" value={fmt(analystRehab)} />
+              <Row label="Holding" value={fmt(analystHoldingTotal)} />
+              <Row label="Financing" value={fmt(analystFinancing)} />
+              <Row label="Total Risk" value={fmt(analystRisk)} bold />
+              <div className="my-1 border-t border-slate-200" />
+              <Row label="Target Profit" value={fmt(analystProfit)} />
+              <Row
+                label="Return on Risk"
+                value={
+                  analystRisk > 0
+                    ? `${((analystProfit / analystRisk) * 100).toFixed(1)}%`
+                    : "—"
+                }
+                bold
+              />
+              <div className="my-1 border-t border-slate-200" />
+              <Row label="Days Held" value={String(analystDays)} />
+              <Row
+                label="Annualized"
+                value={
+                  analystRisk > 0 && analystDays > 0
+                    ? `${(
+                        (analystProfit / analystRisk) *
+                        (365 / analystDays) *
+                        100
+                      ).toFixed(0)}%/yr`
+                    : "—"
+                }
+                bold
+              />
+            </div>
+            <p className="text-[10px] italic text-slate-400">
+              Linear annualization (ROR × 365 ÷ days). Disposition costs
+              are excluded — they come out of sale proceeds, not cash
+              you front.
+            </p>
+          </div>
+        </DetailModal>
+      )}
+      {openModal === "cashRequired" && (
+        <DetailModal
+          title="Cash Required"
+          size="medium"
+          onClose={() => setOpenModal(null)}
+        >
+          <div className="space-y-2 text-[11px]">
+            <p className="text-slate-500">
+              Total cash you'd need to close, rehab, and carry the
+              project through to resale. Splits into acquisition
+              (at closing) and carry (during the hold).
+            </p>
+            {data.cashRequired ? (
+              <div className="rounded border border-slate-200 bg-slate-50 p-2">
+                <Row
+                  label="Down Payment"
+                  value={fmt(data.cashRequired.downPayment)}
+                />
+                <Row
+                  label="Acquisition Title"
+                  value={fmt(data.cashRequired.acquisitionTitle)}
+                />
+                <Row
+                  label="Origination"
+                  value={fmt(data.cashRequired.originationCost)}
+                />
+                <Row
+                  label="Acquisition Subtotal"
+                  value={fmt(data.cashRequired.acquisitionSubtotal)}
+                  bold
+                />
+                <div className="my-1 border-t border-slate-200" />
+                <Row
+                  label="Rehab (out of pocket)"
+                  value={fmt(data.cashRequired.rehabOutOfPocket)}
+                />
+                <Row
+                  label="Holding"
+                  value={fmt(data.cashRequired.holdingTotal)}
+                />
+                <Row
+                  label="Interest (during hold)"
+                  value={fmt(data.cashRequired.interestCost)}
+                />
+                <Row
+                  label="Carry Subtotal"
+                  value={fmt(data.cashRequired.carrySubtotal)}
+                  bold
+                />
+                <div className="my-1 border-t border-slate-200" />
+                <Row
+                  label="Total Cash Required"
+                  value={fmt(data.cashRequired.totalCashRequired)}
+                  bold
+                />
+              </div>
+            ) : (
+              <p className="italic text-slate-400">
+                No cash-required data.
+              </p>
+            )}
+          </div>
+        </DetailModal>
+      )}
       {openModal === "compWorkspace" && (
         <DetailModal
           title="Comparable Sales"
@@ -1159,6 +1403,126 @@ function PlaceholderStatCard({
       </span>
       <span className="text-[9px] italic text-slate-400">{note}</span>
     </div>
+  );
+}
+
+/** Shared layout for return-on-X stat cards. Per-deal % + linear
+ *  annualized rate (× 365/daysHeld) — the flip-underwriting convention.
+ *  When onClick is provided the card renders as a button with hover
+ *  affordances; the parent uses onClick to open a methodology modal. */
+function ReturnStatCard({
+  title,
+  numerator,
+  denominator,
+  daysHeld,
+  onClick,
+}: {
+  title: string;
+  numerator: number | null;
+  denominator: number | null;
+  daysHeld: number | null;
+  onClick?: () => void;
+}) {
+  const ratio =
+    numerator != null && denominator != null && denominator > 0
+      ? numerator / denominator
+      : null;
+  const annualized =
+    ratio != null && daysHeld && daysHeld > 0 ? ratio * (365 / daysHeld) : null;
+
+  const body = (
+    <>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">
+          {title}
+        </span>
+        {onClick && (
+          <span
+            aria-hidden="true"
+            className="text-[10px] text-slate-400 transition-colors group-hover:text-slate-600"
+          >
+            ▾
+          </span>
+        )}
+      </div>
+      <span className="mt-0.5 text-right font-mono text-[14px] font-bold leading-tight text-slate-800">
+        {ratio != null ? `${(ratio * 100).toFixed(1)}%` : "—"}
+      </span>
+      <span className="mt-0.5 text-right text-[10px] leading-tight text-slate-400">
+        {annualized != null
+          ? `${(annualized * 100).toFixed(0)}%/yr · ${daysHeld}d hold`
+          : "—"}
+      </span>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="group flex w-full flex-col rounded-lg border border-slate-200 bg-white px-3 py-2 text-left shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-200"
+      >
+        {body}
+      </button>
+    );
+  }
+  return (
+    <div className="flex flex-col rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+      {body}
+    </div>
+  );
+}
+
+/** Return on Cash — Target Profit / Cash Required. Cash Required is
+ *  what the investor actually fronts (down payment + acq fees +
+ *  rehab OOP + financing + holding). Linear annualization so partners
+ *  can compare to simple yearly benchmarks. */
+function ReturnOnCashCard({
+  targetProfit,
+  cashRequired,
+  daysHeld,
+  onClick,
+}: {
+  targetProfit: number | null;
+  cashRequired: number | null;
+  daysHeld: number | null;
+  onClick?: () => void;
+}) {
+  return (
+    <ReturnStatCard
+      title="Return on Cash"
+      numerator={targetProfit}
+      denominator={cashRequired}
+      daysHeld={daysHeld}
+      onClick={onClick}
+    />
+  );
+}
+
+/** Return on Risk — Target Profit / total capital at stake
+ *  (purchase + acquisition + rehab + financing + holding). Unlike
+ *  cash-required, this includes the full purchase, not just the down
+ *  payment — the loan principal is also exposed if the deal fails. */
+function ReturnOnRiskCard({
+  targetProfit,
+  risk,
+  daysHeld,
+  onClick,
+}: {
+  targetProfit: number | null;
+  risk: number | null;
+  daysHeld: number | null;
+  onClick?: () => void;
+}) {
+  return (
+    <ReturnStatCard
+      title="Return on Risk"
+      numerator={targetProfit}
+      denominator={risk}
+      daysHeld={daysHeld}
+      onClick={onClick}
+    />
   );
 }
 
