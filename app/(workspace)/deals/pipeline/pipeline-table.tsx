@@ -28,7 +28,7 @@ type PipelineRow = {
   offer_deadline_date: string | null;
   offer_accepted_date: string | null;
   days_since_update: number | null;
-  interest_level: string | null;
+  analyst_interest: string | null;
 };
 
 function $f(v: number | null | undefined) {
@@ -152,7 +152,7 @@ export function PipelineTable({ rows }: { rows: PipelineRow[] }) {
             return (
               <tr key={r.analysis_id}>
                 <td className="text-center">
-                  {INTEREST_ICONS[r.interest_level ?? "new"] ?? "⚪"}
+                  {INTEREST_ICONS[r.analyst_interest ?? "new"] ?? "⚪"}
                 </td>
                 <td>
                   <span

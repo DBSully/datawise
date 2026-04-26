@@ -525,8 +525,8 @@ export function PartnerAnalysisView({
           trendConfidence: data.trend?.confidence ?? null,
           gapOfferPerSqft: dealMath?.gapOfferPerSqft ?? null,
           isPrimeCandidate: false,
-          reviewAction: null,
-          passReason: null,
+          screenerDecision: null,
+          screenerDecisionReason: null,
           subjectCity: data.property.city,
         } as Parameters<typeof CompWorkspace>[0]["data"])
       : null,

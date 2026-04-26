@@ -33,7 +33,7 @@ export type BatchResultRow = {
   offer_pct: number | null;
   screening_status: string;
   comp_search_run_id: string | null;
-  review_action: string | null;
+  screener_decision: "fail" | "review" | "fast_track" | null;
   promoted_analysis_id: string | null;
 };
 
@@ -150,16 +150,16 @@ export function BatchResultsTable({ batchId, results }: BatchResultsTableProps) 
                     ) : null}
                   </td>
                   <td>
-                    {r.review_action === "promoted" && r.promoted_analysis_id ? (
+                    {r.promoted_analysis_id ? (
                       <Link
                         href={`/analysis/${r.promoted_analysis_id}`}
                         className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800"
                       >
-                        Watch List
+                        {r.screener_decision === "fast_track" ? "Fast Track" : "Watch List"}
                       </Link>
-                    ) : r.review_action === "passed" ? (
+                    ) : r.screener_decision === "fail" ? (
                       <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
-                        Passed
+                        Failed
                       </span>
                     ) : (
                       <span className="text-[10px] text-slate-400">Ready</span>

@@ -1,3 +1,130 @@
+## 2026-04-25 — Three-gate decision model: screener / analyst / partner with role-distinct vocabulary
+
+User's diagnostic that drove the whole change: "I currently have a pipeline full of 'Warm' leads that may or may not have been analyzed. I need to make a distinction." The legacy schema overloaded one `interest_level` field across two decision authorities (screener pushing through + analyst classifying) and silently defaulted to `warm` on every promotion. Result: ambiguous data, no way to tell who decided what.
+
+End state: each role has its own decision column, its own rejection verb, its own audit columns. Three gates surface independently in the pipeline UI.
+
+### Schema (migration `20260425120000_three_gate_decisions.sql`)
+
+| Role | Column on | Values | Reason | Decided-by/at |
+|---|---|---|---|---|
+| Screener | `screening_results.screener_decision` | `fail` / `review` / `fast_track` / NULL | `screener_decision_reason` | `screener_decided_by`, `screener_decided_at` |
+| Analyst | `analysis_pipeline.analyst_interest` | `hot` / `warm` / `watch` / `pass` / NULL | `analyst_pass_reason` | `analyst_decided_by`, `analyst_decided_at` |
+| Partner | derived in view | rolled up from `partner_feedback` | `pass_reason` (existing) | `submitted_at` |
+
+Dropped legacy columns: `screening_results.review_action`, `pass_reason`, `reviewed_at`, `reviewed_by_user_id`; `analysis_pipeline.interest_level`. The screener + analyst attribution columns are now symmetrically named and populated — analyst caught the asymmetry mid-review ("Are we still tracking the Analyst Role somewhere?") and `analyst_decided_by` was added before push.
+
+Backfill: `review_action='passed'` → `screener_decision='fail'` with prior reason preserved. Promoted + analyst was Hot → `screener_decision='fast_track'`. Other promoted → `screener_decision='review'`. `analyst_interest` left NULL on every row deliberately — user accepted the lost-data tradeoff over silent default-Warm carryover.
+
+### Override semantics — screener calls are durable
+
+`promoteToAnalysisAction` only stamps `screener_decision` when transitioning from NULL. Once set, it's never overwritten. Analysts override Failed properties via the dedicated `overrideFailedScreeningAction` which creates an analysis on top while leaving `screener_decision='fail'` intact for audit / calibration ("how often does the analyst override Fail?").
+
+Symmetric on the analyst side: `passFromWatchListAction` writes `analyst_interest='pass'` AND closes the lifecycle (`disposition='passed', lifecycle_stage='closed'`); `updateAnalystInterestAction` is the lighter version that sets the verdict without archiving the row. Required reason on analyst Pass mirrors required reason on screener Fail.
+
+### Partner rollup (any-Interested wins)
+
+`partner_feedback` already existed; the view now rolls it up:
+
+```sql
+case
+  when bool_or(pf.action = 'interested') then 'interested'
+  else (most recent action via correlated subquery)
+end as partner_decision
+```
+
+Plus `partner_feedback_count` and `partner_last_feedback_at`. Computed in the LATERAL block of `screening_pipeline_v` keyed off `caa.analysis_id`. UI renders a partner pill alongside Stage + Shared: `Ptr ✓` (interested) / `Ptr ✗` (pass) / `Ptr →` (showing/discussion request).
+
+### Vocabulary — Fail vs. Pass deliberately distinct
+
+User's instinct, locked in: screener uses **Fail**, analyst uses **Pass**. Rationale — "Pass" in real estate vernacular has two opposite meanings ("I'm passing on this deal" vs. "this passes the screen"), so giving each role its own verb makes the decider unambiguous in displays and queries. Future roles continue the pattern: Partner = Decline, Sponsor = Veto.
+
+This came up again during a mid-session question about unifying the filter language ("we are now in Analysis stage, which uses 'Passed'. Should we also adjust the analysis wording to 'Fail'?"). Answer: no — collapsing the verbs defeats the two-field model. Filters got two separate dropdowns instead.
+
+### UI — modal, popover, pipeline pill
+
+**Screening modal** (`components/screening/screening-comp-modal.tsx`):
+- Fresh row → three buttons: **Fail Screening** (red, with reason picker) / **Review** (emerald) / **Fast Track** (amber). No more single "Promote to Watch List" with a Hot/Warm/Watch select.
+- Promoted row → **Set Analyst Interest** + **Open Analysis →**. Picker offers Hot / Warm / Watch / Pass; Pass requires a reason (symmetric to Fail).
+- Failed row → **Override (Create Analysis)**. Preserves Fail; opens analysis for analyst to classify.
+
+**Row-action popover** (`components/screening/row-action-popover.tsx`):
+- Same three-gate split; analyst-stage controls drop legacy "Curious" and "New" tiers, standardize on Watch.
+- Stage classifier renamed `passed` → `failed`; the popover surfaces Override on Failed rows instead of Reactivate (which doesn't exist anymore — Failed is durable).
+
+**Pipeline pill** (`components/screening/queue-results-table.tsx` `resolveStagePill`):
+Layered display, freshest decision wins:
+
+| State | Pill | Color |
+|---|---|---|
+| Closed (Won) | Won | emerald |
+| Closed (Lost) | Lost | red |
+| Open offer | `Ofr $450k` | amber |
+| Scheduled showing | `Sho 4/28` | amber |
+| **Analyst Hot/Warm/Watch/Pass** | Hot / Warm / Watch / **Passed** | red / orange / slate / **red** |
+| Manual analysis done (no analyst classification) | `Anl` | blue |
+| Screener Fast Track (no analyst yet) | `Fast Trk` | amber |
+| Screener Review (no analyst yet) | `Review` | blue |
+| Failed but overridden | `Override` | red |
+| Genuine no-decision | `Pending` | blue |
+| Failed | `Failed` | red |
+| Just screened | `Scr` / `Scr·N` | slate |
+
+Two priority calls worth flagging:
+- `analyst_interest='pass'` ranks **above** Anl. Bug surfaced by user testing 623 Marine St — they passed via the dropdown, pill stayed `Anl` instead of showing the verdict. Reordered: explicit analyst verdict beats workflow state.
+- For callerActive rows where analyst hasn't classified yet, the pill mirrors the screener decision instead of inventing a fallback "New" tier (which was the legacy behavior). Dan: "Should 'new' be showing? I don't think this is in our new flow." Right answer: don't backfill — change the display to fall through to upstream state.
+
+### Filters — two dropdowns, role-distinct
+
+| Filter | URL param | Filters on | Default |
+|---|---|---|---|
+| **Failed (Screener)** | `?failed=1` | `screener_decision='fail'` | Hide |
+| **Passed (Analyst)** | `?passed=1` | `caller_active_analyst_interest='pass'` | Hide |
+
+Both compose. In Screening view, `?failed=1` is the entry point to surface Failed rows for override (the `screener_decision IS NULL` constraint relaxes to `IS NULL OR ='fail'`). Note: `?passed=1` previously meant "show failed screening rows" — that semantic flipped to match the new vocabulary; the screener filter is now `?failed=1`.
+
+### Views recreated
+
+Drop-with-CASCADE wasn't an option since several views had to be redefined with new column names. The migration explicitly drops + recreates seven views: `screening_pipeline_v`, `analysis_queue_v`, `watch_list_v`, `screening_results_latest_v`, `daily_activity_v`, `pipeline_v`, `closed_deals_v`. Took two failed pushes to find them all — Postgres surfaces dependents one at a time when you try to drop the underlying column. The push sequence was: first attempt failed on `daily_activity_v`, second failed on `pipeline_v` + `closed_deals_v`, third succeeded.
+
+Two of those views (`pipeline_v`, `closed_deals_v`) aren't queried from app code anymore but were preserved on the recreate path in case external tooling depends on them.
+
+### Files touched (~22)
+
+Schema:
+- `supabase/migrations/20260425120000_three_gate_decisions.sql`
+
+Server actions:
+- `app/(workspace)/screening/actions.ts` — `failScreeningResultAction`, `overrideFailedScreeningAction`, refactored `promoteToAnalysisAction` and `loadScreeningCompDataAction`/`loadCompDataByRunAction`
+- `app/(workspace)/deals/watchlist/actions.ts` — `updateAnalystInterestAction`, refactored `passFromWatchListAction`
+- `app/(workspace)/deals/actions.ts` and `app/(workspace)/analysis/properties/actions.ts` — column renames
+- `app/(workspace)/analysis/screening/actions.ts` — drop legacy `interest_level: "new"` default
+- `lib/auto-persist/save-manual-analysis-field-action.ts` — analyst_interest auto-persist now stamps `_decided_at` and `_decided_by`
+- `lib/auto-persist/field-types.ts` — type union update
+
+UI components:
+- `components/screening/screening-comp-modal.tsx`
+- `components/screening/row-action-popover.tsx`
+- `components/screening/queue-results-table.tsx`
+- `components/screening/batch-results-table.tsx`
+- `components/workstation/quick-status-tile.tsx` — `analyst_interest` field, drops "New" tier
+
+Pages:
+- `app/(workspace)/pipeline/page.tsx` — dual filters, view-mode `screen` accepts `?failed=1` to include Fails
+- `app/(workspace)/dashboard/page.tsx` — column renames in unreviewed primes / watchlist queries / activity feed
+- `app/(workspace)/screening/[batchId]/[resultId]/page.tsx` — promote button passes `screener_decision="review"` instead of `interest_level="warm"`
+- `app/(workspace)/deals/watchlist/watch-list-table.tsx` and `app/(workspace)/deals/pipeline/pipeline-table.tsx`
+- `app/(workspace)/analysis/[analysisId]/analysis-workstation.tsx`
+- `app/portal/deals/[shareToken]/partner-analysis-view.tsx` — dummy `screenerDecision` placeholder
+
+### Deferred / next
+
+- Pass-reason categories ("we will work on those categories after this first step"). Both screener Fail and analyst Pass currently share the same `FAIL_REASONS` list — they'll diverge after Dan thinks through the role-specific options.
+- Partner decision UI surface — pill renders, but click-to-open partner feedback overview is not yet built. Tooltip on the pill shows decision + recency for now.
+- Filter visibility per view — the Failed/Passed dropdowns are always shown; could be context-hidden (Failed irrelevant in Focus, Passed irrelevant in Screening) but kept simple for first cut.
+
+---
+
 ## 2026-04-24 — Pipeline merger: /analysis + /action absorbed, single-pill model, row-action popover
 
 Follow-on session to this morning's /pipeline launch. Original direction from the user: "the next logical piece is absorbing /analysis (richer watchlist UI) and /action into /pipeline — the 'action' page's unique value was its different columns for properties that are moving through our system. I'm not sure that's necessary — I think it could be displayed in the Dashboard or otherwise."

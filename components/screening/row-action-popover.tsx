@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import Link from "next/link";
 import type { QueueResultRow } from "./queue-results-table";
 import {
-  updateInterestLevelAction,
+  updateAnalystInterestAction,
   updateShowingStatusAction,
   updateWatchListNoteAction,
   passFromWatchListAction,
@@ -17,8 +17,8 @@ import {
 } from "@/app/(workspace)/deals/pipeline/actions";
 import {
   promoteInPlaceAction,
-  passOnScreeningResultAction,
-  reactivateScreeningResultFormAction,
+  failScreeningResultAction,
+  overrideFailedScreeningAction,
 } from "@/app/(workspace)/screening/actions";
 
 type RowActionPopoverProps = {
@@ -61,7 +61,7 @@ type RowStage =
   | "showing"
   | "analyzed"
   | "watchlist"
-  | "passed"
+  | "failed"
   | "screened";
 
 function classify(row: QueueResultRow): RowStage {
@@ -74,7 +74,7 @@ function classify(row: QueueResultRow): RowStage {
     if (row.analyzed_updated_at) return "analyzed";
     return "watchlist";
   }
-  if (row.review_action === "passed") return "passed";
+  if (row.screener_decision === "fail") return "failed";
   return "screened";
 }
 
@@ -82,7 +82,9 @@ function classify(row: QueueResultRow): RowStage {
 // Shared reason options (mirrors /deals/watchlist defaults)
 // ---------------------------------------------------------------------------
 
-const PASS_REASONS = [
+// Reasons surface for both screener Fail and analyst Pass. Will be split
+// per-role in a follow-up; for the first cut both roles share the list.
+const FAIL_REASONS = [
   "Overpriced",
   "Bad location",
   "Heavy rehab",
@@ -91,11 +93,10 @@ const PASS_REASONS = [
   "Other",
 ];
 
-const INTEREST_LEVELS = [
+const ANALYST_INTEREST_LEVELS = [
   { value: "hot", label: "Hot" },
   { value: "warm", label: "Warm" },
-  { value: "curious", label: "Curious" },
-  { value: "new", label: "New" },
+  { value: "watch", label: "Watch" },
 ];
 
 const SHOWING_STATUS_OPTIONS = [
@@ -174,48 +175,48 @@ export function RowActionPopover({
           </div>
         )}
 
-        {/* ── Screened only — promote / pass ─────────────────────────── */}
+        {/* ── Screened only — Review / Fast Track / Fail ─────────────── */}
         {stage === "screened" && (
           <>
-            <form action={promoteInPlaceAction} className="space-y-1">
-              <input type="hidden" name="result_id" value={row.id} />
-              <input type="hidden" name="open_workstation" value="false" />
-              <label className="text-[10px] uppercase tracking-wide text-slate-500">
-                Promote to Watch List
-              </label>
-              <div className="flex items-center gap-1">
-                <select
-                  name="interest_level"
-                  defaultValue="warm"
-                  className="flex-1 rounded border border-slate-200 bg-white px-1.5 py-1 text-xs"
-                >
-                  {INTEREST_LEVELS.map((l) => (
-                    <option key={l.value} value={l.value}>{l.label}</option>
-                  ))}
-                </select>
+            <div className="grid grid-cols-2 gap-1.5">
+              <form action={promoteInPlaceAction}>
+                <input type="hidden" name="result_id" value={row.id} />
+                <input type="hidden" name="screener_decision" value="review" />
+                <input type="hidden" name="open_workstation" value="false" />
                 <button
                   type="submit"
-                  className="rounded bg-emerald-600 px-2 py-1 text-xs font-semibold text-white hover:bg-emerald-700"
+                  className="w-full rounded bg-emerald-600 px-2 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
                 >
-                  Promote
+                  Review
                 </button>
-              </div>
-            </form>
+              </form>
+              <form action={promoteInPlaceAction}>
+                <input type="hidden" name="result_id" value={row.id} />
+                <input type="hidden" name="screener_decision" value="fast_track" />
+                <input type="hidden" name="open_workstation" value="false" />
+                <button
+                  type="submit"
+                  className="w-full rounded bg-amber-600 px-2 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
+                >
+                  Fast Track
+                </button>
+              </form>
+            </div>
 
-            <form action={passOnScreeningResultAction} className="space-y-1">
+            <form action={failScreeningResultAction} className="space-y-1">
               <input type="hidden" name="result_id" value={row.id} />
               <label className="text-[10px] uppercase tracking-wide text-slate-500">
-                Pass
+                Fail Screening
               </label>
               <div className="flex items-center gap-1">
                 <select
-                  name="pass_reason"
+                  name="screener_decision_reason"
                   required
                   className="flex-1 rounded border border-slate-200 bg-white px-1.5 py-1 text-xs"
                   defaultValue=""
                 >
                   <option value="" disabled>Reason…</option>
-                  {PASS_REASONS.map((r) => (
+                  {FAIL_REASONS.map((r) => (
                     <option key={r} value={r}>{r}</option>
                   ))}
                 </select>
@@ -223,24 +224,31 @@ export function RowActionPopover({
                   type="submit"
                   className="rounded bg-red-600 px-2 py-1 text-xs font-semibold text-white hover:bg-red-700"
                 >
-                  Pass
+                  Fail
                 </button>
               </div>
             </form>
           </>
         )}
 
-        {/* ── Passed — reactivate ────────────────────────────────────── */}
-        {stage === "passed" && (
-          <form action={reactivateScreeningResultFormAction}>
-            <input type="hidden" name="result_id" value={row.id} />
-            <button
-              type="submit"
-              className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              Reactivate
-            </button>
-          </form>
+        {/* ── Failed — analyst override (creates analysis, preserves Fail) ─ */}
+        {stage === "failed" && (
+          <>
+            <div className="rounded bg-red-50 px-2 py-1.5 text-[11px] text-red-700">
+              <span className="font-semibold">Failed by screener.</span>{" "}
+              The Fail decision is preserved as history; override creates
+              an analysis you can take forward.
+            </div>
+            <form action={overrideFailedScreeningAction}>
+              <input type="hidden" name="result_id" value={row.id} />
+              <button
+                type="submit"
+                className="w-full rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+              >
+                Override (Create Analysis)
+              </button>
+            </form>
+          </>
         )}
 
         {/* ── Caller active (any stage) — interest / showing / note ──── */}
@@ -250,18 +258,19 @@ export function RowActionPopover({
             stage === "showing" ||
             stage === "offer_open") && (
             <>
-              <form action={updateInterestLevelAction} className="space-y-1">
+              <form action={updateAnalystInterestAction} className="space-y-1">
                 <input type="hidden" name="analysis_id" value={analysisId} />
                 <label className="text-[10px] uppercase tracking-wide text-slate-500">
-                  Interest
+                  Analyst Interest
                 </label>
                 <div className="flex items-center gap-1">
                   <select
-                    name="interest_level"
-                    defaultValue={row.active_interest_level ?? "warm"}
+                    name="analyst_interest"
+                    defaultValue={row.active_analyst_interest ?? ""}
                     className="flex-1 rounded border border-slate-200 bg-white px-1.5 py-1 text-xs"
                   >
-                    {INTEREST_LEVELS.map((l) => (
+                    <option value="" disabled>Pick…</option>
+                    {ANALYST_INTEREST_LEVELS.map((l) => (
                       <option key={l.value} value={l.value}>{l.label}</option>
                     ))}
                   </select>
@@ -424,7 +433,7 @@ export function RowActionPopover({
                   className="w-full rounded border border-slate-200 bg-white px-1.5 py-1 text-xs"
                 >
                   <option value="" disabled>Reason…</option>
-                  {PASS_REASONS.map((r) => (
+                  {FAIL_REASONS.map((r) => (
                     <option key={r} value={r}>{r}</option>
                   ))}
                 </select>

@@ -328,7 +328,7 @@ export async function saveManualAnalysisAction(
     .from("analysis_pipeline")
     .upsert({
       analysis_id: activeAnalysis.id,
-      interest_level: nullableText(formData, "interest_level"),
+      analyst_interest: nullableText(formData, "analyst_interest"),
       showing_status: nullableText(formData, "showing_status"),
       offer_status: nullableText(formData, "offer_status"),
     });
@@ -873,14 +873,14 @@ export async function savePipelineAction(formData: FormData) {
   const analysisId = textValue(formData, "analysis_id");
   if (!analysisId) return;
 
-  const interestLevel = nullableText(formData, "interest_level");
+  const analystInterest = nullableText(formData, "analyst_interest");
   const showingStatus = nullableText(formData, "showing_status");
   const offerStatus = nullableText(formData, "offer_status");
 
   const { error } = await supabase.from("analysis_pipeline").upsert(
     {
       analysis_id: analysisId,
-      interest_level: interestLevel,
+      analyst_interest: analystInterest,
       showing_status: showingStatus,
       offer_status: offerStatus,
     },

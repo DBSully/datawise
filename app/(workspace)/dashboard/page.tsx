@@ -110,7 +110,7 @@ export default async function DashboardPage() {
         "id, real_property_id, screening_batch_id, subject_address, subject_city, subject_property_type, subject_list_price, arv_aggregate, max_offer, est_gap_per_sqft, arv_comp_count, comp_search_run_id, promoted_analysis_id, mls_status",
       )
       .eq("is_prime_candidate", true)
-      .is("review_action", null)
+      .is("screener_decision", null)
       .order("est_gap_per_sqft", { ascending: false, nullsFirst: false }),
     // Active watch list
     supabase
@@ -177,7 +177,7 @@ export default async function DashboardPage() {
   const { data: watchListRows } = await supabase
     .from("watch_list_v")
     .select(
-      "analysis_id, real_property_id, unparsed_address, city, interest_level, showing_status, watch_list_note, pipeline_updated_at, arv_aggregate, max_offer, est_gap_per_sqft, events_last_seen_at, unread_event_count, latest_unread_event_type, latest_unread_event_before, latest_unread_event_after, latest_unread_event_at",
+      "analysis_id, real_property_id, unparsed_address, city, analyst_interest, showing_status, watch_list_note, pipeline_updated_at, arv_aggregate, max_offer, est_gap_per_sqft, events_last_seen_at, unread_event_count, latest_unread_event_type, latest_unread_event_before, latest_unread_event_after, latest_unread_event_at",
     );
 
   // Persistent "Change history" feed — all events across watchlist
@@ -216,7 +216,7 @@ export default async function DashboardPage() {
     analysis_id: string;
     unparsed_address: string;
     city: string;
-    interest_level: string | null;
+    analyst_interest: string | null;
     reason: string;
     est_gap_per_sqft: number | null;
     arv_aggregate: number | null;
@@ -228,7 +228,7 @@ export default async function DashboardPage() {
     analysis_id: string;
     unparsed_address: string;
     city: string;
-    interest_level: string | null;
+    analyst_interest: string | null;
     unread_event_count: number;
     latest_unread_event_type: string | null;
     latest_unread_event_before: unknown;
@@ -243,13 +243,13 @@ export default async function DashboardPage() {
       analysis_id: row.analysis_id as string,
       unparsed_address: row.unparsed_address as string,
       city: row.city as string,
-      interest_level: row.interest_level as string | null,
+      analyst_interest: row.analyst_interest as string | null,
       est_gap_per_sqft: row.est_gap_per_sqft as number | null,
       arv_aggregate: row.arv_aggregate as number | null,
       max_offer: row.max_offer as number | null,
     };
 
-    if (row.interest_level === "hot") {
+    if (row.analyst_interest === "hot") {
       watchAttention.push({ ...base, reason: "Hot interest" });
     } else if (
       row.pipeline_updated_at &&
@@ -270,7 +270,7 @@ export default async function DashboardPage() {
         analysis_id: row.analysis_id as string,
         unparsed_address: row.unparsed_address as string,
         city: row.city as string,
-        interest_level: row.interest_level as string | null,
+        analyst_interest: row.analyst_interest as string | null,
         unread_event_count: unreadCount,
         latest_unread_event_type: row.latest_unread_event_type as string | null,
         latest_unread_event_before: row.latest_unread_event_before,
@@ -411,15 +411,15 @@ export default async function DashboardPage() {
 
   if (currentUserId) {
     const [{ data: reviewed }, { data: edited }] = await Promise.all([
-      // Promoted / passed — attributed directly via reviewed_by_user_id
+      // Screener decisions — attributed via screener_decided_by_user_id.
       supabase
         .from("screening_results")
         .select(
-          "real_property_id, promoted_analysis_id, review_action, reviewed_at, pass_reason, subject_address, subject_city",
+          "real_property_id, promoted_analysis_id, screener_decision, screener_decided_at, screener_decision_reason, subject_address, subject_city",
         )
-        .eq("reviewed_by_user_id", currentUserId)
-        .gte("reviewed_at", recentCutoffIso)
-        .order("reviewed_at", { ascending: false })
+        .eq("screener_decided_by", currentUserId)
+        .gte("screener_decided_at", recentCutoffIso)
+        .order("screener_decided_at", { ascending: false })
         .limit(40),
 
       // Workspace edits — manual_analysis is per-analysis; join back to
@@ -440,21 +440,29 @@ export default async function DashboardPage() {
       const r = row as {
         real_property_id: string;
         promoted_analysis_id: string | null;
-        review_action: string | null;
-        reviewed_at: string;
-        pass_reason: string | null;
+        screener_decision: "fail" | "review" | "fast_track" | null;
+        screener_decided_at: string;
+        screener_decision_reason: string | null;
         subject_address: string;
         subject_city: string | null;
       };
-      if (r.review_action !== "promoted" && r.review_action !== "passed") continue;
+      if (
+        r.screener_decision !== "fail" &&
+        r.screener_decision !== "review" &&
+        r.screener_decision !== "fast_track"
+      ) continue;
+      // Map screener decisions onto the existing activity feed kinds:
+      // fail → "passed", review/fast_track → "promoted". Activity feed
+      // is a coarse view; the row detail surfaces the specific decision.
+      const kind = r.screener_decision === "fail" ? "passed" : "promoted";
       myActivity.push({
-        kind: r.review_action as "promoted" | "passed",
-        timestamp: r.reviewed_at,
+        kind: kind as "promoted" | "passed",
+        timestamp: r.screener_decided_at,
         analysis_id: r.promoted_analysis_id,
         real_property_id: r.real_property_id,
         address: r.subject_address,
         city: r.subject_city,
-        extra: r.review_action === "passed" ? r.pass_reason : null,
+        extra: r.screener_decision === "fail" ? r.screener_decision_reason : null,
       });
     }
 
@@ -765,7 +773,7 @@ export default async function DashboardPage() {
                 {watchAttention.map((r, i) => (
                   <tr key={`${r.analysis_id}-${i}`}>
                     <td className="text-center">
-                      {INTEREST_ICONS[r.interest_level ?? "new"] ?? "⚪"}
+                      {INTEREST_ICONS[r.analyst_interest ?? "new"] ?? "⚪"}
                     </td>
                     <td className="font-medium">
                       <Link

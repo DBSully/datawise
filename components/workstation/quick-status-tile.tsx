@@ -2,9 +2,9 @@
 //
 // The new Workstation's Quick Status tile (per WORKSTATION_CARD_SPEC.md
 // §3.2 Tile 4). Four qualitative dropdowns that auto-persist via 3D's
-// saveManualAnalysisFieldAction. The Interest Level dropdown writes to
-// analysis_pipeline.interest_level (cross-table routing handled by the
-// shared action's internal FIELD_TABLE map); the other 3 write to
+// saveManualAnalysisFieldAction. The Interest dropdown writes to
+// analysis_pipeline.analyst_interest (cross-table routing handled by
+// the shared action's internal FIELD_TABLE map); the other 3 write to
 // manual_analysis.{analyst_condition,location_rating,next_step}.
 //
 // Layout (per spec):
@@ -43,10 +43,10 @@ import { SaveStatusDot } from "@/components/workstation/save-status-dot";
 // ─────────────────────────────────────────────────────────────────────────────
 
 const INTEREST_OPTIONS = [
-  { value: "new", label: "New" },
   { value: "watch", label: "Watch" },
   { value: "warm", label: "Warm" },
   { value: "hot", label: "Hot" },
+  { value: "pass", label: "Pass" },
 ] as const;
 
 const CONDITION_OPTIONS = [
@@ -82,7 +82,7 @@ const NEXT_STEP_OPTIONS = [
 
 type QuickStatusTileProps = {
   analysisId: string;
-  initialInterestLevel: string | null;
+  initialAnalystInterest: string | null;
   initialCondition: string | null;
   initialLocation: string | null;
   initialNextStep: string | null;
@@ -94,13 +94,13 @@ type QuickStatusTileProps = {
 
 export function QuickStatusTile({
   analysisId,
-  initialInterestLevel,
+  initialAnalystInterest,
   initialCondition,
   initialLocation,
   initialNextStep,
 }: QuickStatusTileProps) {
-  const [interestLevel, setInterestLevel] = useState<string | null>(
-    initialInterestLevel,
+  const [analystInterest, setAnalystInterest] = useState<string | null>(
+    initialAnalystInterest,
   );
   const [condition, setCondition] = useState<string | null>(initialCondition);
   const [location, setLocation] = useState<string | null>(initialLocation);
@@ -109,11 +109,11 @@ export function QuickStatusTile({
   // Dropdowns persist "instantly" per spec — delayMs=0 means the save
   // fires on the next tick after a change rather than waiting 500ms.
   const interestSave = useDebouncedSave(
-    interestLevel,
+    analystInterest,
     async (value) => {
       await saveManualAnalysisFieldAction({
         analysisId,
-        field: "interest_level",
+        field: "analyst_interest",
         value,
       });
     },
@@ -172,9 +172,9 @@ export function QuickStatusTile({
           </label>
           <div className="mt-0.5 flex items-center gap-1">
             <select
-              value={interestLevel ?? ""}
+              value={analystInterest ?? ""}
               onChange={(e) =>
-                setInterestLevel(e.target.value === "" ? null : e.target.value)
+                setAnalystInterest(e.target.value === "" ? null : e.target.value)
               }
               className="w-[120px] rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
             >

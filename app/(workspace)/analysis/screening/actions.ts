@@ -405,12 +405,14 @@ export async function promoteToAnalysisAction(formData: FormData): Promise<void>
     .update({ promoted_analysis_id: analysis.id })
     .eq("id", resultId);
 
-  // Initialize pipeline lifecycle tracking
+  // Initialize pipeline lifecycle tracking. analyst_interest stays NULL —
+  // the analyst classifies hot/warm/watch/pass explicitly under the
+  // three-gate model (no silent default).
   await supabase.from("analysis_pipeline").upsert({
     analysis_id: analysis.id,
     lifecycle_stage: "analysis",
     disposition: "active",
-    interest_level: "new",
+    analyst_interest: null,
   });
 
   revalidatePath("/analysis/screening");

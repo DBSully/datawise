@@ -79,7 +79,7 @@ const FIELD_TABLE: Record<
   disposition_commission_buyer_manual: "manual_analysis",
   disposition_commission_seller_manual: "manual_analysis",
   // Quick Status tile — analysis_pipeline side (1 field)
-  interest_level: "analysis_pipeline",
+  analyst_interest: "analysis_pipeline",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -127,12 +127,22 @@ export async function saveManualAnalysisFieldAction(
   // 4. UPSERT one column on the routed table. Both manual_analysis and
   // analysis_pipeline use analysis_id as the primary key, so a single
   // upsert pattern works for either table.
+  //
+  // Special case: analyst_interest also stamps analyst_decided_at and
+  // analyst_decided_by so audit/calibration queries can attribute the
+  // decision. Other fields are simple single-column writes.
+  const upsertPayload: Record<string, unknown> = {
+    analysis_id: analysisId,
+    [field]: value,
+  };
+  if (field === "analyst_interest") {
+    upsertPayload.analyst_decided_at = new Date().toISOString();
+    upsertPayload.analyst_decided_by = user.id;
+  }
+
   const { error: upsertError } = await supabase
     .from(table)
-    .upsert(
-      { analysis_id: analysisId, [field]: value },
-      { onConflict: "analysis_id" },
-    );
+    .upsert(upsertPayload, { onConflict: "analysis_id" });
   if (upsertError) throw new Error(upsertError.message);
 
   // 5. Revalidate the canonical Workstation route. Both /analysis/[id]

@@ -23,6 +23,7 @@ type PipelinePageProps = {
     city?: string;
     propertyType?: string;
     prime?: string;
+    failed?: string;
     passed?: string;
     mlsStatus?: string;
     sort?: string;
@@ -107,7 +108,8 @@ export default async function PipelinePage({
   const cityFilter = resolved?.city ?? "all";
   const typeFilter = resolved?.propertyType ?? "all";
   const primeFilter = resolved?.prime ?? "all";
-  const includePassed = resolved?.passed === "1";
+  const includeFailed = resolved?.failed === "1"; // screener Fail filter
+  const includePassed = resolved?.passed === "1"; // analyst Pass filter
   const mlsStatusFilter = resolved?.mlsStatus ?? "all";
   const sort = resolved?.sort ?? "gap_desc";
   const page = Math.max(1, Number(resolved?.page ?? "1") || 1);
@@ -185,17 +187,25 @@ export default async function PipelinePage({
   // batch mode just defaults to "all" rather than "focus" so the user
   // sees the full batch unless they opt to narrow it.
   //   focus  = watch-list + anything the caller is actively working on
-  //   screen = fresh, unreviewed, not mine
+  //   screen = fresh, unreviewed (+ failed when ?passed=1)
   //   action = my watch-list items with pending showing/offer
-  //   all    = everything (modulo passed/filters)
+  //   all    = everything (modulo failed filter)
+  let screenerDecisionFilterApplied = false;
   switch (viewMode) {
     case "focus":
       query = query.eq("has_caller_active_analysis", true);
       break;
     case "screen":
-      query = query
-        .eq("has_caller_active_analysis", false)
-        .is("review_action", null);
+      query = query.eq("has_caller_active_analysis", false);
+      // Screening default = undecided rows only. With ?failed=1 we also
+      // surface Failed rows so the analyst can review/override them
+      // without having to switch to All view.
+      if (includeFailed) {
+        query = query.or("screener_decision.is.null,screener_decision.eq.fail");
+      } else {
+        query = query.is("screener_decision", null);
+      }
+      screenerDecisionFilterApplied = true;
       break;
     case "action":
       query = query
@@ -217,8 +227,20 @@ export default async function PipelinePage({
   if (cityFilter !== "all") query = query.eq("subject_city", cityFilter);
   if (typeFilter !== "all") query = query.eq("subject_property_type", typeFilter);
   if (primeFilter === "true") query = query.eq("is_prime_candidate", true);
-  // Passed hidden by default; ?passed=1 surfaces them for archival lookup.
-  if (!includePassed) query = query.or("review_action.is.null,review_action.neq.passed");
+  // Hide Failed-screening rows by default in views where screener_decision
+  // wasn't already filtered. ?failed=1 surfaces them for archival lookup.
+  if (!includeFailed && !screenerDecisionFilterApplied) {
+    query = query.or("screener_decision.is.null,screener_decision.neq.fail");
+  }
+  // Hide analyst-Pass rows by default across all views. ?passed=1 surfaces
+  // them — useful when scanning recent passes for re-evaluation. Filtering
+  // on caller_active_analyst_interest is safe because rows without an
+  // active analysis have NULL here, which the OR keeps.
+  if (!includePassed) {
+    query = query.or(
+      "caller_active_analyst_interest.is.null,caller_active_analyst_interest.neq.pass",
+    );
+  }
   if (mlsStatusFilter !== "all") query = query.eq("latest_mls_status", mlsStatusFilter);
   if (listingDaysCutoffIso) query = query.gte("latest_listing_contract_date", listingDaysCutoffIso);
   if (screenedDays && screenedDays > 0) {
@@ -572,6 +594,7 @@ export default async function PipelinePage({
     city: cityFilter !== "all" ? cityFilter : undefined,
     propertyType: typeFilter !== "all" ? typeFilter : undefined,
     prime: primeFilter !== "all" ? primeFilter : undefined,
+    failed: includeFailed ? "1" : undefined,
     passed: includePassed ? "1" : undefined,
     mlsStatus: mlsStatusFilter !== "all" ? mlsStatusFilter : undefined,
     sort: sort !== "gap_desc" ? sort : undefined,
@@ -629,11 +652,15 @@ export default async function PipelinePage({
       offer_pct: r.offer_pct as number | null,
       promoted_analysis_id: r.promoted_analysis_id as string | null,
       comp_search_run_id: r.comp_search_run_id as string | null,
-      review_action: r.review_action as string | null,
+      screener_decision: r.screener_decision as "fail" | "review" | "fast_track" | null,
+      screener_decision_reason: r.screener_decision_reason as string | null,
       has_active_analysis: callerAnalysisId != null || foreignOwnerId != null,
       active_analysis_id: callerAnalysisId,
       active_lifecycle_stage: r.caller_active_lifecycle_stage as string | null,
-      active_interest_level: r.caller_active_interest_level as string | null,
+      active_analyst_interest: r.caller_active_analyst_interest as string | null,
+      partner_decision: r.partner_decision as string | null,
+      partner_feedback_count: r.partner_feedback_count as number | null,
+      partner_last_feedback_at: r.partner_last_feedback_at as string | null,
       active_analysis_is_mine:
         callerAnalysisId != null ? true : foreignOwnerId ? false : null,
       active_analysis_owner_name: foreignOwnerId
@@ -818,7 +845,15 @@ export default async function PipelinePage({
         </div>
 
         <div>
-          <label className="dw-label" htmlFor="passed">Passed</label>
+          <label className="dw-label" htmlFor="failed">Failed (Screener)</label>
+          <select id="failed" name="failed" className="dw-select" defaultValue={includeFailed ? "1" : "0"}>
+            <option value="0">Hide failed</option>
+            <option value="1">Include failed</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="dw-label" htmlFor="passed">Passed (Analyst)</label>
           <select id="passed" name="passed" className="dw-select" defaultValue={includePassed ? "1" : "0"}>
             <option value="0">Hide passed</option>
             <option value="1">Include passed</option>

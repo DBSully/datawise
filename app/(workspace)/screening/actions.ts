@@ -390,7 +390,7 @@ export async function cancelScreeningBatchAction(
 // ---------------------------------------------------------------------------
 
 export type AnalysisQuickStatus = {
-  interestLevel: string | null;
+  analystInterest: string | null;
   condition: string | null;
   location: string | null;
   nextStep: string | null;
@@ -408,12 +408,12 @@ export async function loadAnalysisStatusAction(
       .maybeSingle(),
     supabase
       .from("analysis_pipeline")
-      .select("interest_level, next_step")
+      .select("analyst_interest, next_step")
       .eq("analysis_id", analysisId)
       .maybeSingle(),
   ]);
   return {
-    interestLevel: ap?.interest_level ?? null,
+    analystInterest: ap?.analyst_interest ?? null,
     condition: ma?.analyst_condition ?? null,
     location: ma?.location_rating ?? null,
     nextStep: ap?.next_step ?? null,
@@ -450,9 +450,9 @@ export type ScreeningCompData = {
   trendPositiveCapApplied: boolean;
   trendConfidence: string | null;
   isPrimeCandidate: boolean;
-  // Review status
-  reviewAction: string | null;
-  passReason: string | null;
+  // Screener decision (replaces legacy reviewAction/passReason)
+  screenerDecision: "fail" | "review" | "fast_track" | null;
+  screenerDecisionReason: string | null;
   // Property header fields
   postalCode: string | null;
   county: string | null;
@@ -503,7 +503,7 @@ export async function loadScreeningCompDataAction(
   const { data: result, error: resultError } = await supabase
     .from("screening_results")
     .select(
-      "id, real_property_id, listing_row_id, comp_search_run_id, subject_address, subject_city, subject_list_price, subject_building_sqft, subject_above_grade_sqft, subject_below_grade_total_sqft, subject_below_grade_finished_sqft, subject_year_built, subject_property_type, est_gap_per_sqft, arv_aggregate, arv_detail_json, max_offer, offer_pct, spread, rehab_total, hold_total, transaction_total, financing_total, target_profit, trend_annual_rate, trend_raw_rate, trend_positive_cap_applied, trend_confidence, is_prime_candidate, review_action, pass_reason",
+      "id, real_property_id, listing_row_id, comp_search_run_id, subject_address, subject_city, subject_list_price, subject_building_sqft, subject_above_grade_sqft, subject_below_grade_total_sqft, subject_below_grade_finished_sqft, subject_year_built, subject_property_type, est_gap_per_sqft, arv_aggregate, arv_detail_json, max_offer, offer_pct, spread, rehab_total, hold_total, transaction_total, financing_total, target_profit, trend_annual_rate, trend_raw_rate, trend_positive_cap_applied, trend_confidence, is_prime_candidate, screener_decision, screener_decision_reason",
     )
     .eq("id", resultId)
     .single();
@@ -559,8 +559,8 @@ export async function loadScreeningCompDataAction(
     trendPositiveCapApplied: result.trend_positive_cap_applied ?? false,
     trendConfidence: result.trend_confidence,
     isPrimeCandidate: result.is_prime_candidate ?? false,
-    reviewAction: result.review_action,
-    passReason: result.pass_reason,
+    screenerDecision: (result.screener_decision ?? null) as ScreeningCompData["screenerDecision"],
+    screenerDecisionReason: result.screener_decision_reason ?? null,
   };
 
   // Property header fields — prefer live DB values, fall back to screening snapshot
@@ -761,7 +761,10 @@ export async function promoteToAnalysisAction(
   }
 
   const resultId = textValue(formData, "result_id");
-  const interestLevel = textValue(formData, "interest_level") || "warm";
+  // screener_decision: 'review' | 'fast_track' | empty. Empty when the analyst
+  // is overriding an already-decided row (e.g. failed → forced into analysis).
+  // We never overwrite an existing screener_decision — once set, it's history.
+  const incomingScreenerDecision = textValue(formData, "screener_decision");
   const watchListNote = textValue(formData, "watch_list_note") || null;
   const openWorkstation = textValue(formData, "open_workstation") === "true";
   const forceNew = textValue(formData, "force_new") === "true";
@@ -770,10 +773,14 @@ export async function promoteToAnalysisAction(
     throw new Error("Missing result_id");
   }
 
-  // Load the screening result with comp run linkage
+  // Load the screening result with comp run linkage. screener_decision is
+  // included so we know whether to set it (NULL → first decision) or leave
+  // it alone (override of an existing decision).
   const { data: result, error: resultError } = await supabase
     .from("screening_results")
-    .select("id, real_property_id, arv_aggregate, screening_batch_id, comp_search_run_id")
+    .select(
+      "id, real_property_id, arv_aggregate, screening_batch_id, comp_search_run_id, screener_decision",
+    )
     .eq("id", resultId)
     .single();
 
@@ -846,24 +853,34 @@ export async function promoteToAnalysisAction(
 
   const now = new Date().toISOString();
 
-  // Mark the screening result as promoted + reviewed
+  // Build the screening_results update. Always link the analysis. Only set
+  // screener_decision when transitioning from NULL — overrides preserve the
+  // prior screener decision (e.g. fail → still 'fail' for audit/calibration).
+  const screeningUpdate: Record<string, unknown> = {
+    promoted_analysis_id: analysis.id,
+    screening_updated_at: now,
+  };
+  if (
+    result.screener_decision == null &&
+    (incomingScreenerDecision === "review" || incomingScreenerDecision === "fast_track")
+  ) {
+    screeningUpdate.screener_decision = incomingScreenerDecision;
+    screeningUpdate.screener_decided_at = now;
+    screeningUpdate.screener_decided_by = user.id;
+  }
+
   await supabase
     .from("screening_results")
-    .update({
-      promoted_analysis_id: analysis.id,
-      review_action: "promoted",
-      reviewed_at: now,
-      reviewed_by_user_id: user.id,
-      screening_updated_at: now,
-    })
+    .update(screeningUpdate)
     .eq("id", resultId);
 
-  // Initialize pipeline with promotion context
+  // Initialize pipeline. analyst_interest stays NULL — the analyst classifies
+  // explicitly via the analyst-side picker. No silent default Warm anymore.
   await supabase.from("analysis_pipeline").upsert({
     analysis_id: analysis.id,
     lifecycle_stage: "analysis",
     disposition: "active",
-    interest_level: interestLevel,
+    analyst_interest: null,
     promoted_at: now,
     promoted_from_screening_result_id: resultId,
     watch_list_note: watchListNote,
@@ -901,21 +918,25 @@ export async function promoteInPlaceAction(formData: FormData): Promise<void> {
   await promoteToAnalysisAction(formData);
 }
 
-// FormData variant of reactivateScreeningResultAction — form actions can't
-// accept positional args, so the popover uses this.
-export async function reactivateScreeningResultFormAction(
+// Override a Failed screening: create an analysis without touching
+// screener_decision. The Fail call is preserved as durable history;
+// the analyst takes the property forward via analyst_interest. This
+// thin wrapper is what "Override" buttons call from the popover/modal.
+export async function overrideFailedScreeningAction(
   formData: FormData,
 ): Promise<void> {
-  const resultId = textValue(formData, "result_id");
-  if (!resultId) throw new Error("Missing result_id");
-  await reactivateScreeningResultAction(resultId);
+  formData.set("open_workstation", "false");
+  // Strip any screener_decision input — promoteToAnalysisAction guards
+  // against overwriting an existing decision, but we make intent explicit.
+  formData.delete("screener_decision");
+  await promoteToAnalysisAction(formData);
 }
 
 // ---------------------------------------------------------------------------
-// Pass on a screening result
+// Fail a screening result (screener-side decision)
 // ---------------------------------------------------------------------------
 
-export async function passOnScreeningResultAction(
+export async function failScreeningResultAction(
   formData: FormData,
 ): Promise<void> {
   const supabase = await createClient();
@@ -928,14 +949,14 @@ export async function passOnScreeningResultAction(
   }
 
   const resultId = textValue(formData, "result_id");
-  const passReason = textValue(formData, "pass_reason");
+  const reason = textValue(formData, "screener_decision_reason") || textValue(formData, "pass_reason");
 
   if (!resultId) {
     throw new Error("Missing result_id");
   }
 
-  if (!passReason) {
-    throw new Error("A pass reason is required.");
+  if (!reason) {
+    throw new Error("A reason is required to fail a screening.");
   }
 
   const now = new Date().toISOString();
@@ -943,47 +964,11 @@ export async function passOnScreeningResultAction(
   const { error } = await supabase
     .from("screening_results")
     .update({
-      review_action: "passed",
-      reviewed_at: now,
-      reviewed_by_user_id: user.id,
-      pass_reason: passReason,
+      screener_decision: "fail",
+      screener_decision_reason: reason,
+      screener_decided_at: now,
+      screener_decided_by: user.id,
       screening_updated_at: now,
-    })
-    .eq("id", resultId);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  revalidatePath("/screening");
-  revalidatePath("/pipeline");
-  revalidatePath("/dashboard");
-}
-
-// ---------------------------------------------------------------------------
-// Reactivate a passed screening result
-// ---------------------------------------------------------------------------
-
-export async function reactivateScreeningResultAction(
-  resultId: string,
-): Promise<void> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/auth/sign-in");
-  }
-
-  const { error } = await supabase
-    .from("screening_results")
-    .update({
-      review_action: null,
-      reviewed_at: null,
-      reviewed_by_user_id: null,
-      pass_reason: null,
-      screening_updated_at: new Date().toISOString(),
     })
     .eq("id", resultId);
 
@@ -1072,7 +1057,7 @@ export async function loadCompDataByRunAction(
   // Load screening result linked to this property + run (if any) for deal math
   const { data: sr } = await supabase
     .from("screening_results")
-    .select("arv_aggregate, arv_detail_json, max_offer, offer_pct, spread, rehab_total, hold_total, transaction_total, financing_total, target_profit, trend_annual_rate, trend_raw_rate, trend_positive_cap_applied, trend_confidence, is_prime_candidate, est_gap_per_sqft, review_action, pass_reason")
+    .select("arv_aggregate, arv_detail_json, max_offer, offer_pct, spread, rehab_total, hold_total, transaction_total, financing_total, target_profit, trend_annual_rate, trend_raw_rate, trend_positive_cap_applied, trend_confidence, is_prime_candidate, est_gap_per_sqft, screener_decision, screener_decision_reason")
     .eq("real_property_id", realPropertyId)
     .eq("comp_search_run_id", compSearchRunId)
     .maybeSingle();
@@ -1108,8 +1093,8 @@ export async function loadCompDataByRunAction(
     trendPositiveCapApplied: sr?.trend_positive_cap_applied ?? false,
     trendConfidence: sr?.trend_confidence ?? null,
     isPrimeCandidate: sr?.is_prime_candidate ?? false,
-    reviewAction: sr?.review_action ?? null,
-    passReason: sr?.pass_reason ?? null,
+    screenerDecision: (sr?.screener_decision ?? null) as ScreeningCompData["screenerDecision"],
+    screenerDecisionReason: sr?.screener_decision_reason ?? null,
     postalCode: prop.postal_code ?? null,
     county: prop.county ?? null,
     subdivision: mls?.subdivision_name ?? null,

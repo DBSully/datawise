@@ -4,7 +4,7 @@ import { useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  updateInterestLevelAction,
+  updateAnalystInterestAction,
   updateShowingStatusAction,
   updateWatchListNoteAction,
   passFromWatchListAction,
@@ -18,7 +18,7 @@ import {
 type WatchListRow = {
   analysis_id: string;
   real_property_id: string;
-  interest_level: string | null;
+  analyst_interest: string | null;
   showing_status: string | null;
   watch_list_note: string | null;
   unparsed_address: string;
@@ -268,7 +268,7 @@ export function WatchListTable({ rows }: { rows: WatchListRow[] }) {
       if (filterLevelClass && r.level_class_standardized !== filterLevelClass) return false;
       if (filterChangeType && r.mls_major_change_type !== filterChangeType) return false;
       if (filterStatus && (r.showing_status ?? "") !== filterStatus) return false;
-      if (filterInterest && (r.interest_level ?? "new") !== filterInterest) return false;
+      if (filterInterest && (r.analyst_interest ?? "") !== filterInterest) return false;
       if (minOfferPctNum != null && (r.offer_pct ?? -Infinity) < minOfferPctNum) return false;
       if (minGapNum != null && (r.gap_per_sqft ?? -Infinity) < minGapNum) return false;
       return true;
@@ -312,8 +312,8 @@ export function WatchListTable({ rows }: { rows: WatchListRow[] }) {
     async (analysisId: string, level: string) => {
       const fd = new FormData();
       fd.set("analysis_id", analysisId);
-      fd.set("interest_level", level);
-      await updateInterestLevelAction(fd);
+      fd.set("analyst_interest", level);
+      await updateAnalystInterestAction(fd);
       router.refresh();
     },
     [router],
@@ -569,7 +569,7 @@ export function WatchListTable({ rows }: { rows: WatchListRow[] }) {
           </thead>
           <tbody>
             {visibleRows.map((r) => {
-              const ic = INTEREST_CONFIG[r.interest_level ?? "new"] ?? INTEREST_CONFIG.new;
+              const ic = INTEREST_CONFIG[r.analyst_interest ?? "new"] ?? INTEREST_CONFIG.new;
               const isEditingThisNote = editingNote === r.analysis_id;
               const isPassingThis = passingId === r.analysis_id;
 
@@ -640,7 +640,7 @@ export function WatchListTable({ rows }: { rows: WatchListRow[] }) {
                     style={{ left: LEFT_INTEREST, width: W_INTEREST, minWidth: W_INTEREST }}
                   >
                     <InterestDropdown
-                      value={r.interest_level ?? "new"}
+                      value={r.analyst_interest ?? "new"}
                       icon={ic.icon}
                       onChange={(level) => handleInterestChange(r.analysis_id, level)}
                     />

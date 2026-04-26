@@ -12,11 +12,12 @@ import {
   loadAnalysisStatusAction,
   toggleScreeningCompSelectionAction,
   promoteToAnalysisAction,
-  passOnScreeningResultAction,
-  reactivateScreeningResultAction,
+  failScreeningResultAction,
+  overrideFailedScreeningAction,
   type ScreeningCompData,
   type AnalysisQuickStatus,
 } from "@/app/(workspace)/screening/actions";
+import { updateAnalystInterestAction } from "@/app/(workspace)/deals/watchlist/actions";
 import { QuickStatusTile } from "@/components/workstation/quick-status-tile";
 
 // ---------------------------------------------------------------------------
@@ -36,7 +37,9 @@ function fmtNum(v: number | null | undefined, d = 0) {
   });
 }
 
-const PASS_REASONS = [
+// Reasons surface for both Screener Fail and Analyst Pass. The list will
+// be split by role in a follow-up — for the first cut, both roles share it.
+const FAIL_REASONS = [
   "Comps too weak",
   "Rehab too heavy",
   "Price too high / offer% too low",
@@ -45,13 +48,15 @@ const PASS_REASONS = [
   "Other",
 ] as const;
 
-const INTEREST_LEVELS = [
+const ANALYST_INTEREST_LEVELS = [
   { value: "hot", label: "Hot", icon: "🔴", desc: "Act immediately" },
   { value: "warm", label: "Warm", icon: "🟡", desc: "Review soon" },
   { value: "watch", label: "Watch", icon: "🟢", desc: "Monitor for now" },
 ] as const;
 
-type ModalMode = "view" | "promote" | "pass";
+// Modes: 'view' shows summary + actions; 'fail' / 'pass' show reason picker;
+// 'set_interest' shows the analyst Hot/Warm/Watch/Pass picker post-promotion.
+type ModalMode = "view" | "fail" | "set_interest" | "analyst_pass";
 
 // ---------------------------------------------------------------------------
 // Component
@@ -82,13 +87,18 @@ export function ScreeningCompModal({
   const [mode, setMode] = useState<ModalMode>("view");
   const [submitting, setSubmitting] = useState(false);
 
-  // Promote form state
-  const [interestLevel, setInterestLevel] = useState<string>("warm");
+  // Watch-list note (shared between Review and Fast-Track promotion)
   const [watchListNote, setWatchListNote] = useState("");
 
-  // Pass form state
-  const [passReason, setPassReason] = useState("");
-  const [passOtherText, setPassOtherText] = useState("");
+  // Screener Fail form state
+  const [failReason, setFailReason] = useState("");
+  const [failOtherText, setFailOtherText] = useState("");
+
+  // Analyst-side interest picker (post-promotion)
+  const [analystInterest, setAnalystInterest] = useState<string>("");
+  const [analystPassReason, setAnalystPassReason] = useState("");
+  const [analystPassOtherText, setAnalystPassOtherText] = useState("");
+
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
 
   // QuickAnalysis overrides
@@ -350,27 +360,31 @@ export function ScreeningCompModal({
   const [existingAnalysisId, setExistingAnalysisId] = useState<string | null>(null);
   const [pendingOpenWorkstation, setPendingOpenWorkstation] = useState(false);
 
-  // Promote handler. Calls with force_new=false first; if an existing
-  // analysis is found, shows the confirmation dialog. The user can then
-  // [Open Existing] or [Create New Scenario] (resubmit with force_new=true).
-  const handlePromote = useCallback(
-    async (openWorkstation: boolean, forceNew = false) => {
+  // Screener-decision handler. Sends Review or Fast Track + optional override
+  // (no screener_decision input — overrideFailedScreeningAction strips it).
+  // Dedup logic mirrors the prior handlePromote: if an active analysis exists,
+  // surface the confirm dialog so the user picks Open Existing vs New Scenario.
+  const [pendingOverride, setPendingOverride] = useState(false);
+  const handleScreenerDecision = useCallback(
+    async (
+      screenerDecision: "review" | "fast_track" | null,
+      openWorkstation: boolean,
+      forceNew = false,
+    ) => {
       setSubmitting(true);
       const fd = new FormData();
       fd.set("result_id", resultId!);
-      fd.set("interest_level", interestLevel);
+      if (screenerDecision) fd.set("screener_decision", screenerDecision);
       if (watchListNote) fd.set("watch_list_note", watchListNote);
       fd.set("open_workstation", openWorkstation ? "true" : "false");
       if (forceNew) fd.set("force_new", "true");
 
       try {
         const res = await promoteToAnalysisAction(fd);
-        // openWorkstation=true: action redirects, we don't reach here.
-        // openWorkstation=false + kind="created": close modal, refresh.
-        // kind="existing": show confirmation dialog.
         if (res && res.kind === "existing") {
           setExistingAnalysisId(res.analysisId);
           setPendingOpenWorkstation(openWorkstation);
+          setPendingOverride(screenerDecision === null);
           return;
         }
         router.refresh();
@@ -379,7 +393,7 @@ export function ScreeningCompModal({
         setSubmitting(false);
       }
     },
-    [resultId, interestLevel, watchListNote, router, onClose],
+    [resultId, watchListNote, router, onClose],
   );
 
   const handleOpenExisting = useCallback(() => {
@@ -389,33 +403,83 @@ export function ScreeningCompModal({
 
   const handleCreateNewScenario = useCallback(async () => {
     setExistingAnalysisId(null);
-    await handlePromote(pendingOpenWorkstation, true);
-  }, [handlePromote, pendingOpenWorkstation]);
+    // pendingOverride preserves whether this dedup hit came from an override
+    // (screener_decision=null) or a normal promote (screener_decision set).
+    await handleScreenerDecision(
+      pendingOverride ? null : "review",
+      pendingOpenWorkstation,
+      true,
+    );
+  }, [handleScreenerDecision, pendingOpenWorkstation, pendingOverride]);
 
-  // Pass handler
-  const handlePass = useCallback(async () => {
+  // Screener Fail handler.
+  const handleScreenerFail = useCallback(async () => {
     const reason =
-      passReason === "Other" ? passOtherText.trim() : passReason;
+      failReason === "Other" ? failOtherText.trim() : failReason;
     if (!reason) return;
 
     setSubmitting(true);
     const fd = new FormData();
     fd.set("result_id", resultId!);
-    fd.set("pass_reason", reason);
+    fd.set("screener_decision_reason", reason);
 
     try {
-      await passOnScreeningResultAction(fd);
+      await failScreeningResultAction(fd);
       router.refresh();
       onClose();
     } finally {
       setSubmitting(false);
     }
-  }, [resultId, passReason, passOtherText, router, onClose]);
+  }, [resultId, failReason, failOtherText, router, onClose]);
 
-  // Already reviewed?
-  const isReviewed = data?.reviewAction != null;
-  const isAlreadyPromoted = !!promotedAnalysisId || data?.reviewAction === "promoted";
-  const isAlreadyPassed = data?.reviewAction === "passed";
+  // Analyst interest handler — runs only on rows with an existing analysis.
+  const handleAnalystInterest = useCallback(async () => {
+    if (!promotedAnalysisId) return;
+    if (!analystInterest) return;
+
+    if (analystInterest === "pass") {
+      const reason =
+        analystPassReason === "Other"
+          ? analystPassOtherText.trim()
+          : analystPassReason;
+      if (!reason) return;
+    }
+
+    setSubmitting(true);
+    const fd = new FormData();
+    fd.set("analysis_id", promotedAnalysisId);
+    fd.set("analyst_interest", analystInterest);
+    if (analystInterest === "pass") {
+      const reason =
+        analystPassReason === "Other"
+          ? analystPassOtherText.trim()
+          : analystPassReason;
+      fd.set("analyst_pass_reason", reason);
+    }
+
+    try {
+      await updateAnalystInterestAction(fd);
+      router.refresh();
+      onClose();
+    } finally {
+      setSubmitting(false);
+    }
+  }, [
+    promotedAnalysisId,
+    analystInterest,
+    analystPassReason,
+    analystPassOtherText,
+    router,
+    onClose,
+  ]);
+
+  // Three-gate state derived from screener_decision + promoted_analysis_id.
+  // - hasScreenerDecision: screener has weighed in (any value)
+  // - isFailed: screener said Fail and no analysis exists yet
+  // - isAlreadyPromoted: an analysis exists (analyst-stage UI applies)
+  const hasScreenerDecision = data?.screenerDecision != null;
+  const isFailed = data?.screenerDecision === "fail" && !promotedAnalysisId;
+  const isAlreadyPromoted = !!promotedAnalysisId;
 
   return (
     <div
@@ -439,9 +503,12 @@ export function ScreeningCompModal({
                   Prime
                 </span>
               )}
-              {isAlreadyPassed && (
-                <span className="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-700">
-                  Passed
+              {data?.screenerDecision === "fail" && (
+                <span
+                  className="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-700"
+                  title={`Failed: ${data.screenerDecisionReason ?? "no reason recorded"}`}
+                >
+                  Failed
                 </span>
               )}
             </div>
@@ -511,7 +578,7 @@ export function ScreeningCompModal({
               {promotedAnalysisId && quickStatus && (
                 <QuickStatusTile
                   analysisId={promotedAnalysisId}
-                  initialInterestLevel={quickStatus.interestLevel}
+                  initialAnalystInterest={quickStatus.analystInterest}
                   initialCondition={quickStatus.condition}
                   initialLocation={quickStatus.location}
                   initialNextStep={quickStatus.nextStep}
@@ -566,41 +633,61 @@ export function ScreeningCompModal({
           onMapPinToggle={handleMapPinToggle}
           onReloadData={reloadData}
         />
-        {/* Footer — action area (screening mode only) */}
+        {/* Footer — three-gate action area (screening mode only) */}
         {!loading && data && data.candidates.length > 0 && !isWorkstationMode && (
           <div className="border-t border-slate-200">
-            {/* Already promoted — show link */}
-            {isAlreadyPromoted && promotedAnalysisId && (
+            {/* ── Already promoted: analyst-stage controls ──────────── */}
+            {isAlreadyPromoted && promotedAnalysisId && mode === "view" && (
               <div className="flex items-center justify-between px-4 py-2.5">
                 <div className="text-xs text-slate-500">
                   {selectedCount} comp{selectedCount !== 1 ? "s" : ""} picked
+                  {data.screenerDecision === "fail" && (
+                    <span className="ml-2 inline-block rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
+                      Screener: Failed{data.screenerDecisionReason ? ` — ${data.screenerDecisionReason}` : ""}
+                    </span>
+                  )}
+                  {data.screenerDecision === "fast_track" && (
+                    <span className="ml-2 inline-block rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                      Screener: Fast Track
+                    </span>
+                  )}
                 </div>
-                <a
-                  href={`/analysis/${promotedAnalysisId}`}
-                  className="rounded bg-blue-100 px-3 py-1.5 text-xs font-semibold text-blue-800 hover:bg-blue-200"
-                >
-                  Open Analysis →
-                </a>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMode("set_interest")}
+                    className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Set Analyst Interest
+                  </button>
+                  <a
+                    href={`/analysis/${promotedAnalysisId}`}
+                    className="rounded bg-blue-100 px-3 py-1.5 text-xs font-semibold text-blue-800 hover:bg-blue-200"
+                  >
+                    Open Analysis →
+                  </a>
+                </div>
               </div>
             )}
 
-            {/* Already passed — show status + reactivate */}
-            {isAlreadyPassed && !isAlreadyPromoted && (
+            {/* ── Failed (no analysis yet): show Override option ───── */}
+            {isFailed && mode === "view" && (
               <div className="flex items-center justify-between px-4 py-2.5">
                 <div className="text-xs text-slate-500">
-                  Passed: {data.passReason}
+                  <span className="inline-block rounded bg-red-50 px-1.5 py-0.5 font-semibold text-red-700">
+                    Failed: {data.screenerDecisionReason ?? "no reason recorded"}
+                  </span>
                 </div>
                 <button
                   type="button"
                   onClick={async () => {
                     setSubmitting(true);
+                    const fd = new FormData();
+                    fd.set("result_id", resultId!);
                     try {
-                      await reactivateScreeningResultAction(resultId!);
-                      setData((prev) =>
-                        prev ? { ...prev, reviewAction: null, passReason: null } : prev,
-                      );
-                      setMode("view");
+                      await overrideFailedScreeningAction(fd);
                       router.refresh();
+                      onClose();
                     } finally {
                       setSubmitting(false);
                     }
@@ -608,13 +695,13 @@ export function ScreeningCompModal({
                   disabled={submitting}
                   className="rounded border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
                 >
-                  {submitting ? "Reactivating..." : "Reactivate"}
+                  {submitting ? "Overriding..." : "Override (Create Analysis)"}
                 </button>
               </div>
             )}
 
-            {/* Not yet reviewed — show Promote/Pass buttons */}
-            {!isReviewed && mode === "view" && (
+            {/* ── Fresh (no decision yet): three screener buttons ──── */}
+            {!hasScreenerDecision && !isAlreadyPromoted && mode === "view" && (
               <div className="flex items-center justify-between px-4 py-2.5">
                 <div className="text-xs text-slate-500">
                   {selectedCount} comp{selectedCount !== 1 ? "s" : ""} picked
@@ -622,117 +709,48 @@ export function ScreeningCompModal({
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setMode("pass")}
+                    onClick={() => setMode("fail")}
                     className="rounded border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
                   >
-                    Pass on This Property
+                    Fail Screening
                   </button>
                   <button
                     type="button"
-                    onClick={() => setMode("promote")}
-                    className="rounded bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700"
+                    onClick={() => handleScreenerDecision("review", false)}
+                    disabled={submitting}
+                    className="rounded bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
                   >
-                    Add to Watch List
+                    {submitting ? "Saving..." : "Review"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleScreenerDecision("fast_track", false)}
+                    disabled={submitting}
+                    className="rounded bg-amber-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {submitting ? "Saving..." : "Fast Track"}
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Promote form */}
-            {!isReviewed && mode === "promote" && (
+            {/* ── Fail reason picker (screener) ─────────────────────── */}
+            {!hasScreenerDecision && mode === "fail" && (
               <div className="space-y-3 px-4 py-3">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-semibold text-slate-700">
-                    Interest Level
-                  </span>
-                  <span className="text-[10px] text-slate-400">(required)</span>
-                </div>
-                <div className="flex gap-2">
-                  {INTEREST_LEVELS.map((level) => (
-                    <button
-                      key={level.value}
-                      type="button"
-                      onClick={() => setInterestLevel(level.value)}
-                      className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition-colors ${
-                        interestLevel === level.value
-                          ? "border-slate-800 bg-slate-900 text-white"
-                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                      }`}
-                    >
-                      <span>{level.icon}</span>
-                      <span className="font-semibold">{level.label}</span>
-                      <span
-                        className={
-                          interestLevel === level.value
-                            ? "text-slate-300"
-                            : "text-slate-400"
-                        }
-                      >
-                        — {level.desc}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500" htmlFor="wl-note">
-                    Note (optional)
-                  </label>
-                  <input
-                    id="wl-note"
-                    type="text"
-                    value={watchListNote}
-                    onChange={(e) => setWatchListNote(e.target.value)}
-                    placeholder="e.g. great comps, check basement finish"
-                    className="mt-1 w-full rounded border border-slate-200 px-3 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                  />
-                </div>
-                <div className="flex items-center justify-between pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setMode("view")}
-                    className="text-xs text-slate-500 hover:text-slate-700"
-                  >
-                    ← Back
-                  </button>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handlePromote(false)}
-                      disabled={submitting}
-                      className="rounded border border-emerald-300 bg-emerald-50 px-4 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
-                    >
-                      {submitting ? "Saving..." : "Save to Watch List"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handlePromote(true)}
-                      disabled={submitting}
-                      className="rounded bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
-                    >
-                      {submitting ? "Saving..." : "Save + Open Analysis →"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Pass form */}
-            {!isReviewed && mode === "pass" && (
-              <div className="space-y-3 px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-slate-700">
-                    Pass Reason
+                    Fail Reason
                   </span>
                   <span className="text-[10px] text-slate-400">(required)</span>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {PASS_REASONS.map((reason) => (
+                  {FAIL_REASONS.map((reason) => (
                     <button
                       key={reason}
                       type="button"
-                      onClick={() => setPassReason(reason)}
+                      onClick={() => setFailReason(reason)}
                       className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
-                        passReason === reason
+                        failReason === reason
                           ? "border-red-400 bg-red-50 font-semibold text-red-800"
                           : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                       }`}
@@ -741,11 +759,11 @@ export function ScreeningCompModal({
                     </button>
                   ))}
                 </div>
-                {passReason === "Other" && (
+                {failReason === "Other" && (
                   <input
                     type="text"
-                    value={passOtherText}
-                    onChange={(e) => setPassOtherText(e.target.value)}
+                    value={failOtherText}
+                    onChange={(e) => setFailOtherText(e.target.value)}
                     placeholder="Describe the reason..."
                     className="w-full rounded border border-slate-200 px-3 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-red-400 focus:outline-none focus:ring-1 focus:ring-red-400"
                   />
@@ -760,11 +778,143 @@ export function ScreeningCompModal({
                   </button>
                   <button
                     type="button"
-                    onClick={handlePass}
+                    onClick={handleScreenerFail}
                     disabled={
                       submitting ||
-                      !passReason ||
-                      (passReason === "Other" && !passOtherText.trim())
+                      !failReason ||
+                      (failReason === "Other" && !failOtherText.trim())
+                    }
+                    className="rounded bg-red-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {submitting ? "Saving..." : "Confirm Fail"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ── Analyst Hot/Warm/Watch/Pass picker ────────────────── */}
+            {isAlreadyPromoted && mode === "set_interest" && (
+              <div className="space-y-3 px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-700">
+                    Analyst Interest
+                  </span>
+                  <span className="text-[10px] text-slate-400">(required)</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {ANALYST_INTEREST_LEVELS.map((level) => (
+                    <button
+                      key={level.value}
+                      type="button"
+                      onClick={() => setAnalystInterest(level.value)}
+                      className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition-colors ${
+                        analystInterest === level.value
+                          ? "border-slate-800 bg-slate-900 text-white"
+                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      <span>{level.icon}</span>
+                      <span className="font-semibold">{level.label}</span>
+                      <span
+                        className={
+                          analystInterest === level.value
+                            ? "text-slate-300"
+                            : "text-slate-400"
+                        }
+                      >
+                        — {level.desc}
+                      </span>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAnalystInterest("pass");
+                      setMode("analyst_pass");
+                    }}
+                    className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition-colors ${
+                      analystInterest === "pass"
+                        ? "border-red-400 bg-red-50 font-semibold text-red-800"
+                        : "border-slate-200 bg-white text-red-700 hover:bg-red-50"
+                    }`}
+                  >
+                    <span className="font-semibold">Pass</span>
+                    <span className="text-slate-400">— with reason</span>
+                  </button>
+                </div>
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setMode("view")}
+                    className="text-xs text-slate-500 hover:text-slate-700"
+                  >
+                    ← Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAnalystInterest}
+                    disabled={
+                      submitting ||
+                      !analystInterest ||
+                      analystInterest === "pass"
+                    }
+                    className="rounded bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    {submitting ? "Saving..." : "Save"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ── Analyst Pass reason picker ─────────────────────────── */}
+            {isAlreadyPromoted && mode === "analyst_pass" && (
+              <div className="space-y-3 px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-700">
+                    Pass Reason
+                  </span>
+                  <span className="text-[10px] text-slate-400">(required)</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {FAIL_REASONS.map((reason) => (
+                    <button
+                      key={reason}
+                      type="button"
+                      onClick={() => setAnalystPassReason(reason)}
+                      className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+                        analystPassReason === reason
+                          ? "border-red-400 bg-red-50 font-semibold text-red-800"
+                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      {reason}
+                    </button>
+                  ))}
+                </div>
+                {analystPassReason === "Other" && (
+                  <input
+                    type="text"
+                    value={analystPassOtherText}
+                    onChange={(e) => setAnalystPassOtherText(e.target.value)}
+                    placeholder="Describe the reason..."
+                    className="w-full rounded border border-slate-200 px-3 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-red-400 focus:outline-none focus:ring-1 focus:ring-red-400"
+                  />
+                )}
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setMode("set_interest")}
+                    className="text-xs text-slate-500 hover:text-slate-700"
+                  >
+                    ← Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAnalystInterest}
+                    disabled={
+                      submitting ||
+                      !analystPassReason ||
+                      (analystPassReason === "Other" && !analystPassOtherText.trim())
                     }
                     className="rounded bg-red-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
                   >

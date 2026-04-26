@@ -614,7 +614,7 @@ export default async function DealDetailPage({ params }: DealDetailPageProps) {
         <div className="dw-card-tight">
           <form action={promoteAndOpenAction}>
             <input type="hidden" name="result_id" value={result.id} />
-            <input type="hidden" name="interest_level" value="warm" />
+            <input type="hidden" name="screener_decision" value="review" />
             <button type="submit" className="dw-button-primary">
               Promote to Full Analysis →
             </button>

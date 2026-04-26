@@ -10,10 +10,10 @@ function textValue(formData: FormData, key: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Update interest level inline
+// Update analyst interest inline (hot | warm | watch | pass)
 // ---------------------------------------------------------------------------
 
-export async function updateInterestLevelAction(
+export async function updateAnalystInterestAction(
   formData: FormData,
 ): Promise<void> {
   const supabase = await createClient();
@@ -21,12 +21,29 @@ export async function updateInterestLevelAction(
   if (!user) redirect("/auth/sign-in");
 
   const analysisId = textValue(formData, "analysis_id");
-  const interestLevel = textValue(formData, "interest_level");
-  if (!analysisId || !interestLevel) return;
+  const analystInterest = textValue(formData, "analyst_interest");
+  const analystPassReason = textValue(formData, "analyst_pass_reason");
+  if (!analysisId || !analystInterest) return;
+
+  if (!["hot", "warm", "watch", "pass"].includes(analystInterest)) {
+    throw new Error(`Unknown analyst interest: ${analystInterest}`);
+  }
+
+  // Pass requires a reason — symmetric to screener Fail.
+  if (analystInterest === "pass" && !analystPassReason) {
+    throw new Error("A reason is required when passing on a property.");
+  }
+
+  const update: Record<string, unknown> = {
+    analyst_interest: analystInterest,
+    analyst_decided_at: new Date().toISOString(),
+    analyst_decided_by: user.id,
+    analyst_pass_reason: analystInterest === "pass" ? analystPassReason : null,
+  };
 
   const { error } = await supabase
     .from("analysis_pipeline")
-    .update({ interest_level: interestLevel })
+    .update(update)
     .eq("analysis_id", analysisId);
 
   if (error) throw new Error(error.message);
@@ -88,7 +105,9 @@ export async function updateWatchListNoteAction(
 }
 
 // ---------------------------------------------------------------------------
-// Pass from Watch List (archive the deal)
+// Pass from Watch List (analyst-side decision; closes the lifecycle).
+// Three-gate model: this DOES NOT touch screening_results.screener_decision —
+// the screener's call is durable and stays as whatever they set originally.
 // ---------------------------------------------------------------------------
 
 export async function passFromWatchListAction(
@@ -105,33 +124,16 @@ export async function passFromWatchListAction(
   const { error } = await supabase
     .from("analysis_pipeline")
     .update({
+      analyst_interest: "pass",
+      analyst_pass_reason: passReason,
+      analyst_decided_at: new Date().toISOString(),
+      analyst_decided_by: user.id,
       disposition: "passed",
       lifecycle_stage: "closed",
     })
     .eq("analysis_id", analysisId);
 
   if (error) throw new Error(error.message);
-
-  // Also mark the screening result as passed if it exists
-  const { data: pipeline } = await supabase
-    .from("analysis_pipeline")
-    .select("promoted_from_screening_result_id")
-    .eq("analysis_id", analysisId)
-    .maybeSingle();
-
-  if (pipeline?.promoted_from_screening_result_id) {
-    await supabase
-      .from("screening_results")
-      .update({
-        review_action: "passed",
-        pass_reason: `Passed from Watch List: ${passReason}`,
-        reviewed_at: new Date().toISOString(),
-        reviewed_by_user_id: user.id,
-        screening_updated_at: new Date().toISOString(),
-      })
-      .eq("id", pipeline.promoted_from_screening_result_id)
-      .is("review_action", null);
-  }
 
   revalidatePath("/deals/watchlist");
   revalidatePath("/analysis");

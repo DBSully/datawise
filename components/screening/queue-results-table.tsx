@@ -35,14 +35,19 @@ export type QueueResultRow = {
   offer_pct: number | null;
   promoted_analysis_id: string | null;
   comp_search_run_id: string | null;
-  review_action: string | null;
+  screener_decision: "fail" | "review" | "fast_track" | null;
+  screener_decision_reason: string | null;
   has_active_analysis: boolean | null;
   active_analysis_id: string | null;
   active_lifecycle_stage: string | null;
-  active_interest_level: string | null;
+  active_analyst_interest: string | null;
   active_analysis_is_mine: boolean | null;
   active_analysis_owner_name: string | null;
   has_newer_screening_than_analysis: boolean | null;
+  // Partner rollup (any-Interested wins → most recent → null)
+  partner_decision?: string | null;
+  partner_feedback_count?: number | null;
+  partner_last_feedback_at?: string | null;
 
   // Step 2b — pill + Why Now data. Optional so consumers that don't
   // enrich keep compiling. Missing values render as dim pills / empty
@@ -306,25 +311,71 @@ function resolveStagePill(row: QueueResultRow): StagePill {
       };
     }
 
-    // Manual analysis done.
+    // Analyst classification — when explicitly set, wins over Anl since
+    // it's a more current verdict. (E.g. "I analyzed and decided Pass" —
+    // the Pass is the conclusion, the Anl just means work was done.)
+    const level = (row.active_analyst_interest ?? "").toLowerCase();
+    const colorByLevel: Record<string, PillColor> = {
+      hot: "red",
+      warm: "orange",
+      watch: "slate",
+      pass: "red",
+    };
+    const labelByLevel: Record<string, string> = {
+      hot: "Hot",
+      warm: "Warm",
+      watch: "Watch",
+      pass: "Passed",
+    };
+    if (level && labelByLevel[level]) {
+      return {
+        label: labelByLevel[level],
+        color: colorByLevel[level],
+        title: `Watch list · analyst: ${level}${row.has_newer_screening_than_analysis ? " · newer screening available" : ""}`,
+        href,
+      };
+    }
+
+    // Manual analysis done — only shown when analyst hasn't classified yet.
     if (row.analyzed_updated_at) {
       const ago = formatDaysAgo(row.analyzed_updated_at);
       return {
         label: "Anl",
         color: "blue",
-        title: `Manual analysis last updated ${ago ?? row.analyzed_updated_at}`,
+        title: `Manual analysis last updated ${ago ?? row.analyzed_updated_at} · click to set Hot/Warm/Watch/Pass`,
         href,
       };
     }
 
-    // Watch List — color by interest.
-    const level = (row.active_interest_level ?? "warm").toLowerCase();
-    const colorByLevel: Record<string, PillColor> = { hot: "red", warm: "orange", curious: "slate" };
-    const labelByLevel: Record<string, string> = { hot: "Hot", warm: "Warm", curious: "Curious" };
+    // No analyst classification and no manual analysis — surface the screener's state.
+    if (row.screener_decision === "fast_track") {
+      return {
+        label: "Fast Trk",
+        color: "amber",
+        title: "Screener: Fast Track — click to set your classification",
+        href,
+      };
+    }
+    if (row.screener_decision === "review") {
+      return {
+        label: "Review",
+        color: "blue",
+        title: "Screener: Review — click to set your classification",
+        href,
+      };
+    }
+    if (row.screener_decision === "fail") {
+      return {
+        label: "Override",
+        color: "red",
+        title: "Screener: Failed — you overrode; click to set your classification",
+        href,
+      };
+    }
     return {
-      label: labelByLevel[level] ?? "Warm",
-      color: colorByLevel[level] ?? "orange",
-      title: `Watch list · ${level}${row.has_newer_screening_than_analysis ? " · newer screening available" : ""}`,
+      label: "Pending",
+      color: "blue",
+      title: "Awaiting your classification",
       href,
     };
   }
@@ -341,12 +392,25 @@ function resolveStagePill(row: QueueResultRow): StagePill {
     };
   }
 
-  // Passed — only wins when there's no forward motion (rule iii).
-  if (row.review_action === "passed") {
-    return { label: "Passed", color: "dim", title: "Passed on this property" };
+  // Failed — only wins when there's no forward motion (rule iii).
+  if (row.screener_decision === "fail") {
+    const reason = row.screener_decision_reason
+      ? ` · ${row.screener_decision_reason}`
+      : "";
+    return { label: "Failed", color: "red", title: `Screener: Failed${reason}` };
   }
 
-  // Just screened.
+  // Fast Track — screener flagged urgent, no analyst yet.
+  if (row.screener_decision === "fast_track") {
+    return { label: "Fast Trk", color: "amber", title: "Screener: Fast Track — pending analyst" };
+  }
+
+  // Review — screener pushed through, no analyst yet.
+  if (row.screener_decision === "review") {
+    return { label: "Review", color: "blue", title: "Screener: Review — pending analyst" };
+  }
+
+  // Just screened — no decision yet.
   const count = row.screening_run_count ?? 0;
   return {
     label: count > 1 ? `Scr·${count}` : "Scr",
@@ -392,6 +456,41 @@ function SharedPill({ row }: { row: QueueResultRow }) {
       color="purple"
       label={count > 1 ? `Shr·${count}` : "Shr"}
       title={`${count} share${count > 1 ? "s" : ""}${ago ? ` · latest ${ago} ago` : ""}`}
+      widthPx={PILL_W.shared}
+    />
+  );
+}
+
+// Partner decision pill — rolled up by the view (any-Interested wins → most recent).
+// Only rendered when at least one partner_feedback row exists for this analysis.
+function PartnerPill({ row }: { row: QueueResultRow }) {
+  const decision = row.partner_decision;
+  const count = row.partner_feedback_count ?? 0;
+  if (!decision || count <= 0) return null;
+  const labelByDecision: Record<string, string> = {
+    interested: "Ptr ✓",
+    pass: "Ptr ✗",
+    showing_request: "Ptr →",
+    discussion_request: "Ptr →",
+  };
+  const colorByDecision: Record<string, PillColor> = {
+    interested: "emerald",
+    pass: "dim",
+    showing_request: "blue",
+    discussion_request: "blue",
+  };
+  const titleByDecision: Record<string, string> = {
+    interested: "Partner: Interested",
+    pass: "Partner: Pass",
+    showing_request: "Partner: Wants Showing",
+    discussion_request: "Partner: Wants Discussion",
+  };
+  const ago = formatDaysAgo(row.partner_last_feedback_at);
+  return (
+    <Pill
+      color={colorByDecision[decision] ?? "slate"}
+      label={labelByDecision[decision] ?? "Ptr"}
+      title={`${titleByDecision[decision] ?? `Partner: ${decision}`}${ago ? ` · ${ago} ago` : ""}${count > 1 ? ` · ${count} responses` : ""}`}
       widthPx={PILL_W.shared}
     />
   );
@@ -592,6 +691,7 @@ export function QueueResultsTable({
                     <div className="flex items-center gap-1">
                       <StagePillCell row={r} onOpen={openPopover} />
                       <SharedPill row={r} />
+                      <PartnerPill row={r} />
                     </div>
                   </td>
                   <td>{renderWhyNow(r)}</td>

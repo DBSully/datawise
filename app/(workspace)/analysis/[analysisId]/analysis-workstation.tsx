@@ -104,11 +104,11 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
     (ma?.days_held_manual as number | null) ?? null;
 
   // ── Quick Status initial values ─────────────────────────────────────
-  // Interest Level lives on analysis_pipeline; the other 3 dropdowns
+  // Analyst Interest lives on analysis_pipeline; the other 3 dropdowns
   // live on manual_analysis. The shared saveManualAnalysisFieldAction
   // handles the cross-table routing internally.
-  const initialInterestLevel =
-    (data.pipeline?.interest_level as string | null) ?? null;
+  const initialAnalystInterest =
+    (data.pipeline?.analyst_interest as string | null) ?? null;
   const initialCondition = (ma?.analyst_condition as string | null) ?? null;
   const initialLocation = (ma?.location_rating as string | null) ?? null;
   const initialNextStep = (ma?.next_step as string | null) ?? null;
@@ -635,7 +635,7 @@ export function AnalysisWorkstation({ data, recentEvents = [] }: AnalysisWorksta
         {/* TILE 4 — Quick Status (auto-persist) */}
         <QuickStatusTile
           analysisId={data.analysisId}
-          initialInterestLevel={initialInterestLevel}
+          initialAnalystInterest={initialAnalystInterest}
           initialCondition={initialCondition}
           initialLocation={initialLocation}
           initialNextStep={initialNextStep}

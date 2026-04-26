@@ -64,12 +64,12 @@ export type ManualAnalysisFieldUpdate =
 // analysis_pipeline fields (1 of 11)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Interest Level lives on the pipeline row, not on manual_analysis.
- *  Per spec §3.2 it moves from the Pipeline card into the Quick Status
- *  tile in the new Workstation. The underlying column is unchanged —
- *  only the rendering location moves. */
+/** Analyst Interest lives on the pipeline row, not on manual_analysis.
+ *  Per the three-gate model (2026-04-25), this is the analyst's own
+ *  classification (hot/warm/watch/pass) — the screener_decision on
+ *  screening_results is a separate field. */
 export type PipelineFieldUpdate =
-  | { field: "interest_level"; value: string | null };
+  | { field: "analyst_interest"; value: string | null };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Combined union — what the action accepts
